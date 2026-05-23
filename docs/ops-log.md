@@ -28,3 +28,4 @@
 - 写入 `~/.ssh/config`，为 `github.com` 指定 `id_ed25519_github_codex`。`ssh -T git@github.com` 已返回认证成功。
 - 用户提供新的飞书 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`，已写入本地 `.env`；新增 `scripts/check-feishu-app.mjs` 用于验证应用凭证，不输出密钥或 token。
 - 飞书应用凭证健康检查通过，已成功获取 tenant access token，有效期 7200 秒。
+- 创建 GitHub 远程仓库 `git@github.com:571793506-code/junhang-ai-tutor.git`，本地 `main` 已推送并设置 upstream。
