@@ -1,0 +1,12 @@
+{
+  "name": "@junhang/db",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "db:format": "prisma format --schema prisma/schema.prisma",
+    "db:validate": "prisma validate --schema prisma/schema.prisma"
+  }
+}

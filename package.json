@@ -1,0 +1,27 @@
+{
+  "name": "junhang-ai-tutor",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AI after-school tutoring system for Junhang.",
+  "scripts": {
+    "dev": "npm run dev --workspace apps/web",
+    "verify": "npm run lint --if-present && npm run typecheck --if-present && npm run test --if-present",
+    "audit:reference": "node scripts/audit-reference.mjs",
+    "check:ai": "node scripts/check-ai-services.mjs",
+    "check:feishu": "node scripts/check-feishu-app.mjs"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.0"
+  },
+  "devDependencies": {
+    "@larksuite/cli": "^1.0.36",
+    "prisma": "^6.19.0"
+  }
+}

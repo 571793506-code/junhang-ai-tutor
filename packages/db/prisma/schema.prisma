@@ -1,0 +1,352 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ActorType {
+  STUDENT
+  GUARDIAN
+  TEACHER
+  SYSTEM
+}
+
+enum ReportType {
+  DAILY
+  WEEKLY
+  MONTHLY
+  MIDTERM
+  FINAL
+  TERM
+}
+
+enum TaskStatus {
+  DRAFT
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  REVIEWED
+  ARCHIVED
+}
+
+enum SubmissionStatus {
+  SUBMITTED
+  GRADED
+  NEEDS_REVIEW
+  RETURNED
+}
+
+model Student {
+  id              String            @id @default(cuid())
+  displayName     String
+  grade           String?
+  school          String?
+  textbookVersion String?
+  notes           String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  guardians       StudentGuardian[]
+  classes         ClassStudent[]
+  tasks           LearningTask[]
+  attempts        TaskAttempt[]
+  dictations      DictationSession[]
+  qaSessions      QaSession[]
+  vocabulary      VocabularyRecord[]
+  submissions     Submission[]
+  mistakes        MistakeRecord[]
+  behaviorEvents  BehaviorEvent[]
+  profiles        StudentProfile[]
+  reports         StudentReport[]
+}
+
+model Guardian {
+  id        String            @id @default(cuid())
+  name      String
+  phone     String?
+  email     String?
+  openId    String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  students  StudentGuardian[]
+}
+
+model Teacher {
+  id        String         @id @default(cuid())
+  name      String
+  phone     String?
+  email     String?
+  openId    String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  classes   ClassTeacher[]
+  tasks     LearningTask[]
+}
+
+model StudentGuardian {
+  studentId  String
+  guardianId String
+  relation   String?
+  createdAt  DateTime @default(now())
+  guardian   Guardian @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, guardianId])
+}
+
+model Class {
+  id        String         @id @default(cuid())
+  name      String
+  term      String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  students  ClassStudent[]
+  teachers  ClassTeacher[]
+}
+
+model ClassStudent {
+  classId   String
+  studentId String
+  createdAt DateTime @default(now())
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([classId, studentId])
+}
+
+model ClassTeacher {
+  classId   String
+  teacherId String
+  createdAt DateTime @default(now())
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacher   Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@id([classId, teacherId])
+}
+
+model Subject {
+  id              String           @id @default(cuid())
+  code            String           @unique
+  name            String
+  knowledgePoints KnowledgePoint[]
+  assignments     Assignment[]
+  tasks           LearningTask[]
+}
+
+model KnowledgePoint {
+  id        String           @id @default(cuid())
+  subjectId String
+  parentId  String?
+  code      String?
+  name      String
+  grade     String?
+  metadata  Json?
+  parent    KnowledgePoint?  @relation("KnowledgeTree", fields: [parentId], references: [id])
+  children  KnowledgePoint[] @relation("KnowledgeTree")
+  subject   Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  mistakes  MistakeRecord[]
+}
+
+model TextbookAsset {
+  id        String   @id @default(cuid())
+  subject   String
+  edition   String?
+  grade     String?
+  volume    String?
+  title     String
+  source    String?
+  path      String?
+  url       String?
+  hash      String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model LearningTask {
+  id          String        @id @default(cuid())
+  studentId   String?
+  teacherId   String?
+  subjectId   String?
+  title       String
+  description String?
+  status      TaskStatus    @default(DRAFT)
+  dueAt       DateTime?
+  metadata    Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  student     Student?      @relation(fields: [studentId], references: [id])
+  teacher     Teacher?      @relation(fields: [teacherId], references: [id])
+  subject     Subject?      @relation(fields: [subjectId], references: [id])
+  attempts    TaskAttempt[]
+}
+
+model TaskAttempt {
+  id              String   @id @default(cuid())
+  taskId          String
+  studentId       String
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+  durationSeconds Int?
+  score           Float?
+  result          Json?
+  task            LearningTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  student         Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+model DictationSession {
+  id          String   @id @default(cuid())
+  studentId   String
+  subject     String
+  sourceTitle String?
+  prompt      String
+  answer      String?
+  result      Json?
+  score       Float?
+  createdAt   DateTime @default(now())
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+model QaSession {
+  id        String   @id @default(cuid())
+  studentId String?
+  subject   String?
+  question  String
+  answer    String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  student   Student? @relation(fields: [studentId], references: [id])
+}
+
+model VocabularyRecord {
+  id        String   @id @default(cuid())
+  studentId String
+  term      String
+  content   Json
+  createdAt DateTime @default(now())
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+model Assignment {
+  id          String           @id @default(cuid())
+  subjectId   String?
+  title       String
+  grade       String?
+  difficulty  String?
+  metadata    Json?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  subject     Subject?         @relation(fields: [subjectId], references: [id])
+  items       AssignmentItem[]
+  submissions Submission[]
+}
+
+model AssignmentItem {
+  id           String     @id @default(cuid())
+  assignmentId String
+  orderIndex   Int
+  itemType     String
+  prompt       String
+  answer       Json?
+  rubric       Json?
+  metadata     Json?
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+}
+
+model Submission {
+  id           String           @id @default(cuid())
+  assignmentId String
+  studentId    String
+  status       SubmissionStatus @default(SUBMITTED)
+  content      Json?
+  submittedAt  DateTime         @default(now())
+  assignment   Assignment       @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student      Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  grading      GradingResult?
+}
+
+model GradingResult {
+  id           String     @id @default(cuid())
+  submissionId String     @unique
+  score        Float?
+  result       Json
+  needsReview  Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+}
+
+model MistakeRecord {
+  id               String          @id @default(cuid())
+  studentId         String
+  knowledgePointId  String?
+  subject           String
+  prompt            String
+  studentAnswer     String?
+  correctAnswer     String?
+  cause             String?
+  masteryResolved   Boolean         @default(false)
+  metadata          Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  knowledgePoint    KnowledgePoint? @relation(fields: [knowledgePointId], references: [id])
+  student           Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+model BehaviorEvent {
+  id              String    @id @default(cuid())
+  studentId       String?
+  actorType       ActorType
+  feature         String
+  action          String
+  occurredAt      DateTime  @default(now())
+  durationSeconds Int?
+  metadata        Json?
+  student         Student?  @relation(fields: [studentId], references: [id])
+}
+
+model StudentProfile {
+  id        String   @id @default(cuid())
+  studentId String
+  snapshot  Json
+  createdAt DateTime @default(now())
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+model StudentReport {
+  id        String     @id @default(cuid())
+  studentId String
+  type      ReportType
+  periodKey String
+  title     String
+  content   String
+  metadata  Json?
+  createdAt DateTime   @default(now())
+  student   Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+model GeneratedAsset {
+  id        String   @id @default(cuid())
+  kind      String
+  title     String
+  path      String?
+  url       String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+}
+
+model ModelRun {
+  id             String   @id @default(cuid())
+  provider       String
+  model          String?
+  skill          String?
+  inputSummary   String?
+  outputSummary  String?
+  status         String
+  latencyMs      Int?
+  costEstimate   Float?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+}
+
