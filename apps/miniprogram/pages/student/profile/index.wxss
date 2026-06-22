@@ -1,0 +1,17 @@
+.mastery-row {
+  margin-top: 18rpx;
+}
+
+.mastery-bar {
+  height: 18rpx;
+  margin: 12rpx 0;
+  overflow: hidden;
+  border-radius: 999rpx;
+  background: #dcebe6;
+}
+
+.mastery-fill {
+  height: 100%;
+  border-radius: 999rpx;
+  background: linear-gradient(90deg, #2f9d7e, #77c7ac);
+}

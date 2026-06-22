@@ -1,0 +1,64 @@
+<view class="page content-page">
+  <view class="content-hero">
+    <text class="kicker">教材资料</text>
+    <text class="title">教材库与资料上下文</text>
+    <text class="subtitle">教材资料只作为知识结构和题型参考来源。未复核资料不会进入生成流程。</text>
+  </view>
+
+  <view class="stat-grid">
+    <view class="stat-card"><text class="stat-value">{{stats.documents}}</text><text class="stat-label">索引资料</text></view>
+    <view class="stat-card"><text class="stat-value">{{stats.sources}}</text><text class="stat-label">资料来源</text></view>
+    <view class="stat-card"><text class="stat-value">{{stats.approved}}</text><text class="stat-label">可用于生成</text></view>
+    <view class="stat-card warn"><text class="stat-value">{{stats.pending}}</text><text class="stat-label">待复核</text></view>
+  </view>
+
+  <view class="content-panel">
+    <view class="panel-head">
+      <view>
+        <text class="panel-title">内容索引状态</text>
+        <text class="panel-subtitle">{{index && index.available ? '已进入生成上下文' : '尚未建立内容索引'}}</text>
+      </view>
+      <button class="small-button" loading="{{loading}}" bindtap="loadContentContext">刷新</button>
+    </view>
+    <view class="index-note"><text>{{index && index.reason ? index.reason : (index && index.indexPath ? index.indexPath : 'exports/content-index/index.json')}}</text></view>
+    <button class="primary-button" loading="{{loading}}" bindtap="syncIndex">同步到资料库</button>
+  </view>
+
+  <view class="content-panel">
+    <view class="panel-head">
+      <view>
+        <text class="panel-title">登记网络参考</text>
+        <text class="panel-subtitle">只记录公开参考来源，复核通过后才作为结构参考。</text>
+      </view>
+    </view>
+    <picker mode="selector" range="{{subjects}}" value="{{subjectIndex}}" bindchange="setSubject"><view class="picker-field">{{subjects[subjectIndex]}}</view></picker>
+    <picker mode="selector" range="{{grades}}" value="{{gradeIndex}}" bindchange="setGrade"><view class="picker-field">{{grades[gradeIndex]}}</view></picker>
+    <input class="field" placeholder="参考标题" value="{{sourceDraft.title}}" data-field="title" bindinput="setDraft" />
+    <input class="field" placeholder="公开来源链接，可不填" value="{{sourceDraft.sourceUrl}}" data-field="sourceUrl" bindinput="setDraft" />
+    <textarea class="textarea" placeholder="说明适合参考的知识点、题型结构或注意事项" value="{{sourceDraft.summary}}" data-field="summary" bindinput="setDraft" />
+    <button class="primary-button" loading="{{loading}}" bindtap="createSource">登记参考来源</button>
+  </view>
+
+  <view class="content-panel">
+    <view class="panel-head">
+      <view>
+        <text class="panel-title">资料来源复核</text>
+        <text class="panel-subtitle">教师确认后才允许作为组卷、练习和复核参考。</text>
+      </view>
+    </view>
+    <view wx:if="{{!sources.length}}" class="empty">暂无资料来源。请先同步内容索引或登记网络参考。</view>
+    <view wx:for="{{sources}}" wx:key="id" class="source-card">
+      <view>
+        <text class="source-title">{{item.title}}</text>
+        <text class="source-meta">{{item.subject || '未标科目'}} · {{item.grade || '未标年级'}} · {{item.reviewStatus === 'APPROVED' ? '已复核' : item.reviewStatus === 'REJECTED' ? '已停用' : '待复核'}} · {{item.allowedForGeneration ? '可用于生成' : '不可直接生成'}} · {{item.chunkCount}}段</text>
+        <text class="source-summary">{{item.summary || item.sourceUrl || item.markdownPath || '暂无摘要'}}</text>
+      </view>
+      <view class="source-actions">
+        <button class="small-button" data-id="{{item.id}}" loading="{{loading}}" bindtap="approveSource">通过</button>
+        <button class="small-button ghost" data-id="{{item.id}}" loading="{{loading}}" bindtap="disableSource">停用</button>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{message}}" class="message">{{message}}</view>
+</view>

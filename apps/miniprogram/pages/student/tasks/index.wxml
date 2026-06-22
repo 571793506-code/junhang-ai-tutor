@@ -1,0 +1,21 @@
+<view class="page student-page">
+  <view class="hero">
+    <text class="eyebrow">今日任务</text>
+    <text class="title">老师布置的学习安排</text>
+    <text class="subtitle">这里用于家长和学生查看任务，不在学生端生成任务。</text>
+  </view>
+
+  <view class="card">
+    <text class="section-title">任务列表</text>
+    <view class="list">
+      <view wx:for="{{tasks}}" wx:key="id" class="list-item">
+        <view class="row between">
+          <text class="item-title">{{item.title}}</text>
+          <text class="pill">{{item.status}}</text>
+        </view>
+        <text class="item-meta">{{item.subject}} · {{item.minutes || 15}} 分钟 · {{item.dueLabel || '今日'}}</text>
+      </view>
+    </view>
+    <text wx:if="{{!tasks.length}}" class="muted">今天暂时没有新任务。</text>
+  </view>
+</view>

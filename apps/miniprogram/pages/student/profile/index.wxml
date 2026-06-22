@@ -1,0 +1,39 @@
+<view class="page student-page">
+  <view class="hero">
+    <text class="eyebrow">学生档案</text>
+    <text class="title">{{student.displayName || '学生'}}近期学习记录</text>
+    <text class="subtitle">家长可查看知识掌握、错题记录和阶段反馈。</text>
+  </view>
+
+  <view class="card">
+    <text class="section-title">知识掌握</text>
+    <view wx:for="{{subjects}}" wx:key="name" class="mastery-row">
+      <text class="item-title">{{item.name}}</text>
+      <view class="mastery-bar">
+        <view class="mastery-fill" style="width: {{item.value}}%;"></view>
+      </view>
+      <text class="item-meta">{{item.value}}%</text>
+    </view>
+  </view>
+
+  <view class="card">
+    <text class="section-title">错题记录</text>
+    <view class="list">
+      <view wx:for="{{corrections}}" wx:key="id" class="list-item">
+        <text class="item-title">{{item.subject}} · {{item.point}}</text>
+        <text class="item-meta">{{item.prompt}}</text>
+      </view>
+    </view>
+    <text wx:if="{{!corrections.length}}" class="muted">暂时没有新的错题记录。</text>
+  </view>
+
+  <view class="card">
+    <text class="section-title">阶段反馈</text>
+    <view class="list">
+      <view wx:for="{{reports}}" wx:key="id" class="list-item">
+        <text class="item-title">{{item.period}} · {{item.title}}</text>
+        <text class="item-meta">{{item.summary}}</text>
+      </view>
+    </view>
+  </view>
+</view>

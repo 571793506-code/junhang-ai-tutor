@@ -1,0 +1,16 @@
+.status-dot {
+  flex: 0 0 auto;
+}
+
+.ai-generated-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42rpx;
+  margin-top: 14rpx;
+  padding: 0 18rpx;
+  border-radius: 10rpx;
+  background: #e7f5ef;
+  color: #236752;
+  font-size: 23rpx;
+  font-weight: 800;
+}

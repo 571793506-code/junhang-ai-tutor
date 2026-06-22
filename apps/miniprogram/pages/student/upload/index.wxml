@@ -1,0 +1,23 @@
+<view class="page student-page">
+  <view class="hero">
+    <text class="eyebrow">拍照提交</text>
+    <text class="title">把作业、小测或试卷交给老师批改</text>
+    <text class="subtitle">可一次选择多张图片。提交后会写入该学生的学习记录，老师端可继续复核。</text>
+  </view>
+
+  <view class="card">
+    <text class="section-title">提交类型</text>
+    <picker mode="selector" range="{{kinds}}" value="{{kindIndex}}" bindchange="setKind">
+      <view class="picker-field">{{kinds[kindIndex]}}</view>
+    </picker>
+    <picker mode="selector" range="{{subjects}}" value="{{subjectIndex}}" bindchange="setSubject">
+      <view class="picker-field">{{subjects[subjectIndex]}}</view>
+    </picker>
+    <input class="input" type="number" placeholder="页码，可不填" value="{{pageNumber}}" bindinput="setPageNumber" />
+    <input class="input" placeholder="题号范围，如 1-6 题 / 听写 1-20" value="{{questionRange}}" bindinput="setQuestionRange" />
+    <textarea class="textarea" placeholder="可补充说明：第几页、哪一次作业、老师需要注意什么" value="{{note}}" bindinput="setNote" />
+    <button class="button secondary" bindtap="chooseImages">选择图片（{{files.length}}）</button>
+    <button class="button warm" loading="{{loading}}" bindtap="submit">提交批改</button>
+    <text wx:if="{{message}}" class="subtitle">{{message}}</text>
+  </view>
+</view>

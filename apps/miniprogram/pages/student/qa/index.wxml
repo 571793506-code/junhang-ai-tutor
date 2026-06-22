@@ -1,0 +1,27 @@
+<view class="page student-page">
+  <view class="hero">
+    <view class="row between">
+      <view>
+        <text class="eyebrow">AI 问答</text>
+        <text class="title">先想一步，再来提问</text>
+        <text class="ai-generated-badge">AI生成</text>
+      </view>
+      <view class="status-dot {{available ? 'ready' : ''}}"></view>
+    </view>
+    <text class="subtitle">绿灯表示当前可用，红灯表示暂时不可用。</text>
+  </view>
+
+  <view class="card">
+    <text class="section-title">你的问题</text>
+    <textarea class="textarea" placeholder="例如：等腰三角形一个角是40度，为什么要分情况？" value="{{question}}" bindinput="setQuestion" />
+    <button class="button warm" loading="{{loading}}" bindtap="ask">提交问题</button>
+  </view>
+
+  <view wx:if="{{answer}}" class="card">
+    <view class="row between">
+      <text class="section-title">回答</text>
+      <text class="ai-generated-badge">AI生成</text>
+    </view>
+    <text class="muted">{{answer}}</text>
+  </view>
+</view>

@@ -1,0 +1,97 @@
+<view class="page classroom-page classroom-dashboard">
+  <view class="dashboard-head">
+    <view>
+      <text class="dash-kicker">课堂平板端</text>
+      <text class="dash-title">{{device.label || '本桌平板'}}</text>
+      <text class="dash-subtitle">公共设备只用于本次课堂互动确认，不进入学生完整个人主页。</text>
+    </view>
+    <view class="status-stack">
+      <text class="status-chip">{{unlocked ? '已确认身份' : '公共待机'}}</text>
+      <text class="status-chip soft">{{device.grade || '年级设备'}}</text>
+    </view>
+  </view>
+
+  <view class="interaction-stage">
+    <view class="halo">
+      <view class="halo-ring"></view>
+      <view class="halo-core" bindtap="lockScreen">
+        <text class="halo-title">{{unlocked ? selectedName : '学习光环'}}</text>
+        <text class="halo-note">{{unlocked ? '已进入本次互动' : '点击自己的头像确认身份'}}</text>
+      </view>
+    </view>
+
+    <view class="avatar-ring">
+      <view wx:for="{{students}}" wx:key="id" class="student-node slot-{{item.slot}} {{item.selected ? 'selected' : ''}}" data-id="{{item.id}}" bindtap="unlockStudent">
+        <view class="student-avatar">{{item.initial}}</view>
+        <text class="student-name">{{item.displayName}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="plugin-grid">
+    <view wx:for="{{plugins}}" wx:key="key" class="plugin-card {{item.enabled ? 'enabled' : 'muted'}}">
+      <text class="plugin-icon {{item.tone}}">{{item.icon}}</text>
+      <view>
+        <text class="plugin-title">{{item.title}}</text>
+        <text class="plugin-note">{{item.note}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="content-grid">
+    <view class="screen-panel">
+      <view class="panel-head">
+        <text class="panel-title">今日任务提醒</text>
+        <text class="panel-tag">本桌可见</text>
+      </view>
+      <view class="feed-list">
+        <view wx:for="{{tasks}}" wx:key="id" class="feed-item">
+          <text class="feed-title">{{item.studentName || '本桌学生'}}：{{item.title}}</text>
+          <text class="feed-meta">{{item.subject}} · {{item.status || '待完成'}}</text>
+        </view>
+        <text wx:if="{{!tasks.length}}" class="empty-text">暂无本桌今日任务。</text>
+      </view>
+    </view>
+
+    <view class="screen-panel">
+      <view class="panel-head">
+        <text class="panel-title">教师端发布</text>
+        <text class="panel-tag">同步内容</text>
+      </view>
+      <view class="feed-list">
+        <view wx:for="{{broadcasts}}" wx:key="id" class="feed-item">
+          <text class="feed-title">{{item.title}}</text>
+          <text class="feed-meta">{{item.subject}} · {{item.status}}</text>
+        </view>
+        <view wx:for="{{dictations}}" wx:key="id" class="feed-item">
+          <text class="feed-title">{{item.title}}</text>
+          <text class="feed-meta">听写 · {{item.repeats}} 遍 · 间隔 {{item.intervalSeconds}} 秒</text>
+        </view>
+        <view wx:for="{{readings}}" wx:key="id" class="feed-item">
+          <text class="feed-title">{{item.title}}</text>
+          <text class="feed-meta">跟读 · 重点：{{item.focusText}}</text>
+        </view>
+        <text wx:if="{{!broadcasts.length && !dictations.length && !readings.length}}" class="empty-text">暂无教师端同步内容。</text>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{unlocked}}" class="screen-panel qa-panel">
+    <view class="panel-head">
+      <view>
+        <text class="panel-title">AI 问答</text>
+        <text class="panel-subtitle">{{selectedName}} 本次互动</text>
+      </view>
+      <text class="ai-generated-badge">AI生成</text>
+    </view>
+    <text class="qa-note">题目类问题优先做思路引导，日常知识和词汇问题可直接回答。</text>
+    <textarea class="qa-textarea" placeholder="输入学生想问的问题。后续这里会接语音输入。" value="{{question}}" bindinput="setQuestion" />
+    <view class="voice-actions">
+      <button class="voice-button" bindtap="startVoiceInput">语音输入</button>
+      <button class="voice-button" bindtap="playAnswer">语音输出</button>
+    </view>
+    <button class="submit-button" loading="{{loading}}" bindtap="ask">提交课堂问题</button>
+    <text wx:if="{{voiceStatus}}" class="voice-status">{{voiceStatus}}</text>
+    <text wx:if="{{answer}}" class="answer-text">{{answer}}</text>
+  </view>
+</view>

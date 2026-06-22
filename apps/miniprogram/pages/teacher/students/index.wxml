@@ -1,0 +1,40 @@
+<view class="page teacher-page">
+  <view class="hero">
+    <text class="eyebrow">学生与权限</text>
+    <text class="title">学生归属与登录开通</text>
+    <text class="subtitle">当前小程序先展示已登记学生；新增、重置和退课禁用仍建议先在 Web 教师端完成。</text>
+  </view>
+
+  <view class="card teacher-card">
+    <text class="section-title">新增学生</text>
+    <input class="input" placeholder="学生姓名" value="{{draft.displayName}}" data-field="displayName" bindinput="setDraft" />
+    <picker mode="selector" range="{{grades}}" value="{{gradeIndex}}" bindchange="setGrade">
+      <view class="picker-field">{{grades[gradeIndex]}}</view>
+    </picker>
+    <input class="input" placeholder="班级，例如：三年级晚辅A班" value="{{draft.className}}" data-field="className" bindinput="setDraft" />
+    <input class="input" placeholder="家长姓名" value="{{draft.guardianName}}" data-field="guardianName" bindinput="setDraft" />
+    <input class="input" placeholder="家长电话" type="number" value="{{draft.guardianPhone}}" data-field="guardianPhone" bindinput="setDraft" />
+    <input class="input" placeholder="教材版本，例如：人教版" value="{{draft.textbookVersion}}" data-field="textbookVersion" bindinput="setDraft" />
+    <textarea class="textarea" placeholder="学习重点或入班备注" value="{{draft.notes}}" data-field="notes" bindinput="setDraft" />
+    <button class="button" loading="{{creating}}" bindtap="createStudent">登记并生成专属码</button>
+    <text wx:if="{{createMessage}}" class="subtitle">{{createMessage}}</text>
+  </view>
+
+  <view class="card teacher-card">
+    <text class="section-title">已登记学生</text>
+    <view class="list">
+      <view wx:for="{{students}}" wx:key="id" class="list-item">
+        <view class="row between">
+          <text class="item-title">{{item.displayName}}</text>
+          <text class="pill">{{item.enrollmentStatus}}</text>
+        </view>
+        <text class="item-meta">{{item.grade}} · {{item.guardianPhone}} · 专属码 {{item.accessCode || '未开通'}}</text>
+        <text class="item-meta">负责教师：{{item.responsibleTeacherName || '待绑定'}}</text>
+        <view class="row actions">
+          <button class="mini-button" data-id="{{item.id}}" bindtap="resetCode">重置码</button>
+          <button class="mini-button danger" data-id="{{item.id}}" bindtap="disableAccess">停用登录</button>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

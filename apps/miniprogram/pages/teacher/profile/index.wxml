@@ -1,0 +1,36 @@
+<view class="page profile-page">
+  <view class="profile-hero">
+    <text class="kicker">教师端学生档案</text>
+    <text class="title">草稿复核后再发布</text>
+    <text class="subtitle">学生端只显示老师确认后的档案反馈。草稿可直接修改措辞、删减内容或补充建议。</text>
+  </view>
+
+  <view class="profile-panel">
+    <view class="panel-head">
+      <view>
+        <text class="panel-title">选择学生</text>
+        <text class="panel-subtitle">系统会聚合任务、批改、问答和课堂记录生成档案草稿。</text>
+      </view>
+      <text class="panel-tag">教师复核</text>
+    </view>
+    <picker mode="selector" range="{{students}}" range-key="displayName" value="{{selectedIndex}}" bindchange="setStudent">
+      <view class="picker-field">{{selectedStudentName || '暂无学生'}}</view>
+    </picker>
+    <view class="button-row">
+      <button class="primary-button" loading="{{loading}}" bindtap="generateDraft">生成档案草稿</button>
+      <button class="secondary-button" loading="{{loading}}" bindtap="publishDraft">确认发布至学生端</button>
+    </view>
+  </view>
+
+  <view class="profile-panel">
+    <view class="panel-head">
+      <view>
+        <text class="panel-title">待发布档案正文</text>
+        <text class="panel-subtitle">这里必须是老师能直接阅读和修改的中文文本。</text>
+      </view>
+      <text class="ai-generated-badge">AI生成</text>
+    </view>
+    <textarea class="profile-textarea" value="{{draftText}}" bindinput="setDraftText" maxlength="-1" />
+    <text wx:if="{{message}}" class="message">{{message}}</text>
+  </view>
+</view>

@@ -1,0 +1,94 @@
+.pill {
+  background: rgba(204, 232, 255, 0.22);
+  color: #d9ecff;
+}
+
+.mini-button {
+  min-height: 64rpx;
+  margin-top: 18rpx;
+  border-radius: 10rpx;
+  background: rgba(208, 232, 255, 0.22);
+  color: #fff;
+  font-size: 24rpx;
+}
+
+.review-meta-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 14rpx;
+}
+
+.review-chip {
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: rgba(225, 240, 255, 0.18);
+  color: #eaf5ff;
+  font-size: 22rpx;
+}
+
+.ocr-preview {
+  display: block;
+  margin-top: 12rpx;
+  padding: 14rpx;
+  border-radius: 10rpx;
+  background: rgba(9, 28, 58, 0.22);
+  color: #fff;
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+
+.review-confirm-box {
+  display: grid;
+  gap: 12rpx;
+  margin-top: 16rpx;
+  padding: 16rpx;
+  border: 1rpx solid rgba(225, 240, 255, 0.22);
+  border-radius: 10rpx;
+  background: rgba(9, 28, 58, 0.2);
+}
+
+.field-title {
+  color: #eaf5ff;
+  font-size: 23rpx;
+  font-weight: 800;
+}
+
+.review-input,
+.review-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 10rpx;
+  background: rgba(255, 255, 255, 0.92);
+  color: #18364f;
+  font-size: 24rpx;
+}
+
+.review-input {
+  min-height: 70rpx;
+  padding: 0 18rpx;
+}
+
+.review-textarea {
+  min-height: 132rpx;
+  padding: 16rpx 18rpx;
+}
+
+.review-warning {
+  color: #ffecd1;
+  font-size: 22rpx;
+  line-height: 1.45;
+}
+
+.ai-generated-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42rpx;
+  margin-top: 14rpx;
+  padding: 0 18rpx;
+  border-radius: 10rpx;
+  background: rgba(208, 232, 255, 0.2);
+  color: #eaf5ff;
+  font-size: 23rpx;
+  font-weight: 800;
+}

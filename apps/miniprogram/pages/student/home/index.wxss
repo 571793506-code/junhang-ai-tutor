@@ -1,0 +1,265 @@
+.student-home {
+  background:
+    radial-gradient(circle at 16% 8%, rgba(50, 211, 185, 0.22), transparent 30%),
+    linear-gradient(180deg, #f5fffb 0%, #eef7f4 46%, #f7fbff 100%);
+}
+
+.home-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24rpx;
+  padding: 34rpx 0 22rpx;
+}
+
+.home-kicker {
+  display: inline-flex;
+  min-height: 42rpx;
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: rgba(255,255,255,0.72);
+  color: #236752;
+  font-size: 23rpx;
+  font-weight: 800;
+}
+
+.home-title {
+  display: block;
+  margin-top: 16rpx;
+  font-size: 48rpx;
+  line-height: 1.12;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.home-subtitle {
+  display: block;
+  margin-top: 14rpx;
+  color: #5d7285;
+  font-size: 26rpx;
+  line-height: 1.55;
+}
+
+.ai-mark {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 132rpx;
+  width: 132rpx;
+  height: 132rpx;
+  border: 1rpx solid rgba(31, 184, 173, 0.24);
+  border-radius: 36rpx;
+  background: rgba(255,255,255,0.72);
+  box-shadow: 0 18rpx 42rpx rgba(31, 122, 114, 0.1);
+  color: #168a83;
+  font-size: 25rpx;
+  font-weight: 900;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18rpx;
+}
+
+.overview-card,
+.learning-panel,
+.module-section {
+  border: 1rpx solid rgba(95, 130, 148, 0.16);
+  border-radius: 22rpx;
+  background: rgba(255,255,255,0.82);
+  box-shadow: 0 14rpx 38rpx rgba(29, 78, 91, 0.08);
+}
+
+.overview-card {
+  min-height: 160rpx;
+  padding: 24rpx;
+}
+
+.overview-card.primary {
+  background: linear-gradient(135deg, rgba(32, 183, 174, 0.18), rgba(255,255,255,0.86));
+}
+
+.overview-value {
+  display: block;
+  font-size: 52rpx;
+  line-height: 1;
+  font-weight: 900;
+  color: #126f68;
+}
+
+.overview-label {
+  display: block;
+  margin-top: 12rpx;
+  color: #172033;
+  font-size: 27rpx;
+  font-weight: 900;
+}
+
+.overview-note {
+  display: block;
+  margin-top: 8rpx;
+  color: #6a7c8e;
+  font-size: 23rpx;
+}
+
+.learning-panel,
+.module-section {
+  margin-top: 20rpx;
+  padding: 26rpx;
+}
+
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.panel-title {
+  display: block;
+  font-size: 32rpx;
+  font-weight: 900;
+}
+
+.panel-subtitle {
+  display: block;
+  margin-top: 8rpx;
+  color: #6a7c8e;
+  font-size: 23rpx;
+}
+
+.subject-pill {
+  flex: 0 0 auto;
+  min-height: 44rpx;
+  padding: 8rpx 18rpx;
+  border-radius: 999rpx;
+  background: #e7f5ef;
+  color: #236752;
+  font-size: 23rpx;
+  font-weight: 900;
+}
+
+.subject-row {
+  display: flex;
+  gap: 12rpx;
+  margin: 22rpx 0;
+}
+
+.subject-button {
+  flex: 1;
+  min-height: 70rpx;
+  border-radius: 14rpx;
+  background: #edf5f2;
+  color: #35675c;
+  font-size: 25rpx;
+  font-weight: 800;
+}
+
+.subject-button.active {
+  background: #2f9d7e;
+  color: #fff;
+}
+
+.mastery-track {
+  height: 18rpx;
+  margin: 18rpx 0 16rpx;
+  overflow: hidden;
+  border-radius: 999rpx;
+  background: #dcebe6;
+}
+
+.mastery-fill {
+  height: 100%;
+  border-radius: 999rpx;
+  background: linear-gradient(90deg, #2f9d7e, #77c7ac);
+}
+
+.learning-note {
+  display: block;
+  color: #5c6f80;
+  font-size: 25rpx;
+  line-height: 1.5;
+}
+
+.module-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16rpx;
+  margin-top: 22rpx;
+}
+
+.module-card {
+  display: flex;
+  min-height: 178rpx;
+  padding: 20rpx;
+  border: 1rpx solid rgba(86, 117, 139, 0.14);
+  border-radius: 20rpx;
+  background: rgba(255,255,255,0.78);
+}
+
+.module-card.disabled {
+  opacity: 0.68;
+  border-style: dashed;
+}
+
+.module-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 58rpx;
+  width: 58rpx;
+  height: 58rpx;
+  margin-right: 14rpx;
+  border-radius: 18rpx;
+  color: #fff;
+  font-size: 26rpx;
+  font-weight: 900;
+}
+
+.module-icon.blue {
+  background: linear-gradient(135deg, #2f75f6, #63a4ff);
+}
+
+.module-icon.cyan {
+  background: linear-gradient(135deg, #18a7b2, #34d399);
+}
+
+.module-icon.green {
+  background: linear-gradient(135deg, #238b56, #84cc16);
+}
+
+.module-icon.orange {
+  background: linear-gradient(135deg, #f97316, #facc15);
+}
+
+.module-icon.purple {
+  background: linear-gradient(135deg, #7c3aed, #38bdf8);
+}
+
+.module-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.module-title {
+  display: block;
+  color: #172033;
+  font-size: 27rpx;
+  font-weight: 900;
+}
+
+.module-desc,
+.module-status {
+  display: block;
+  margin-top: 8rpx;
+  color: #66788a;
+  font-size: 22rpx;
+  line-height: 1.35;
+}
+
+.module-status {
+  color: #23806e;
+  font-weight: 800;
+}

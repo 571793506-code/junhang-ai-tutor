@@ -1,0 +1,31 @@
+{
+  "pages": [
+    "pages/role/index",
+    "pages/student/login/index",
+    "pages/student/home/index",
+    "pages/student/tasks/index",
+    "pages/student/qa/index",
+    "pages/student/vocabulary/index",
+    "pages/student/profile/index",
+    "pages/student/upload/index",
+    "pages/teacher/login/index",
+    "pages/teacher/console/index",
+    "pages/teacher/students/index",
+    "pages/teacher/tasks/index",
+    "pages/teacher/content/index",
+    "pages/teacher/assessments/index",
+    "pages/teacher/grading/index",
+    "pages/teacher/review/index",
+    "pages/teacher/profile/index",
+    "pages/classroom/login/index",
+    "pages/classroom/dashboard/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "君航 AI 助教",
+    "navigationBarBackgroundColor": "#f7fbff",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f4f8fb"
+  },
+  "style": "v2",
+  "lazyCodeLoading": "requiredComponents"
+}

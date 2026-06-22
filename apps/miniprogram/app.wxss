@@ -1,0 +1,259 @@
+page {
+  min-height: 100vh;
+  background: #f4f8fb;
+  color: #172033;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+view,
+text,
+button,
+input,
+textarea,
+picker {
+  box-sizing: border-box;
+}
+
+.page {
+  min-height: 100vh;
+  padding: 32rpx;
+}
+
+.student-page {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(238, 247, 244, 0.94)),
+    #eef7f4;
+}
+
+.teacher-page {
+  background:
+    linear-gradient(160deg, rgba(8, 33, 78, 0.94), rgba(22, 98, 184, 0.9)),
+    #0f3a7a;
+  color: #f8fbff;
+}
+
+.classroom-page {
+  background:
+    linear-gradient(180deg, #f7fbff 0%, #eef4ff 100%);
+}
+
+.hero {
+  padding: 34rpx 0 28rpx;
+}
+
+.eyebrow {
+  color: #477083;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.teacher-page .eyebrow {
+  color: #9fd0ff;
+}
+
+.title {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 46rpx;
+  line-height: 1.18;
+  font-weight: 800;
+}
+
+.subtitle {
+  display: block;
+  margin-top: 14rpx;
+  color: #64748b;
+  font-size: 27rpx;
+  line-height: 1.55;
+}
+
+.teacher-page .subtitle {
+  color: #d7e8ff;
+}
+
+.card {
+  margin-top: 24rpx;
+  padding: 28rpx;
+  border: 1rpx solid rgba(120, 144, 166, 0.18);
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12rpx 32rpx rgba(34, 67, 94, 0.08);
+  color: #172033;
+}
+
+.teacher-card {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(207, 230, 255, 0.22);
+  color: #f8fbff;
+  box-shadow: none;
+}
+
+.section-title {
+  display: block;
+  font-size: 31rpx;
+  font-weight: 800;
+  margin-bottom: 18rpx;
+}
+
+.muted {
+  color: #64748b;
+  font-size: 25rpx;
+  line-height: 1.55;
+}
+
+.teacher-page .muted,
+.teacher-card .muted {
+  color: #d7e8ff;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.between {
+  justify-content: space-between;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18rpx;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44rpx;
+  padding: 8rpx 18rpx;
+  border-radius: 999rpx;
+  background: #e7f5ef;
+  color: #236752;
+  font-size: 23rpx;
+  font-weight: 700;
+}
+
+.status-dot {
+  width: 18rpx;
+  height: 18rpx;
+  border-radius: 999rpx;
+  background: #ef4444;
+}
+
+.status-dot.ready {
+  background: #22c55e;
+}
+
+.input,
+.textarea,
+.picker-field {
+  width: 100%;
+  min-height: 86rpx;
+  margin-top: 16rpx;
+  padding: 0 22rpx;
+  border: 1rpx solid #d8e4ee;
+  border-radius: 12rpx;
+  background: #fff;
+  color: #172033;
+  font-size: 28rpx;
+}
+
+.textarea {
+  min-height: 180rpx;
+  padding-top: 20rpx;
+  line-height: 1.5;
+}
+
+.button {
+  width: 100%;
+  min-height: 88rpx;
+  margin-top: 22rpx;
+  border-radius: 12rpx;
+  background: #1769d2;
+  color: #fff;
+  font-size: 29rpx;
+  font-weight: 800;
+}
+
+.button.secondary {
+  background: #e9f2ff;
+  color: #1769d2;
+}
+
+.button.warm {
+  background: #2f9d7e;
+}
+
+.button.ghost {
+  background: transparent;
+  border: 1rpx solid rgba(99, 120, 145, 0.28);
+  color: inherit;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.list-item {
+  padding: 22rpx;
+  border-radius: 14rpx;
+  background: rgba(246, 250, 253, 0.92);
+}
+
+.teacher-card .list-item {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.item-title {
+  display: block;
+  color: inherit;
+  font-size: 28rpx;
+  font-weight: 800;
+}
+
+.item-meta {
+  display: block;
+  margin-top: 8rpx;
+  color: #64748b;
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+
+.teacher-card .item-meta {
+  color: #d7e8ff;
+}
+
+.nav-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18rpx;
+  margin-top: 22rpx;
+}
+
+.nav-tile {
+  min-height: 150rpx;
+  padding: 24rpx;
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.92);
+  color: #172033;
+}
+
+.teacher-page .nav-tile {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f8fbff;
+}
+
+.avatar {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(135deg, #d7f7eb, #dfeaff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #256b5c;
+  font-weight: 900;
+}

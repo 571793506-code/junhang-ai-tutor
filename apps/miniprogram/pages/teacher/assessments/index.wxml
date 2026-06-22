@@ -1,0 +1,46 @@
+<view class="page teacher-page">
+  <view class="hero">
+    <text class="eyebrow">生成打印</text>
+    <text class="title">先审 PDF 草稿，再导出正式文件</text>
+    <text class="ai-generated-badge">AI生成</text>
+    <text class="subtitle">小测和练习默认两页 A4，试卷默认四页 A4。特殊要求会写进排版提示。</text>
+  </view>
+
+  <view class="card teacher-card">
+    <text class="section-title">生成设置</text>
+    <picker mode="selector" range="{{kinds}}" value="{{kindIndex}}" bindchange="setKind">
+      <view class="picker-field">{{kinds[kindIndex]}}</view>
+    </picker>
+    <picker mode="selector" range="{{subjects}}" value="{{subjectIndex}}" bindchange="setSubject">
+      <view class="picker-field">{{subjects[subjectIndex]}}</view>
+    </picker>
+    <picker mode="selector" range="{{grades}}" value="{{gradeIndex}}" bindchange="setGrade">
+      <view class="picker-field">{{grades[gradeIndex]}}</view>
+    </picker>
+    <picker mode="selector" range="{{difficulties}}" value="{{difficultyIndex}}" bindchange="setDifficulty">
+      <view class="picker-field">{{difficulties[difficultyIndex]}}</view>
+    </picker>
+    <textarea class="textarea" placeholder="输入生成要求：知识点、题型、是否需要留更多答题空间等。" value="{{requirement}}" bindinput="setRequirement" />
+    <button class="button" loading="{{loading}}" bindtap="submit">生成 PDF 草稿</button>
+  </view>
+
+  <view wx:if="{{draftAsset}}" class="card teacher-card">
+    <view class="row between">
+      <text class="section-title">PDF 草稿审查</text>
+      <text class="ai-generated-badge">AI生成</text>
+    </view>
+    <text class="muted">请打开 PDF 草稿审查题目内容、题量和排版。确认后才生成正式题目 PDF 与解析 PDF。</text>
+    <button class="ghost-button" bindtap="openDraft">打开内容审查 PDF 草稿</button>
+    <view class="row action-row">
+      <button class="button" loading="{{loading}}" bindtap="acceptDraft">是，生成正式 PDF</button>
+      <button class="ghost-button danger" loading="{{loading}}" bindtap="rejectDraft">否，重新生成草稿</button>
+    </view>
+  </view>
+
+  <view wx:if="{{finalAssets.length}}" class="card teacher-card">
+    <text class="section-title">正式 PDF</text>
+    <block wx:for="{{finalAssets}}" wx:key="id">
+      <text class="muted">{{item.title}}</text>
+    </block>
+  </view>
+</view>

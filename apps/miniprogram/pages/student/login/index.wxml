@@ -1,0 +1,43 @@
+<view class="login-page role-student is-selected">
+  <view class="login-shell">
+    <view class="brand-panel">
+      <view class="brand-stage">
+        <view class="ai-orbit"></view>
+        <image class="ai-avatar" src="/assets/junhang-ai-avatar-center.png" mode="aspectFill" />
+      </view>
+      <view class="selected-hint">
+        <text class="hint-title">学生端</text>
+        <text class="hint-note">家庭学习入口</text>
+      </view>
+      <view class="role-strip compact">
+        <view class="role-card active">
+          <text class="role-icon student">学</text>
+          <text class="role-name">学生端</text>
+        </view>
+        <view class="role-card" bindtap="goRole">
+          <text class="role-icon teacher">师</text>
+          <text class="role-name">切换</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="form-panel">
+      <view class="form-head">
+        <text class="login-kicker">学生 / 家长端</text>
+        <text class="form-title">学生端登录</text>
+        <text class="form-note">使用学生姓名、家长电话和老师提供的学生专属码登录。</text>
+      </view>
+
+      <text class="field-label">学生姓名</text>
+      <input class="login-input" placeholder-class="login-placeholder" placeholder="请输入学生姓名" value="{{displayName}}" bindinput="setDisplayName" />
+      <text class="field-label">家长电话</text>
+      <input class="login-input" placeholder-class="login-placeholder" placeholder="请输入家长电话" type="number" value="{{guardianPhone}}" bindinput="setGuardianPhone" />
+      <text class="field-label">学生专属码</text>
+      <input class="login-input" placeholder-class="login-placeholder" placeholder="请输入学生专属码" value="{{accessCode}}" bindinput="setAccessCode" />
+
+      <button class="login-button" loading="{{loading}}" bindtap="login">进入学生端</button>
+      <button class="link-button" bindtap="goRole">返回身份选择</button>
+      <text wx:if="{{message}}" class="message">{{message}}</text>
+    </view>
+  </view>
+</view>

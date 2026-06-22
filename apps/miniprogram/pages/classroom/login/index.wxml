@@ -1,0 +1,39 @@
+<view class="login-page role-classroom is-selected">
+  <view class="login-shell">
+    <view class="brand-panel">
+      <view class="brand-stage">
+        <view class="ai-orbit"></view>
+        <image class="ai-avatar" src="/assets/junhang-ai-avatar-center.png" mode="aspectFill" />
+      </view>
+      <view class="selected-hint">
+        <text class="hint-title">平板端</text>
+        <text class="hint-note">课堂公共设备入口</text>
+      </view>
+      <view class="role-strip compact">
+        <view class="role-card active">
+          <text class="role-icon classroom">板</text>
+          <text class="role-name">平板端</text>
+        </view>
+        <view class="role-card" bindtap="goRole">
+          <text class="role-icon student">学</text>
+          <text class="role-name">切换</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="form-panel">
+      <view class="form-head">
+        <text class="login-kicker">课堂平板端</text>
+        <text class="form-title">平板端绑定</text>
+        <text class="form-note">输入设备绑定码后进入课堂公共屏，本端不展示学生完整个人主页。</text>
+      </view>
+
+      <text class="field-label">设备绑定码</text>
+      <input class="login-input" placeholder-class="login-placeholder" placeholder="请输入平板绑定码" value="{{bindingCode}}" bindinput="setBindingCode" />
+
+      <button class="login-button" loading="{{loading}}" bindtap="login">绑定并进入平板端</button>
+      <button class="link-button" bindtap="goRole">返回身份选择</button>
+      <text wx:if="{{message}}" class="message">{{message}}</text>
+    </view>
+  </view>
+</view>

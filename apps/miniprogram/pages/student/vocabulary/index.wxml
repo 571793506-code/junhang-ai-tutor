@@ -1,0 +1,27 @@
+<view class="page student-page">
+  <view class="hero">
+    <text class="eyebrow">英语词汇助手</text>
+    <text class="title">查单词、看词性、练变化</text>
+    <text class="subtitle">词性旁会显示中文说明，易错点里会提示对应变化。</text>
+  </view>
+
+  <view class="card">
+    <text class="section-title">查询单词</text>
+    <input class="input" placeholder="例如 carry" value="{{term}}" bindinput="setTerm" />
+    <button class="button warm" bindtap="lookup">查询</button>
+  </view>
+
+  <view class="card">
+    <view class="row between">
+      <text class="section-title">{{result.term}}</text>
+      <text class="pill">{{result.partOfSpeech}}（{{result.partOfSpeechCn}}）</text>
+    </view>
+    <text class="muted">{{result.meaning}}</text>
+    <view class="list">
+      <view wx:for="{{result.changes}}" wx:key="label" class="list-item">
+        <text class="item-title">{{item.label}}</text>
+        <text class="item-meta">{{item.value}}</text>
+      </view>
+    </view>
+  </view>
+</view>

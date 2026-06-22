@@ -1,0 +1,63 @@
+<view class="page student-page student-home">
+  <view class="home-hero">
+    <view>
+      <text class="home-kicker">{{student.grade || '学生端'}}</text>
+      <text class="home-title">{{student.displayName || '同学'}}，今天稳稳向前</text>
+      <text class="home-subtitle">这里保留真实学习入口，家长可查看老师发布、AI 生成和老师复核后的学习反馈。</text>
+    </view>
+    <view class="ai-mark">
+      <text>AI</text>
+      <text>助教</text>
+    </view>
+  </view>
+
+  <view class="overview-grid">
+    <view class="overview-card primary" bindtap="goTasks">
+      <text class="overview-value">{{todayTasks.length}}</text>
+      <text class="overview-label">今日任务</text>
+      <text class="overview-note">老师发布</text>
+    </view>
+    <view class="overview-card">
+      <text class="overview-value">{{openAssignments.length}}</text>
+      <text class="overview-label">待处理练习</text>
+      <text class="overview-note">按学生匹配</text>
+    </view>
+  </view>
+
+  <view class="learning-panel">
+    <view class="panel-head">
+      <view>
+        <text class="panel-title">学习观察</text>
+        <text class="panel-subtitle">仅学生和家长可见</text>
+      </view>
+      <text class="subject-pill">{{activeSubject}}</text>
+    </view>
+    <view class="subject-row">
+      <button wx:for="{{subjects}}" wx:key="*this" class="subject-button {{activeSubject === item ? 'active' : ''}}" data-subject="{{item}}" bindtap="selectSubject">{{item}}</button>
+    </view>
+    <view class="mastery-track">
+      <view class="mastery-fill" style="width: {{masteryValue}}%;"></view>
+    </view>
+    <text class="learning-note">近期建议关注：{{subjectRisks}}</text>
+  </view>
+
+  <view class="module-section">
+    <view class="panel-head">
+      <view>
+        <text class="panel-title">功能模块</text>
+        <text class="panel-subtitle">点击模块进入对应功能页</text>
+      </view>
+    </view>
+
+    <view class="module-grid">
+      <view wx:for="{{modules}}" wx:key="key" class="module-card {{item.disabled ? 'disabled' : ''}}" data-key="{{item.key}}" bindtap="openModule">
+        <text class="module-icon {{item.tone}}">{{item.icon}}</text>
+        <view class="module-copy">
+          <text class="module-title">{{item.title}}</text>
+          <text class="module-desc">{{item.desc}}</text>
+          <text class="module-status">{{item.status}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

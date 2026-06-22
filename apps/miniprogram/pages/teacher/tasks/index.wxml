@@ -1,0 +1,29 @@
+<view class="page teacher-page">
+  <view class="hero">
+    <text class="eyebrow">今日任务生成</text>
+    <text class="title">由老师决定任务，再让 AI 起草</text>
+    <text class="ai-generated-badge">AI生成</text>
+    <text class="subtitle">选择具体学生，输入今天要完成的内容。生成后会写入该学生今日任务。</text>
+  </view>
+
+  <view class="card teacher-card">
+    <text class="section-title">任务设置</text>
+    <picker mode="selector" range="{{studentNames}}" value="{{studentIndex}}" bindchange="setStudent">
+      <view class="picker-field">{{studentNames[studentIndex] || '选择学生'}}</view>
+    </picker>
+    <picker mode="selector" range="{{subjects}}" value="{{subjectIndex}}" bindchange="setSubject">
+      <view class="picker-field">{{subjects[subjectIndex]}}</view>
+    </picker>
+    <input class="input" placeholder="任务标题，例如：英语词形变化巩固" value="{{title}}" bindinput="setTitle" />
+    <textarea class="textarea" placeholder="任务内容，例如：复习 carry / go / bright 的词形变化，完成 4 道造句。" value="{{requirement}}" bindinput="setRequirement" />
+    <button class="button" loading="{{loading}}" bindtap="submit">AI生成并写入今日任务</button>
+  </view>
+
+  <view wx:if="{{draftText}}" class="card teacher-card">
+    <view class="row between">
+      <text class="section-title">生成结果</text>
+      <text class="ai-generated-badge">AI生成</text>
+    </view>
+    <text class="muted">{{draftText}}</text>
+  </view>
+</view>

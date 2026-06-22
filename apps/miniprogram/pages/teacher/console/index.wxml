@@ -1,0 +1,119 @@
+<view class="page teacher-page teacher-console">
+  <view class="console-hero">
+    <view>
+      <text class="console-kicker">{{teacher.displayName || '教师端'}}</text>
+      <text class="console-title">教师工作台</text>
+      <text class="console-subtitle">按学生权限、今日任务、生成打印、批改复核、学生档案、教材资料、课堂设备、电视动态屏和系统状态组织教师端。</text>
+    </view>
+    <view class="service-badge {{aiReady ? 'ready' : ''}}">
+      <view class="service-dot"></view>
+      <text>{{aiReady ? 'AI 可用' : '检查中'}}</text>
+    </view>
+  </view>
+
+  <view class="console-panel status-panel">
+    <view class="panel-head">
+      <view>
+        <text class="panel-title">服务状态</text>
+        <text class="panel-subtitle">{{statusText}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="console-panel">
+    <view class="panel-head">
+      <view>
+        <text class="panel-title">课堂设备与电视动态屏</text>
+        <text class="panel-subtitle">平板任务由教师端下发；电视动态屏第一版继续使用 Web 大屏，小程序端提供入口和状态提示。</text>
+      </view>
+      <text class="panel-tag">教师端可见</text>
+    </view>
+
+    <view class="display-address" bindtap="copyDisplayAddress">
+      <text class="address-label">电视动态屏地址</text>
+      <text class="address-value">{{displayAddress}}</text>
+      <text class="address-action">点击复制</text>
+    </view>
+
+    <view class="control-grid">
+      <view wx:for="{{padControls}}" wx:key="title" class="control-card">
+        <text class="control-title">{{item.title}}</text>
+        <text class="control-status">{{item.status}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="console-panel">
+    <view class="panel-head">
+      <view>
+        <text class="panel-title">平板插件状态</text>
+        <text class="panel-subtitle">第一轮只展示可用状态，不做复杂开关配置。</text>
+      </view>
+    </view>
+    <view class="plugin-state-list">
+      <view wx:for="{{pluginStates}}" wx:key="title" class="plugin-state">
+        <text class="state-dot"></text>
+        <view>
+          <text class="state-title">{{item.title}}</text>
+          <text class="state-meta">{{item.status}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="console-panel">
+    <view class="panel-head">
+      <view>
+        <text class="panel-title">教师端模块入口</text>
+        <text class="panel-subtitle">模块名与 Web 原型保持一致，后续迁移只替换页面实现，不改业务边界。</text>
+      </view>
+    </view>
+    <view class="teacher-module-grid">
+      <view class="teacher-module" bindtap="goStudents">
+        <text class="module-icon">权</text>
+        <text class="module-title">学生权限</text>
+        <text class="module-note">学生、专属码和归属教师</text>
+      </view>
+      <view class="teacher-module" bindtap="goTasks">
+        <text class="module-icon">任</text>
+        <text class="module-title">今日任务</text>
+        <text class="module-note">生成草稿后由老师确认</text>
+      </view>
+      <view class="teacher-module" bindtap="goContent">
+        <text class="module-icon">资</text>
+        <text class="module-title">教材资料</text>
+        <text class="module-note">教材索引、资料库和复核状态</text>
+      </view>
+      <view class="teacher-module" bindtap="goGrading">
+        <text class="module-icon">拍</text>
+        <text class="module-title">批改上传</text>
+        <text class="module-note">批改复核的拍照入口</text>
+      </view>
+      <view class="teacher-module" bindtap="goReview">
+        <text class="module-icon">复</text>
+        <text class="module-title">批改复核</text>
+        <text class="module-note">老师确认后再发布</text>
+      </view>
+      <view class="teacher-module" bindtap="goAssessments">
+        <text class="module-icon">卷</text>
+        <text class="module-title">生成打印</text>
+        <text class="module-note">练习、小测、试卷 A4</text>
+      </view>
+      <view class="teacher-module" bindtap="goProfile">
+        <text class="module-icon">档</text>
+        <text class="module-title">学生档案</text>
+        <text class="module-note">草稿复核后发布</text>
+      </view>
+      <view class="teacher-module" bindtap="goClassroom">
+        <text class="module-icon">板</text>
+        <text class="module-title">课堂设备</text>
+        <text class="module-note">核对头像、任务和问答</text>
+      </view>
+      <view class="teacher-module system-module">
+        <text class="module-icon">态</text>
+        <text class="module-title">系统状态</text>
+        <text class="module-note">{{statusText}}</text>
+      </view>
+    </view>
+  </view>
+</view>

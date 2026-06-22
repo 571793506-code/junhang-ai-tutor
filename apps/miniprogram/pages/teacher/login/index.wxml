@@ -1,0 +1,41 @@
+<view class="login-page role-teacher is-selected">
+  <view class="login-shell">
+    <view class="brand-panel">
+      <view class="brand-stage">
+        <view class="ai-orbit"></view>
+        <image class="ai-avatar" src="/assets/junhang-ai-avatar-center.png" mode="aspectFill" />
+      </view>
+      <view class="selected-hint">
+        <text class="hint-title">教师端</text>
+        <text class="hint-note">教学管理入口</text>
+      </view>
+      <view class="role-strip compact">
+        <view class="role-card active">
+          <text class="role-icon teacher">师</text>
+          <text class="role-name">教师端</text>
+        </view>
+        <view class="role-card" bindtap="goRole">
+          <text class="role-icon student">学</text>
+          <text class="role-name">切换</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="form-panel">
+      <view class="form-head">
+        <text class="login-kicker">教师端</text>
+        <text class="form-title">教师端登录</text>
+        <text class="form-note">使用教师手机号和教师码登录，进入工作台后再管理任务与复核。</text>
+      </view>
+
+      <text class="field-label">手机号</text>
+      <input class="login-input" placeholder-class="login-placeholder" placeholder="请输入教师手机号" type="number" value="{{phone}}" bindinput="setPhone" />
+      <text class="field-label">教师码</text>
+      <input class="login-input" placeholder-class="login-placeholder" placeholder="请输入教师码" value="{{accessCode}}" bindinput="setAccessCode" />
+
+      <button class="login-button" loading="{{loading}}" bindtap="login">进入教师端</button>
+      <button class="link-button" bindtap="goRole">返回身份选择</button>
+      <text wx:if="{{message}}" class="message">{{message}}</text>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,5 @@
+.picker-field,
+.input,
+.textarea {
+  color: #172033;
+}

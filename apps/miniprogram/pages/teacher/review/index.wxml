@@ -1,0 +1,38 @@
+<view class="page teacher-page">
+  <view class="hero">
+    <text class="eyebrow">批改复核</text>
+    <text class="title">待老师确认的批改记录</text>
+    <text class="ai-generated-badge">AI生成</text>
+    <text class="subtitle">AI生成初批和图片上传都会进入这里，老师复核后再沉淀到学生档案。</text>
+  </view>
+
+  <view class="card teacher-card">
+    <view class="row between">
+      <text class="section-title">待复核列表</text>
+      <text class="pill">{{submissions.length}} 条</text>
+    </view>
+    <view class="list">
+      <view wx:for="{{submissions}}" wx:key="id" class="list-item">
+        <text class="item-title">{{item.studentName}} · {{item.kind}}</text>
+        <text class="item-meta">{{item.assignmentTitle}}</text>
+        <text class="item-meta">图片 {{item.imageIndex || '-'}} / {{item.imageTotal || item.imageNames.length || '-'}} · {{item.uploadedBy}}</text>
+        <view class="review-meta-grid">
+          <text class="review-chip">{{item.ocrStatusLabel}}</text>
+          <text class="review-chip">页码 {{item.pageNumber || '-'}}</text>
+          <text class="review-chip">题号 {{item.questionRange || '-'}}</text>
+        </view>
+        <text wx:if="{{item.ocrTextPreview}}" class="ocr-preview">{{item.ocrTextPreview}}</text>
+        <text class="item-meta">{{item.gradingSummary || '等待老师查看图片和批改结果。'}}</text>
+        <view class="review-confirm-box">
+          <text class="field-title">教师确认分数</text>
+          <input class="review-input" type="digit" value="{{item.reviewScore}}" data-id="{{item.id}}" bindinput="updateReviewScore" placeholder="确认后再入档" />
+          <text class="field-title">复核备注</text>
+          <textarea class="review-textarea" value="{{item.reviewNote}}" data-id="{{item.id}}" bindinput="updateReviewNote" placeholder="填写扣分原因、识别问题或待观察点" />
+          <text class="review-warning">教师确认后才写入学生档案，低置信结果不会直接归档。</text>
+        </view>
+        <button class="mini-button" data-id="{{item.id}}" bindtap="markReviewed">标记已复核</button>
+      </view>
+    </view>
+    <text wx:if="{{!submissions.length}}" class="muted">暂时没有待复核记录。</text>
+  </view>
+</view>

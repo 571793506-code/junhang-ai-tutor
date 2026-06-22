@@ -1,0 +1,63 @@
+<view class="login-page role-{{activeRole}} {{selected ? 'is-selected' : 'is-awaiting'}}">
+  <view class="login-shell">
+    <view class="brand-panel">
+      <view class="brand-copy" wx:if="{{!selected}}">
+        <text class="login-kicker">君航 AI 助教</text>
+        <text class="login-title">选择进入端口</text>
+        <text class="login-subtitle">根据身份进入对应学习空间。页面会在选择后切换风格，并显示该端口需要填写的信息。</text>
+      </view>
+
+      <view class="brand-stage">
+        <view class="ai-orbit"></view>
+        <image class="ai-avatar" src="/assets/junhang-ai-avatar-center.png" mode="aspectFill" />
+      </view>
+
+      <view class="selected-hint" wx:if="{{selected}}">
+        <text class="hint-title">{{activeMeta.name}}</text>
+        <text class="hint-note">{{activeMeta.shortNote}}</text>
+      </view>
+
+      <view class="role-strip {{selected ? 'compact' : ''}}">
+        <view wx:for="{{roles}}" wx:key="key" class="role-card {{item.active ? 'active' : ''}}" data-role="{{item.key}}" bindtap="selectRole">
+          <text class="role-icon {{item.key}}">{{item.icon}}</text>
+          <view>
+            <text class="role-name">{{item.name}}</text>
+            <text class="role-desc">{{item.desc}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="form-panel" wx:if="{{selected}}">
+      <view class="form-head">
+        <text class="login-kicker">{{activeMeta.kicker}}</text>
+        <text class="form-title">{{activeMeta.formTitle}}</text>
+        <text class="form-note">{{activeMeta.note}}</text>
+      </view>
+
+      <block wx:if="{{activeRole === 'student'}}">
+        <text class="field-label">学生姓名</text>
+        <input class="login-input" placeholder-class="login-placeholder" placeholder="请输入学生姓名" value="{{displayName}}" bindinput="setDisplayName" />
+        <text class="field-label">家长电话</text>
+        <input class="login-input" placeholder-class="login-placeholder" placeholder="请输入家长电话" type="number" value="{{guardianPhone}}" bindinput="setGuardianPhone" />
+        <text class="field-label">学生专属码</text>
+        <input class="login-input" placeholder-class="login-placeholder" placeholder="请输入学生专属码" value="{{studentCode}}" bindinput="setStudentCode" />
+      </block>
+
+      <block wx:elif="{{activeRole === 'teacher'}}">
+        <text class="field-label">手机号</text>
+        <input class="login-input" placeholder-class="login-placeholder" placeholder="请输入教师手机号" type="number" value="{{teacherPhone}}" bindinput="setTeacherPhone" />
+        <text class="field-label">教师码</text>
+        <input class="login-input" placeholder-class="login-placeholder" placeholder="请输入教师码" value="{{teacherCode}}" bindinput="setTeacherCode" />
+      </block>
+
+      <block wx:else>
+        <text class="field-label">设备绑定码</text>
+        <input class="login-input" placeholder-class="login-placeholder" placeholder="请输入平板绑定码" value="{{bindingCode}}" bindinput="setBindingCode" />
+      </block>
+
+      <button class="login-button" loading="{{loading}}" bindtap="login">{{activeMeta.button}}</button>
+      <text wx:if="{{message}}" class="message">{{message}}</text>
+    </view>
+  </view>
+</view>
