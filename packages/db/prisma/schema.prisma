@@ -39,27 +39,79 @@ enum SubmissionStatus {
   RETURNED
 }
 
+enum AccessCodeStatus {
+  ACTIVE
+  DISABLED
+  EXPIRED
+}
+
+enum EnrollmentStatus {
+  TRIAL
+  ACTIVE
+  PAUSED
+  WITHDRAWN
+}
+
+enum DeviceStatus {
+  BOUND
+  PENDING
+  DISABLED
+}
+
+enum BroadcastStatus {
+  PENDING
+  PLAYED
+  ARCHIVED
+}
+
+enum DictationStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ReadingStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ClassroomQaMode {
+  GUIDED_THINKING
+  KNOWLEDGE_EXPLANATION
+}
+
 model Student {
-  id              String            @id @default(cuid())
-  displayName     String
-  grade           String?
-  school          String?
-  textbookVersion String?
-  notes           String?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  guardians       StudentGuardian[]
-  classes         ClassStudent[]
-  tasks           LearningTask[]
-  attempts        TaskAttempt[]
-  dictations      DictationSession[]
-  qaSessions      QaSession[]
-  vocabulary      VocabularyRecord[]
-  submissions     Submission[]
-  mistakes        MistakeRecord[]
-  behaviorEvents  BehaviorEvent[]
-  profiles        StudentProfile[]
-  reports         StudentReport[]
+  id                   String                     @id @default(cuid())
+  displayName          String
+  grade                String?
+  school               String?
+  className            String?
+  textbookVersion      String?
+  enrollmentStatus     EnrollmentStatus           @default(ACTIVE)
+  loginEnabled         Boolean                    @default(true)
+  currentSessionJti    String?
+  currentSessionAt     DateTime?
+  responsibleTeacherId String?
+  notes                String?
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  responsibleTeacher   Teacher?                   @relation("ResponsibleStudents", fields: [responsibleTeacherId], references: [id])
+  accessCodes          StudentAccessCode[]
+  teacherAssignments   TeacherStudentAssignment[]
+  guardians            StudentGuardian[]
+  classes              ClassStudent[]
+  tasks                LearningTask[]
+  attempts             TaskAttempt[]
+  dictations           DictationSession[]
+  qaSessions           QaSession[]
+  vocabulary           VocabularyRecord[]
+  submissions          Submission[]
+  mistakes             MistakeRecord[]
+  behaviorEvents       BehaviorEvent[]
+  profiles             StudentProfile[]
+  reports              StudentReport[]
+  voiceInteractions    VoiceInteraction[]
 }
 
 model Guardian {
@@ -74,15 +126,70 @@ model Guardian {
 }
 
 model Teacher {
-  id        String         @id @default(cuid())
-  name      String
-  phone     String?
-  email     String?
-  openId    String?
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
-  classes   ClassTeacher[]
-  tasks     LearningTask[]
+  id                        String                     @id @default(cuid())
+  name                      String
+  phone                     String?
+  email                     String?
+  openId                    String?
+  role                      String?
+  status                    String?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  accessCodes               TeacherAccessCode[]
+  createdStudentAccessCodes StudentAccessCode[]        @relation("StudentAccessCodeCreator")
+  responsibleStudents       Student[]                  @relation("ResponsibleStudents")
+  studentAssignments        TeacherStudentAssignment[]
+  classroomDevices          ClassroomDevice[]
+  broadcasts                TaskBroadcast[]
+  dictationTasks            DictationTask[]
+  readingTasks              ReadingTask[]
+  classes                   ClassTeacher[]
+  tasks                     LearningTask[]
+}
+
+model StudentAccessCode {
+  id                 String           @id @default(cuid())
+  studentId          String
+  codeHash           String
+  codePreview        String?
+  status             AccessCodeStatus @default(ACTIVE)
+  createdByTeacherId String?
+  createdAt          DateTime         @default(now())
+  disabledAt         DateTime?
+  student            Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  createdByTeacher   Teacher?         @relation("StudentAccessCodeCreator", fields: [createdByTeacherId], references: [id])
+
+  @@unique([codeHash])
+  @@index([studentId, status])
+}
+
+model TeacherAccessCode {
+  id         String           @id @default(cuid())
+  teacherId  String
+  codeHash   String
+  codePreview String?
+  roleScope  String?
+  status     AccessCodeStatus @default(ACTIVE)
+  createdAt  DateTime         @default(now())
+  disabledAt DateTime?
+  teacher    Teacher          @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([codeHash])
+  @@index([teacherId, status])
+}
+
+model TeacherStudentAssignment {
+  id         String    @id @default(cuid())
+  teacherId  String
+  studentId  String
+  source     String?
+  activeFrom DateTime  @default(now())
+  activeTo   DateTime?
+  teacher    Teacher   @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  student    Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([teacherId])
+  @@index([studentId])
 }
 
 model StudentGuardian {
@@ -165,6 +272,62 @@ model TextbookAsset {
   updatedAt DateTime @updatedAt
 }
 
+model KnowledgeSource {
+  id                   String            @id @default(cuid())
+  title                String
+  sourceType           String
+  subject              String?
+  grade                String?
+  edition              String?
+  volume               String?
+  unit                 String?
+  lesson               String?
+  sourceUrl            String?
+  sourcePath           String?
+  markdownPath         String?
+  licenseStatus        String            @default("REVIEW_REQUIRED")
+  reviewStatus         String            @default("PENDING")
+  allowedForGeneration Boolean           @default(false)
+  confidence           Float?
+  summary              String?
+  metadata             Json?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  chunks               KnowledgeChunk[]
+  reviews              SourceReview[]
+
+  @@index([subject, grade])
+  @@index([sourceType, reviewStatus])
+  @@index([allowedForGeneration])
+}
+
+model KnowledgeChunk {
+  id              String          @id @default(cuid())
+  sourceId        String
+  orderIndex      Int
+  text            String
+  preview         String?
+  knowledgePoints Json?
+  metadata        Json?
+  createdAt       DateTime        @default(now())
+  source          KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId, orderIndex])
+}
+
+model SourceReview {
+  id          String          @id @default(cuid())
+  sourceId    String
+  teacherId   String?
+  status      String
+  note        String?
+  createdAt   DateTime        @default(now())
+  source      KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId, createdAt])
+  @@index([teacherId])
+}
+
 model LearningTask {
   id          String        @id @default(cuid())
   studentId   String?
@@ -184,10 +347,10 @@ model LearningTask {
 }
 
 model TaskAttempt {
-  id              String   @id @default(cuid())
+  id              String       @id @default(cuid())
   taskId          String
   studentId       String
-  startedAt       DateTime @default(now())
+  startedAt       DateTime     @default(now())
   completedAt     DateTime?
   durationSeconds Int?
   score           Float?
@@ -210,14 +373,16 @@ model DictationSession {
 }
 
 model QaSession {
-  id        String   @id @default(cuid())
-  studentId String?
-  subject   String?
-  question  String
-  answer    String?
-  metadata  Json?
-  createdAt DateTime @default(now())
-  student   Student? @relation(fields: [studentId], references: [id])
+  id         String    @id @default(cuid())
+  studentId  String?
+  modelRunId String?
+  subject    String?
+  question   String
+  answer     String?
+  metadata   Json?
+  createdAt  DateTime  @default(now())
+  student    Student?  @relation(fields: [studentId], references: [id])
+  modelRun   ModelRun? @relation(fields: [modelRunId], references: [id])
 }
 
 model VocabularyRecord {
@@ -270,28 +435,30 @@ model Submission {
 model GradingResult {
   id           String     @id @default(cuid())
   submissionId String     @unique
+  modelRunId   String?
   score        Float?
   result       Json
   needsReview  Boolean    @default(false)
   createdAt    DateTime   @default(now())
   submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  modelRun     ModelRun?  @relation(fields: [modelRunId], references: [id])
 }
 
 model MistakeRecord {
   id               String          @id @default(cuid())
-  studentId         String
-  knowledgePointId  String?
-  subject           String
-  prompt            String
-  studentAnswer     String?
-  correctAnswer     String?
-  cause             String?
-  masteryResolved   Boolean         @default(false)
-  metadata          Json?
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  knowledgePoint    KnowledgePoint? @relation(fields: [knowledgePointId], references: [id])
-  student           Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId        String
+  knowledgePointId String?
+  subject          String
+  prompt           String
+  studentAnswer    String?
+  correctAnswer    String?
+  cause            String?
+  masteryResolved  Boolean         @default(false)
+  metadata         Json?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  knowledgePoint   KnowledgePoint? @relation(fields: [knowledgePointId], references: [id])
+  student          Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
 }
 
 model BehaviorEvent {
@@ -304,6 +471,104 @@ model BehaviorEvent {
   durationSeconds Int?
   metadata        Json?
   student         Student?  @relation(fields: [studentId], references: [id])
+}
+
+model ClassroomDevice {
+  id                 String             @id @default(cuid())
+  label              String
+  bindingCodeHash    String?
+  bindingCodePreview String?
+  grade              String?
+  className          String?
+  teacherId          String?
+  status             DeviceStatus       @default(BOUND)
+  unlocked           Boolean            @default(false)
+  unlockedBy         String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  teacher            Teacher?           @relation(fields: [teacherId], references: [id])
+  broadcasts         TaskBroadcast[]
+  dictationTasks     DictationTask[]
+  readingTasks       ReadingTask[]
+  voiceInteractions  VoiceInteraction[]
+}
+
+model TaskBroadcast {
+  id        String          @id @default(cuid())
+  deviceId  String
+  teacherId String?
+  subject   String?
+  title     String
+  content   String?
+  voiceText String
+  status    BroadcastStatus @default(PENDING)
+  createdAt DateTime        @default(now())
+  playedAt  DateTime?
+  metadata  Json?
+  device    ClassroomDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  teacher   Teacher?        @relation(fields: [teacherId], references: [id])
+}
+
+model DictationTask {
+  id              String          @id @default(cuid())
+  deviceId        String
+  teacherId       String?
+  grade           String?
+  className       String?
+  subject         String
+  title           String
+  difficulty      String?
+  repeats         Int             @default(2)
+  intervalSeconds Int             @default(10)
+  status          DictationStatus @default(PENDING)
+  createdAt       DateTime        @default(now())
+  completedAt     DateTime?
+  device          ClassroomDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  teacher         Teacher?        @relation(fields: [teacherId], references: [id])
+  items           DictationItem[]
+}
+
+model DictationItem {
+  id              String        @id @default(cuid())
+  dictationTaskId String
+  orderIndex      Int
+  text            String
+  hint            String?
+  metadata        Json?
+  task            DictationTask @relation(fields: [dictationTaskId], references: [id], onDelete: Cascade)
+}
+
+model ReadingTask {
+  id          String          @id @default(cuid())
+  deviceId    String
+  teacherId   String?
+  grade       String?
+  className   String?
+  subject     String
+  title       String
+  passage     String
+  focusItems  Json
+  supportNote String?
+  status      ReadingStatus   @default(PENDING)
+  createdAt   DateTime        @default(now())
+  completedAt DateTime?
+  device      ClassroomDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  teacher     Teacher?        @relation(fields: [teacherId], references: [id])
+}
+
+model VoiceInteraction {
+  id            String           @id @default(cuid())
+  deviceId      String
+  studentId     String?
+  modelRunId    String?
+  mode          ClassroomQaMode?
+  transcript    String
+  answerSummary String?
+  metadata      Json?
+  occurredAt    DateTime         @default(now())
+  device        ClassroomDevice  @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  student       Student?         @relation(fields: [studentId], references: [id])
+  modelRun      ModelRun?        @relation(fields: [modelRunId], references: [id])
 }
 
 model StudentProfile {
@@ -337,16 +602,18 @@ model GeneratedAsset {
 }
 
 model ModelRun {
-  id             String   @id @default(cuid())
-  provider       String
-  model          String?
-  skill          String?
-  inputSummary   String?
-  outputSummary  String?
-  status         String
-  latencyMs      Int?
-  costEstimate   Float?
-  metadata       Json?
-  createdAt      DateTime @default(now())
+  id                String             @id @default(cuid())
+  provider          String
+  model             String?
+  skill             String?
+  inputSummary      String?
+  outputSummary     String?
+  status            String
+  latencyMs         Int?
+  costEstimate      Float?
+  metadata          Json?
+  createdAt         DateTime           @default(now())
+  qaSessions        QaSession[]
+  gradingResults    GradingResult[]
+  voiceInteractions VoiceInteraction[]
 }
-

@@ -1,0 +1,21 @@
+{
+  "name": "@junhang/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch-path=src src/server.js",
+    "start": "node src/server.js",
+    "check": "node src/server.js --check"
+  },
+  "dependencies": {
+    "@junhang/ai": "0.1.0",
+    "@junhang/core": "0.1.0",
+    "@junhang/db": "0.1.0",
+    "@junhang/services": "0.1.0",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "multer": "^2.0.2",
+    "tesseract.js": "^7.0.0"
+  }
+}

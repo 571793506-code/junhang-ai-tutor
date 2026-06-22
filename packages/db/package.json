@@ -3,10 +3,16 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "types": "./src/index.d.ts",
   "scripts": {
-    "db:generate": "prisma generate --schema prisma/schema.prisma",
-    "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
-    "db:format": "prisma format --schema prisma/schema.prisma",
-    "db:validate": "prisma validate --schema prisma/schema.prisma"
+    "db:generate": "node ../../node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
+    "db:migrate": "node ../../node_modules/prisma/build/index.js migrate dev --schema prisma/schema.prisma",
+    "db:format": "node ../../node_modules/prisma/build/index.js format --schema prisma/schema.prisma",
+    "db:validate": "node ../../node_modules/prisma/build/index.js validate --schema prisma/schema.prisma",
+    "db:seed": "node src/seed-demo.js",
+    "db:studio": "node ../../node_modules/prisma/build/index.js studio --schema prisma/schema.prisma"
   }
 }

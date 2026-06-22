@@ -1,0 +1,24 @@
+import type { PrismaClient } from "@prisma/client";
+
+export declare const prisma: PrismaClient;
+export declare function createPrismaClient(options?: ConstructorParameters<typeof PrismaClient>[0]): PrismaClient;
+export declare function generateAccessCode(length?: number): string;
+export declare function hashAccessCode(code: string, pepper?: string): string;
+export declare function previewAccessCode(code: string): string;
+export declare function recordModelRun(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function upsertTeacherWithAccessCode(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function createStudentWithAccessCode(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function upsertStudentWithAccessCode(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function disableStudentAccess(studentId: string, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function resetStudentAccessCode(studentId: string, input?: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function updateStudentAccessStatus(studentId: string, input?: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function listTeacherStudents(teacherId: string, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function createLearningTask(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function createClassroomBroadcast(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function createDictationTask(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function createReadingTask(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function recordVoiceInteraction(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function recordQaSession(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function recordVocabularyRecord(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function createAssignmentDraft(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function recordSubmissionGrading(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
