@@ -64,7 +64,7 @@ npm run check:ai
 MINIMAX_API_KEY=
 MINIMAX_GROUP_ID=
 MINIMAX_BASE_URL=https://api.minimaxi.com/v1
-MINIMAX_TEXT_MODEL=MiniMax-M2.7-highspeed
+MINIMAX_TEXT_MODEL=MiniMax-M3
 ```
 
 ## GitHub

@@ -1,47 +1,90 @@
 # 君航 AI 助教
 
-从零重建的 AI 课后辅导系统。旧项目目录 `D:\君航AI助教` 仅作为需求、教材、学生档案和历史记录参考，不作为本仓库的二次开发基础。
+这是一个面向课后辅导场景的多端 AI 助教系统，包含 Web 原型、API 服务、微信小程序、课堂平板和后续公共屏能力。
 
-## 产品分层
+## 多端交付边界
 
-- AI 助教小程序：面向学生、家长、老师的日常学习、记录、批改、反馈与成长档案。
-- Web 模拟与管理端：先用于页面原型、业务调试、老师管理后台和核心流程验证。
-- AI 教学实验室：独立 Web 端，用于 PPT、3D 场景、虚拟人物、投影课堂和多模型协作。
+本项目最终交付以微信小程序、课堂平板和后续公共屏为主。Web 端只作为前端联调、原型验证和自动化测试入口，不作为最终功能边界。
 
-## 当前阶段
+新增教学工作流时，核心逻辑应优先沉淀到 API、服务层、脚本、共享工具或明确的数据契约中。Web 已验证能力进入正式教学链路前，需要确认小程序、课堂平板或公共屏如何复用同一接口、权限规则和可见字段。
 
-第一阶段目标是建立一个可信的学习闭环：
+多端 API 契约见 `docs/14-api-contract.md`，小程序迁移规则见 `docs/44-miniprogram-migration-runbook.md`。
 
-1. 学生基本信息
-2. 背书/听写记录
-3. 英语词汇助手
-4. 知识问答
-5. 作业/试卷生成与批改
-6. 错题本
-7. 学生日/周/月档案
-8. 学习行为日志
+项目踩坑审查与后续防护清单见 `docs/51-project-pitfall-review.md`。继续开发前先按其中“开工前检查”确认范围、风险和验证命令。
+
+当前工作区包含较多未跟踪文件。纳入版本控制前按 `docs/45-git-traceability-runbook.md` 分组检查和提交，不要直接使用 `git add .`。
+
+## Windows 快速命令
+
+PowerShell 下不要直接使用 `npm run ...`。优先使用项目入口：
+
+```powershell
+.\jh.cmd check:api
+.\jh.cmd dev:api
+.\jh.cmd dev
+.\jh.cmd check:encoding
+```
+
+如果终端中文输出异常：
+
+```powershell
+.\scripts\windows-terminal-setup.cmd
+```
+
+## 常用启动
+
+```powershell
+.\jh.cmd db:up
+.\jh.cmd dev:api
+.\jh.cmd dev
+```
+
+Web 默认地址：
+
+```text
+http://127.0.0.1:5173/
+```
+
+API 默认地址：
+
+```text
+http://127.0.0.1:8787/
+```
+
+## 常用检查
+
+```powershell
+.\jh.cmd check:encoding
+.\jh.cmd check:api
+.\jh.cmd check:miniprogram-js
+.\jh.cmd check:services
+.\jh.cmd check:encoding:history
+```
 
 ## 目录
 
-- `docs/`：产品、技术、数据、AI skill 与接入文档。
-- `apps/web/`：网页模拟端，后续用于验证小程序页面和老师后台。
-- `apps/miniprogram/`：小程序端，页面定稿后再进入。
-- `apps/teaching-lab/`：虚拟课堂与投影教学 Web 端。
-- `packages/core/`：通用领域模型、权限、日志与业务规则。
-- `packages/ai/`：模型接入、prompt、AI skill 编排。
-- `packages/db/`：数据库 schema、迁移与 seed。
+- `apps/web/`：Web 原型和教师端/学生端/课堂端模拟界面。
+- `apps/api/`：本地 API 服务。
+- `apps/miniprogram/`：微信小程序端。
+- `packages/core/`：通用领域模型、演示数据和编码守卫。
+- `packages/ai/`：AI 服务接入、OCR、演示响应。
+- `packages/db/`：Prisma schema、数据库客户端、迁移与 seed。
+- `packages/services/`：业务服务层。
+- `scripts/`：本地检查、导出、编码扫描、环境包装脚本。
+- `docs/`：产品、技术、生成规则、迁移与运维文档。
 
-## 数据库
+## 编码防护
 
-第一版选择 PostgreSQL + Prisma。schema 位于 `packages/db/prisma/schema.prisma`，数据库决策记录见 `docs/10-database-decision.md`。
+项目已接入乱码检查与输入输出守卫。修改中文文案、提示词、API 输出、生成内容或历史导出后，必须运行：
 
-## 外部服务
+```powershell
+.\jh.cmd check:encoding
+```
 
-计划重新接入：
+涉及历史导出或备份：
 
-- 飞书：通知、表格/多维表格、群机器人、家长/老师消息。
-- DeepSeek：文本推理、题目生成、讲解、档案分析等。
-- MiniMax：语音、虚拟人物、对话和多媒体能力。
-- GitHub：代码托管、分支、PR 与版本管理。
+```powershell
+.\jh.cmd check:encoding:history
+```
 
-API Key 不写入仓库，统一放入本地 `.env`。
+更多项目级规则见 `AGENTS.md`。
