@@ -1,0 +1,179 @@
+{
+  "purpose": "君航 AI 助教宣传演示测试数据。仅用于小程序演示、视频录制和现场体验，不使用真实学生隐私。",
+  "students": [
+    {
+      "id": "demo-new4-a",
+      "displayName": "新四测试生A",
+      "grade": "新四年级",
+      "currentGrade": "三年级升四年级",
+      "school": "测试学校",
+      "guardianPhone": "13800000001",
+      "accessCode": "A40001",
+      "textbookVersion": "人教版",
+      "className": "暑期体验A班",
+      "mastery": {
+        "语文": 68,
+        "数学": 62,
+        "英语": 74
+      },
+      "risks": [
+        "数学应用题读题漏条件",
+        "语文阅读概括不够完整",
+        "英语单词过去式变化不稳定"
+      ],
+      "todayTasks": [
+        {
+          "subject": "数学",
+          "title": "应用题数量关系巩固",
+          "minutes": 18,
+          "status": "待完成",
+          "source": "老师发布"
+        },
+        {
+          "subject": "英语",
+          "title": "carry / bright 词形变化",
+          "minutes": 12,
+          "status": "进行中",
+          "source": "错题复练"
+        }
+      ],
+      "qaDemo": {
+        "subject": "数学",
+        "question": "应用题里为什么要先找总量？",
+        "answerSummary": "先判断题目问的是总量、部分量还是每份量，再决定用加减乘除。"
+      },
+      "submissionDemo": {
+        "kind": "作业批改",
+        "subject": "数学",
+        "questionRange": "1-4题",
+        "status": "已提交，等待老师复核"
+      },
+      "profileFeedback": "本次体验中，孩子愿意表达思路，但应用题审题容易漏掉条件。建议暑期先做数量关系和同类题复练。"
+    },
+    {
+      "id": "demo-new5-b",
+      "displayName": "新五测试生B",
+      "grade": "新五年级",
+      "currentGrade": "四年级升五年级",
+      "school": "测试学校",
+      "guardianPhone": "13800000002",
+      "accessCode": "B50001",
+      "textbookVersion": "人教版",
+      "className": "暑期体验A班",
+      "mastery": {
+        "语文": 72,
+        "数学": 66,
+        "英语": 70
+      },
+      "risks": [
+        "小数计算步骤不稳定",
+        "阅读题找依据句能力弱",
+        "英语一般过去时容易漏写变化"
+      ],
+      "todayTasks": [
+        {
+          "subject": "语文",
+          "title": "阅读概括与依据句训练",
+          "minutes": 20,
+          "status": "待提交",
+          "source": "老师发布"
+        },
+        {
+          "subject": "数学",
+          "title": "小数计算订正复练",
+          "minutes": 15,
+          "status": "待完成",
+          "source": "错题复练"
+        }
+      ],
+      "qaDemo": {
+        "subject": "语文",
+        "question": "阅读题为什么不能只写自己的想法？",
+        "answerSummary": "阅读题要先回到原文找依据，再用自己的话概括，不能脱离文章。"
+      },
+      "submissionDemo": {
+        "kind": "小测批改",
+        "subject": "语文",
+        "questionRange": "阅读1-3题",
+        "status": "AI识别中，等待老师查看"
+      },
+      "profileFeedback": "孩子基础较稳，但阅读回答容易缺少原文依据。建议暑期重点训练概括、依据句和规范表达。"
+    },
+    {
+      "id": "demo-new6-c",
+      "displayName": "新六测试生C",
+      "grade": "新六年级",
+      "currentGrade": "五年级升六年级",
+      "school": "测试学校",
+      "guardianPhone": "13800000003",
+      "accessCode": "C60001",
+      "textbookVersion": "人教版",
+      "className": "暑期体验A班",
+      "mastery": {
+        "语文": 70,
+        "数学": 61,
+        "英语": 69
+      },
+      "risks": [
+        "分数应用题建模不稳定",
+        "作文片段表达不够具体",
+        "英语句型转换容易丢助动词"
+      ],
+      "todayTasks": [
+        {
+          "subject": "数学",
+          "title": "分数应用题基础建模",
+          "minutes": 20,
+          "status": "待完成",
+          "source": "老师发布"
+        },
+        {
+          "subject": "英语",
+          "title": "一般过去时句型转换",
+          "minutes": 15,
+          "status": "待提交",
+          "source": "AI建议"
+        }
+      ],
+      "qaDemo": {
+        "subject": "英语",
+        "question": "一般过去时疑问句为什么要用 did？",
+        "answerSummary": "did 帮助句子变成过去时疑问句，后面的动词要恢复原形。"
+      },
+      "submissionDemo": {
+        "kind": "试卷批改",
+        "subject": "数学",
+        "questionRange": "应用题1-3题",
+        "status": "老师已反馈"
+      },
+      "profileFeedback": "孩子能跟随讲解，但独立建模时容易找不到等量关系。暑期建议重点训练分数、百分数和比的衔接题。"
+    }
+  ],
+  "teacherDemo": {
+    "displayName": "测试教师",
+    "phone": "13900000000",
+    "teacherCode": "T90001",
+    "visibleDemoOnly": [
+      "教师工作台概览",
+      "学生与权限测试数据",
+      "今日任务生成测试流程",
+      "拍照批改测试记录",
+      "批改复核测试记录"
+    ],
+    "hiddenInPublicDemo": [
+      "真实学生名单",
+      "真实家长电话",
+      "资料上下文内部内容",
+      "生成策略和提示词",
+      "模型供应商和 API 配置",
+      "后台日志"
+    ]
+  },
+  "publicScreenEvents": [
+    "数学：应用题练习已进入老师复核。",
+    "英语：词汇订正任务已同步学生端。",
+    "语文：阅读概括小测已完成 AI 初筛。",
+    "课堂：一条 AI 问答记录已归档。",
+    "系统：阶段反馈等待老师确认发布。"
+  ]
+}

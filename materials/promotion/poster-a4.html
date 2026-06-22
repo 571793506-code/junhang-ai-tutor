@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>君航 AI 助教宣传海报</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      color: #172033;
+      background: #edf5f8;
+    }
+    .poster {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto;
+      background: linear-gradient(180deg, #f8fcff 0%, #ffffff 42%, #f3faf8 100%);
+      border: 1px solid #d2e0ea;
+      padding: 18mm;
+      position: relative;
+      overflow: hidden;
+    }
+    .badge {
+      display: inline-block;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: #e7f5f7;
+      color: #176c7c;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    h1 {
+      margin: 16px 0 10px;
+      font-size: 42px;
+      line-height: 1.15;
+      color: #0d3958;
+      letter-spacing: 0;
+    }
+    .subtitle {
+      font-size: 22px;
+      color: #2f596e;
+      line-height: 1.5;
+      margin-bottom: 22px;
+      font-weight: 700;
+    }
+    .lead {
+      padding: 14px 16px;
+      background: #ffffff;
+      border: 1px solid #d8e7ef;
+      border-radius: 8px;
+      font-size: 17px;
+      line-height: 1.7;
+      color: #44586b;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 20px;
+    }
+    .card {
+      min-height: 92px;
+      padding: 14px;
+      border-radius: 8px;
+      background: #ffffff;
+      border: 1px solid #d7e5ee;
+    }
+    .card-title {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 18px;
+      font-weight: 700;
+      color: #0f3d5e;
+    }
+    .card-text {
+      font-size: 14px;
+      line-height: 1.6;
+      color: #566a7d;
+    }
+    .section-title {
+      margin: 24px 0 12px;
+      font-size: 22px;
+      font-weight: 800;
+      color: #0f3d5e;
+    }
+    .items {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    .item {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #f5fafc;
+      border: 1px solid #dbe9f0;
+    }
+    .bottom {
+      display: grid;
+      grid-template-columns: 1fr 46mm;
+      gap: 16px;
+      align-items: center;
+      margin-top: 24px;
+      padding-top: 18px;
+      border-top: 1px solid #d6e3ec;
+    }
+    .qr {
+      width: 46mm;
+      height: 46mm;
+      border: 2px solid #dce8ef;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-size: 14px;
+      color: #5e7888;
+      background: #ffffff;
+      overflow: hidden;
+    }
+    .qr img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    .cta {
+      font-size: 23px;
+      line-height: 1.4;
+      font-weight: 800;
+      color: #0f3d5e;
+    }
+    .note {
+      margin-top: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #627487;
+    }
+    @media print {
+      body { padding: 0; background: #fff; }
+      .poster { border: 0; margin: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="poster">
+    <span class="badge">期末后开放预约体验</span>
+    <h1>君航 AI 助教<br />3 天学习诊断体验</h1>
+    <div class="subtitle">新四 / 新五 / 新六限额预约</div>
+    <div class="lead">
+      不是普通试听课。通过学生端、课堂平板和电视动态屏，完整体验“老师发布任务、学生提交、AI 辅助分析、老师复核、学习档案反馈”的闭环。
+    </div>
+
+    <section class="grid">
+      <div class="card">
+        <span class="card-title">学生端</span>
+        <span class="card-text">今日任务、AI 问答、英语词汇、拍照提交、学生档案。</span>
+      </div>
+      <div class="card">
+        <span class="card-title">课堂端</span>
+        <span class="card-text">平板互动、头像确认、听写播报、课文跟读。</span>
+      </div>
+      <div class="card">
+        <span class="card-title">大屏端</span>
+        <span class="card-text">匿名展示学习流程，不公开排名、分数和个人错题。</span>
+      </div>
+      <div class="card">
+        <span class="card-title">教师把关</span>
+        <span class="card-text">AI 初步分析，老师复核后再进入学生档案。</span>
+      </div>
+    </section>
+
+    <div class="section-title">体验内容</div>
+    <section class="items">
+      <div class="item">建立学生学习档案</div>
+      <div class="item">作业/小测/听写拍照提交</div>
+      <div class="item">AI 问答做思路引导</div>
+      <div class="item">英语词汇和基础检查</div>
+      <div class="item">统一小测与个性化反馈</div>
+      <div class="item">生成 3 天学习诊断建议</div>
+    </section>
+
+    <section class="bottom">
+      <div>
+        <div class="cta">扫码领取报名表与小程序演示视频</div>
+        <div class="note">期末前只做预约和说明，不打乱复习节奏。本体验用于学习诊断、错题分析和暑期班适配，不承诺短期提分或排名变化。</div>
+      </div>
+      <div class="qr"><img src="assets/wechat-qr-cropped.jpeg" alt="微信二维码" /></div>
+    </section>
+  </main>
+</body>
+</html>

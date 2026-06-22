@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>微信扫码预约桌牌</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      background: #eef5f8;
+      color: #172033;
+    }
+    .card {
+      width: 148mm;
+      height: 210mm;
+      margin: 0 auto;
+      padding: 18mm;
+      background: #ffffff;
+      border: 1px solid #d4e1ec;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .kicker {
+      font-size: 16px;
+      color: #2c7a8c;
+      font-weight: 700;
+    }
+    h1 {
+      margin: 10px 0 8px;
+      font-size: 34px;
+      line-height: 1.15;
+      color: #0f3d5e;
+    }
+    .subtitle {
+      font-size: 17px;
+      line-height: 1.6;
+      color: #4e6072;
+    }
+    .qr {
+      width: 78mm;
+      height: 78mm;
+      margin: 18mm auto 8mm;
+      border: 3px solid #e3edf3;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: #5d7787;
+      font-size: 18px;
+      line-height: 1.5;
+      background: #ffffff;
+      overflow: hidden;
+    }
+    .qr img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    .steps {
+      display: grid;
+      gap: 10px;
+      margin-top: 8mm;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    .step {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #f3f8fb;
+      border: 1px solid #d6e5ed;
+    }
+    .footer {
+      font-size: 13px;
+      line-height: 1.7;
+      color: #657789;
+      border-top: 1px solid #dce6ee;
+      padding-top: 10px;
+    }
+    @media print {
+      body { padding: 0; background: #fff; }
+      .card { border: 0; margin: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <section>
+      <div class="kicker">君航 AI 助教</div>
+      <h1>扫码预约<br />3 天学习诊断体验</h1>
+      <div class="subtitle">新四 / 新五 / 新六限额预约。期末前只做预约和说明，不打乱复习节奏。</div>
+      <div class="qr"><img src="assets/wechat-qr-cropped.jpeg" alt="微信二维码" /></div>
+      <div class="steps">
+        <div class="step">1. 扫码添加微信</div>
+        <div class="step">2. 领取报名表与小程序演示视频</div>
+        <div class="step">3. 预约期末后 3 天体验时间</div>
+      </div>
+    </section>
+    <footer class="footer">
+      AI 辅助分析，老师复核把关。公共屏不公开排名、个人分数和个人错题。
+    </footer>
+  </main>
+</body>
+</html>

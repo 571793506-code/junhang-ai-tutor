@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>君航 AI 助教 3 天学习诊断体验预约表</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      color: #172033;
+      background: #f3f7fb;
+    }
+    .sheet {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto;
+      padding: 20mm;
+      background: #ffffff;
+      border: 1px solid #d8e2ef;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.25;
+      color: #0f3d5e;
+    }
+    .subtitle {
+      margin: 10px 0 22px;
+      font-size: 15px;
+      color: #506174;
+    }
+    .notice {
+      margin-bottom: 20px;
+      padding: 12px 14px;
+      border: 1px solid #cfe3f2;
+      background: #f3faff;
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px 16px;
+    }
+    .field {
+      min-height: 42px;
+      border-bottom: 1px solid #aab9c8;
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      padding-bottom: 7px;
+      font-size: 14px;
+    }
+    .field strong {
+      flex: 0 0 auto;
+      color: #24384d;
+    }
+    .wide { grid-column: 1 / -1; }
+    .section {
+      margin-top: 24px;
+    }
+    .section-title {
+      margin-bottom: 10px;
+      font-size: 17px;
+      font-weight: 700;
+      color: #0f3d5e;
+    }
+    .lines {
+      display: grid;
+      gap: 14px;
+    }
+    .line {
+      min-height: 42px;
+      border-bottom: 1px solid #aab9c8;
+      font-size: 14px;
+      padding-top: 4px;
+    }
+    .checks {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      font-size: 14px;
+    }
+    .check {
+      min-height: 36px;
+      border: 1px solid #cbd8e5;
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+    .footer {
+      margin-top: 26px;
+      padding-top: 14px;
+      border-top: 1px solid #d8e2ef;
+      font-size: 12px;
+      line-height: 1.7;
+      color: #5d6d7f;
+    }
+    @media print {
+      body { padding: 0; background: #fff; }
+      .sheet { border: 0; margin: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <h1>君航 AI 助教<br />3 天学习诊断体验预约表</h1>
+    <p class="subtitle">对象：暑假后新四 / 新五 / 新六学生。每个年级限额预约。</p>
+
+    <div class="notice">
+      本体验用于学习诊断、错题分析和暑期班适配，不承诺短期提分或排名变化。体验过程中会使用学生端记录任务、提交、问答和反馈，学生信息仅用于本次沟通与教学安排。
+    </div>
+
+    <section class="section">
+      <div class="section-title">一、学生与家长信息</div>
+      <div class="grid">
+        <div class="field"><strong>学生姓名：</strong></div>
+        <div class="field"><strong>当前年级：</strong></div>
+        <div class="field"><strong>暑假后年级：</strong> 新四 / 新五 / 新六</div>
+        <div class="field"><strong>就读学校：</strong></div>
+        <div class="field"><strong>家长姓名：</strong></div>
+        <div class="field"><strong>联系电话：</strong></div>
+        <div class="field"><strong>微信号：</strong></div>
+        <div class="field"><strong>可体验时间：</strong></div>
+        <div class="field wide"><strong>暑假可上课时间：</strong></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">二、学习情况</div>
+      <div class="lines">
+        <div class="line">语文主要问题：</div>
+        <div class="line">数学主要问题：</div>
+        <div class="line">英语主要问题：</div>
+        <div class="line">家长最希望解决的问题：</div>
+        <div class="line">孩子平时作业/听写/背书情况：</div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">三、预约意向</div>
+      <div class="checks">
+        <div class="check">愿意参加 3 天体验</div>
+        <div class="check">先看演示视频</div>
+        <div class="check">了解暑期加强班</div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">四、现场记录</div>
+      <div class="grid">
+        <div class="field"><strong>微信已加：</strong> 是 / 否</div>
+        <div class="field"><strong>意向等级：</strong> A / B / C</div>
+        <div class="field wide"><strong>备注：</strong></div>
+      </div>
+    </section>
+
+    <div class="footer">
+      说明：AI 辅助分析，老师复核把关。公共屏只展示整体学习过程，不公开学生排名、个人分数和个人错题。
+    </div>
+  </main>
+</body>
+</html>
