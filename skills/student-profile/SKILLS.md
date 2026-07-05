@@ -11,7 +11,7 @@
 ## 核心原则
 
 - 学生档案草稿只给教师编辑和复核，教师确认前不对学生或家长发布。
-- 当前核心展示方向是周档案和月度综合长期成长档案；期中、期末总结后续按教师确认 PDF 发送给家长，不作为首期页面 Tab 扩展。
+- 当前核心展示方向是周档案和月度综合长期成长档案；周/月内容经教师复核后发布到学生端，期中/期末只在教师端生成 PDF 并由老师微信私聊人工发送给家长。
 - 档案必须保留来源意识：任务、批改、问答、课堂记录、老师备注要能区分。
 - 低置信 OCR、未确认分数、未复核错题和 provisional 结果不能写入最终档案。
 - 家长可见内容要温和、具体、可行动，避免内部术语和模型信息。
@@ -21,7 +21,9 @@
 ## 当前项目可参考位置
 
 - `apps/api/src/student-growth-profile.js`：`profileEvidencePack`、周/月 `publishedView`、`teacherReview` 和角色过滤。
+- `apps/api/src/student-term-report.js`：期中/期末阶段报告草稿、教师专用 PDF HTML 渲染和角色过滤。
 - `apps/api/src/server.js`：`/api/students/:studentId/profile/draft`、`/publish`、`/aggregate` 和 `/profile`。
+- `apps/api/src/server.js`：`/api/students/:studentId/term-report/draft`、`/pdf`、`/mark-sent` 和 `/term-reports`。
 - `packages/ai/src/runtime.js`：学生档案草稿 JSON 输出字段。
 - `apps/web/src/main.tsx`：教师端草稿编辑和发布交互，仅作为原型参考。
 - `docs/14-api-contract.md`：学生档案发布和归档前置条件。
@@ -37,6 +39,17 @@
 - `publishedView`：学生/家长可见摘要，包含 `overview`、`subjectOverview`、`focusSubjects`、`correctionLoop`、`stableGrowth`、`tutoringFocus`、`parentNextSteps`、`timelinePreview`。
 - `teacherReview`：教师复核材料，包含样本不足说明、待确认来源、内部风险和发布清单。
 - `profileEvidencePack`：证据包，包含任务、已复核批改、错题、问答、课堂互动、阶段报告、行为记录和 `blockedEvidence`。
+
+期中/期末阶段报告复用 `StudentReport.metadata.termReport`：
+
+- `reportType`：`midterm` 或 `final`。
+- `visibility`：固定为 `teacher_pdf_only`，PDF 或 HTML 资产只供教师端下载保存。
+- `status`：`draft`、`pdf_ready` 或 `sent_manually`。
+- `periodLabel`：教师填写的阶段名称。
+- `teacherEditedText`：教师确认后的报告正文。
+- `pdfUrl`, `pdfTitle`, `pdfAssetId`：教师端保存资产信息。
+- `wechatMessage`：教师复制后微信私聊发送给家长的话术。
+- `sentManuallyAt`, `sentByTeacherId`：老师人工发送后的状态记录。
 
 `publishedView` 中每条观察尽量保留：
 
@@ -75,6 +88,15 @@
 
 AI 输出必须是严格 JSON 草稿。可以额外生成教师可编辑的纯文本，但纯文本只是发布正文兜底，不替代结构化 `publishedView` 和 `teacherReview`。
 
+期中/期末 PDF 阶段报告的教师端流程：
+
+1. 教师选择学生、报告类型和阶段名称，生成阶段报告草稿。
+2. 教师编辑或确认 `teacherEditedText`。
+3. 教师点击保存并生成 PDF，下载保存报告。
+4. 教师通过微信私聊人工发送给家长。
+5. 教师在系统内标记“已人工发送”。
+6. 学生端只显示状态文案“老师已发送阶段报告给家长”，不展示报告正文、PDF 链接或下载入口。
+
 ## 禁止项
 
 - 不自动发布到学生或家长。
@@ -82,11 +104,13 @@ AI 输出必须是严格 JSON 草稿。可以额外生成教师可编辑的纯�
 - 不迁移完整小程序档案页面作为首期目标。
 - 不把学生隐私、家长电话、登录码或内部审计日志暴露到群聊。
 - 不向学生/家长返回 `teacherReview`、`profileEvidencePack`、供应商、模型名、prompt、debug、raw 或内部路由。
-- 不把期中/期末 PDF 交付规则混成周/月页面展示逻辑。
+- 不把期中/期末 PDF 交付规则混成周/月页面展示逻辑；期中/期末不能直接发布阶段报告正文到学生端。
+- 不接入微信自动外发；当前只记录老师人工发送后的状态。
 
 ## 验证
 
 - 修改档案 API 时运行 `cmd /c npm.cmd run check --workspace apps/api`。
+- 修改阶段报告 API 时运行 `node --test apps/api/src/student-term-report.test.mjs`。
 - 修改 Web 档案展示时运行 `cmd /c npm.cmd run typecheck --workspace apps/web`。
 - 修改档案中文文案或提示词时运行 `cmd /c npm.cmd run check:encoding`。
 - 涉及批改归档来源时确认 `needsTeacherReview`、`archiveEligible` 和教师确认分数逻辑未被绕过。

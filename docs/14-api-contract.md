@@ -48,6 +48,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 | 批改工作台 | `GET /api/grading/workbench`、`GET /api/grading/workbench/:submissionId`、`PATCH /api/grading/workbench/:submissionId/questions/:questionId` | 教师 Web/小程序读取同一套页面、逐题、标注、置信度和复核状态，并可逐题修正 | 只给教师端使用；学生/家长端不展示未确认逐题批改；逐题修正后仍需教师确认归档 | `check --workspace apps/api`、`typecheck --workspace apps/web` |
 | 批改复核归档 | `POST /api/review/submissions/:submissionId/mark-reviewed`、`POST /api/grading/workbench/:submissionId/archive` | 教师 Web/小程序确认分数、备注后归档 | 低置信、需教师复核或仅有 provisionalScore 的结果，必须提交教师确认分数；否则不入档、不创建错题记录 | `check --workspace apps/api`、`typecheck --workspace apps/web`、`check:miniprogram-js` |
 | 学生长期成长档案 | `POST /api/students/:studentId/profile/draft`、`POST /api/students/:studentId/profile/publish`、`POST /api/students/:studentId/profile/aggregate`、`GET /api/students/:studentId/profile` | 教师端生成周档案或月度综合档案草稿；学生/家长端只读取教师发布后的结构化摘要；Web 仅作联调原型，小程序复用同一契约 | 教师可见 `teacherReview` 和 `profileEvidencePack`；学生/家长不可见证据包、复核提示、供应商、模型、prompt、debug 或未复核来源 | `check --workspace apps/api`、`typecheck --workspace apps/web`、`check:encoding` |
+| 期中/期末阶段报告 PDF | `POST /api/students/:studentId/term-report/draft`、`POST /api/students/:studentId/term-report/:reportId/pdf`、`POST /api/students/:studentId/term-report/:reportId/mark-sent`、`GET /api/students/:studentId/term-reports` | 教师端生成报告草稿、编辑正文、保存 PDF 或 HTML 资产，下载后通过微信私聊人工发送给家长；不接入微信自动外发 | 教师可见 PDF 链接、微信话术和草稿；学生/家长端不显示报告正文、PDF 链接或草稿，只有老师标记已人工发送后显示“老师已发送阶段报告给家长” | `node --test apps/api/src/student-term-report.test.mjs`、`check --workspace apps/api`、`typecheck --workspace apps/web`、`check:encoding` |
 | 资料索引摘要 | `GET /api/content/index` | 教师 Web/小程序查看资料上下文状态 | 只展示摘要、资料数、科目、知识点，不返回完整 Markdown chunk | `check:content-context`、`check:teaching-content` |
 | 资料上传转 Markdown | `POST /api/content/markdown-ingestion` | 教师端上传普通教学资料 | 仅教师端可用；拒绝 `.edupdf`；上传路径限制在工作区内 | `check:content-upload-ui`、`check:teaching-content` |
 | 资料索引重建 | `POST /api/content/index/rebuild` | 教师端触发重建，组卷服务读取结果 | 仅教师端可用；返回索引摘要，不泄露内部上下文 | `check:content-context`、`check:teaching-content` |
@@ -100,6 +101,30 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 教师角色可见 `teacherReview` 和 `profileEvidencePack`，用于复核来源、样本不足说明和发布清单。
   - 学生角色只返回已过滤快照：保留 `profileType`, `period`, `publishedView`, `weeklyScore`, `mastery`, `strengths`, `risks`, `tone`, `timeline`, `narrative` 等可见字段；移除 `teacherReview`, `profileEvidencePack`, `provider`, `model`, `prompt`, `debug`, `raw` 等内部字段。
 
+### 期中/期末阶段报告 PDF
+
+- `POST /api/students/:studentId/term-report/draft`
+  - 教师端生成期中或期末阶段报告草稿。
+  - 请求字段：`reportType` 可选 `midterm` 或 `final`；`periodLabel` 为教师填写的阶段名称，例如 `2026春季期中`。
+  - 报告复用 `StudentReport`，阶段交付状态写入 `metadata.termReport`，不新增首期数据库表。
+  - 初始状态为 `draft`，可见性为 `teacher_pdf_only`，只返回给教师。
+
+- `POST /api/students/:studentId/term-report/:reportId/pdf`
+  - 教师端提交最终确认正文 `teacherText`，服务端生成阶段报告 HTML，并优先渲染 PDF。
+  - 返回 `report` 和 `asset`；`asset.metadata.visibility=teacher_pdf_only`，用于教师下载保存。
+  - 若 PDF 运行时不可用，保留同内容 HTML 资产，状态仍按教师端保存流程返回，便于后续补跑或人工处理。
+  - PDF/HTML 资产不进入学生端正文展示，不作为小程序平台自动外发内容。
+
+- `POST /api/students/:studentId/term-report/:reportId/mark-sent`
+  - 教师下载并通过微信私聊人工发送给家长后，手动记录发送状态。
+  - 只有已生成 `pdfUrl` 的报告允许标记；否则返回 `PDF_REQUIRED`。
+  - API 写入 `status=sent_manually`, `sentManuallyAt`, `sentByTeacherId`。
+
+- `GET /api/students/:studentId/term-reports`
+  - 教师角色返回草稿、PDF 状态、PDF 链接、微信话术和教师编辑正文。
+  - 学生角色只返回 `sent_manually` 的阶段报告状态卡；`summary` 固定为“老师已发送阶段报告给家长”，不返回 `teacherEditedText`, `pdfUrl`, `draft`, `wechatMessage`。
+  - 周档案和月度综合长期成长档案仍通过 `profile/draft` 与 `profile/publish` 审核后发布至学生端；期中、期末仅走教师端 PDF 保存和人工微信发送。
+
 结构化快照核心形态：
 
 ```json
@@ -138,7 +163,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 }
 ```
 
-期中、期末或更正式的阶段总结不作为当前页面 Tab 扩展；后续按教师确认后的 PDF 交付给家长查看，仍复用同一证据包和教师复核边界。
+期中、期末或更正式的阶段总结不作为学生端页面正文扩展；按教师确认后的 PDF 交付给家长查看，仍复用同一证据包和教师复核边界。学生端只展示发送状态，不展示阶段报告全文、PDF 链接或下载入口。
 
 ## AI 问答与任务
 
