@@ -19,6 +19,15 @@
   </view>
 
   <view class="card teacher-card">
+    <text class="section-title">教师确认归档</text>
+    <text class="muted">只提交教师确认后的分数和备注。低置信、待复核或人工调整结果仍由服务端决定是否允许归档。</text>
+    <input class="input" type="digit" placeholder="教师确认分数" value="{{reviewScore}}" bindinput="setReviewScore" />
+    <textarea class="textarea review-note" placeholder="复核备注，可填写低置信题号、调整原因或后续练习建议。" value="{{reviewNote}}" bindinput="setReviewNote" />
+    <button class="button warm" loading="{{archiveLoading}}" bindtap="submitArchive">确认归档</button>
+    <text wx:if="{{archiveMessage}}" class="subtitle">{{archiveMessage}}</text>
+  </view>
+
+  <view class="card teacher-card">
     <text class="section-title">图片页</text>
     <block wx:for="{{pages}}" wx:key="id">
       <view class="detail-row">

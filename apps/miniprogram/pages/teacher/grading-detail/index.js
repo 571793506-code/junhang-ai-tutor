@@ -34,11 +34,16 @@ function normalizePage(item, index) {
 
 Page({
   data: {
+    archiveLoading: false,
+    archiveMessage: "",
     loading: false,
     message: "",
     pages: [],
     questions: [],
+    reviewNote: "",
+    reviewScore: "",
     summary: {},
+    submissionId: "",
     workbench: null
   },
   async onLoad(options) {
@@ -49,6 +54,7 @@ Page({
       this.setData({ message: "缺少批改记录 ID。" });
       return;
     }
+    this.setData({ submissionId });
     this.loadWorkbench(submissionId);
   },
   async loadWorkbench(submissionId) {
@@ -72,6 +78,61 @@ Page({
       this.setData({ message: error.message || "批改详情加载失败。" });
     } finally {
       this.setData({ loading: false });
+    }
+  },
+  setReviewScore(event) {
+    this.setData({ reviewScore: event.detail.value || "" });
+  },
+  setReviewNote(event) {
+    this.setData({ reviewNote: event.detail.value || "" });
+  },
+  async submitArchive() {
+    const scoreText = String(this.data.reviewScore || "").trim();
+    if (!scoreText) {
+      this.setData({ archiveMessage: "请先填写教师确认分数，再归档。" });
+      return;
+    }
+    const score = Number(scoreText);
+    if (!Number.isFinite(score)) {
+      this.setData({ archiveMessage: "请先填写教师确认分数，再归档。" });
+      return;
+    }
+    if (!this.data.submissionId) {
+      this.setData({ archiveMessage: "缺少批改记录 ID，无法归档。" });
+      return;
+    }
+    this.setData({ archiveLoading: true, archiveMessage: "" });
+    try {
+      const response = await api.archiveGradingWorkbench(this.data.submissionId, {
+        score,
+        reviewNote: String(this.data.reviewNote || "").trim()
+      });
+      const workbench = response.workbench || null;
+      this.setData({
+        archiveMessage: "已提交教师确认，批改结果已归档。",
+        reviewScore: "",
+        reviewNote: ""
+      });
+      if (workbench) {
+        this.setData({
+          workbench,
+          pages: (workbench.pages || []).map(normalizePage),
+          questions: (workbench.questions || []).map(normalizeQuestion),
+          summary: {
+            title: workbench.title || `${workbench.subject || "批改"} · ${workbench.studentName || "学生"}`,
+            statusText: workbench.needsTeacherReview ? "需要教师确认" : "已归档",
+            scoreText: workbench.score != null ? String(workbench.score) : "待确认",
+            qualityText: workbench.quality && workbench.quality.status ? workbench.quality.status : "待检查",
+            pendingText: `${workbench.pendingQuestionCount || 0}题待确认`
+          }
+        });
+      } else {
+        this.loadWorkbench(this.data.submissionId);
+      }
+    } catch (error) {
+      this.setData({ archiveMessage: error.message || "归档失败，请检查分数和复核状态。" });
+    } finally {
+      this.setData({ archiveLoading: false });
     }
   }
 });

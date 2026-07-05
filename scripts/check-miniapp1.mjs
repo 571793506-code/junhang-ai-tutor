@@ -5,6 +5,7 @@ import vm from "node:vm";
 const root = path.resolve(process.argv[2] || process.env.JH_MINIAPP_TARGET || "C:\\Users\\86188\\WeChatProjects\\miniapp-1");
 const ignoredDirs = new Set(["node_modules", "miniprogram_npm"]);
 const providerNeedles = ["DeepSeek", "MiniMax", "minimax", "deepseek", "gpt", "GPT"];
+const encodingMarkerFixtureFiles = new Set(["utils/encodingGuard.js"]);
 
 function walk(dir, files = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -108,15 +109,39 @@ if (!fs.existsSync(root)) {
     }
   }
 
+  const gradingDetailJsPath = path.join(root, "pages/teacher/grading-detail/index.js");
+  const gradingDetailWxmlPath = path.join(root, "pages/teacher/grading-detail/index.wxml");
+  if (fs.existsSync(gradingDetailJsPath) && fs.existsSync(gradingDetailWxmlPath)) {
+    const jsSource = fs.readFileSync(gradingDetailJsPath, "utf8");
+    const wxmlSource = fs.readFileSync(gradingDetailWxmlPath, "utf8");
+    const requiredDetailNeedles = [
+      { source: jsSource, needle: "archiveGradingWorkbench", message: "grading detail page must call service-layer archive API" },
+      { source: jsSource, needle: "submitArchive", message: "grading detail page must expose teacher archive submit handler" },
+      { source: wxmlSource, needle: "bindtap=\"submitArchive\"", message: "grading detail page must provide teacher archive button" },
+      { source: wxmlSource, needle: "bindinput=\"setReviewScore\"", message: "grading detail page must require teacher score input before low-confidence archive" },
+      { source: wxmlSource, needle: "bindinput=\"setReviewNote\"", message: "grading detail page must allow teacher review note input" }
+    ];
+    for (const item of requiredDetailNeedles) {
+      if (!item.source.includes(item.needle)) {
+        failures.push({
+          type: "grading-review",
+          file: item.source === jsSource ? relative(gradingDetailJsPath) : relative(gradingDetailWxmlPath),
+          message: item.message
+        });
+      }
+    }
+  }
+
   for (const file of files) {
+    const fileName = relative(file);
     const source = fs.readFileSync(file, "utf8");
     for (const needle of providerNeedles) {
       if (source.includes(needle)) {
-        failures.push({ type: "provider-leak", file: relative(file), message: `contains ${needle}` });
+        failures.push({ type: "provider-leak", file: fileName, message: `contains ${needle}` });
       }
     }
-    if (/�|锟斤拷|鐨|涓|乱码/.test(source)) {
-      failures.push({ type: "encoding", file: relative(file), message: "contains suspicious mojibake marker" });
+    if (!encodingMarkerFixtureFiles.has(fileName) && /�|锟斤拷|鐨|涓|乱码/.test(source)) {
+      failures.push({ type: "encoding", file: fileName, message: "contains suspicious mojibake marker" });
     }
   }
 

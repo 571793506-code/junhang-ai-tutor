@@ -33,3 +33,7 @@
 .row-body {
   color: #344054;
 }
+
+.review-note {
+  min-height: 150rpx;
+}
