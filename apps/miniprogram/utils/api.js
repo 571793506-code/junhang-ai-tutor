@@ -105,6 +105,9 @@ module.exports = {
   askQuestion(input) {
     return request("/api/ai/qa", { method: "POST", data: input });
   },
+  generateVocabulary(input) {
+    return request("/api/ai/vocabulary", { method: "POST", data: input });
+  },
   bootstrap() {
     return request("/api/bootstrap");
   },
@@ -134,6 +137,27 @@ module.exports = {
   },
   askClassroomVoice(input) {
     return request("/api/classroom/voice-qa", { method: "POST", data: input });
+  },
+  completeTask(taskId, input) {
+    return request(`/api/tasks/${taskId}/complete`, { method: "PATCH", data: input || {} });
+  },
+  getClassroomDevice(deviceId) {
+    return request(`/api/classroom/devices/${deviceId}`);
+  },
+  lockClassroomDevice(deviceId, input) {
+    return request(`/api/classroom/devices/${deviceId}/lock`, { method: "POST", data: input || {} });
+  },
+  publishClassroomBroadcast(input) {
+    return request("/api/classroom/broadcasts", { method: "POST", data: input });
+  },
+  publishDictation(input) {
+    return request("/api/classroom/dictation", { method: "POST", data: input });
+  },
+  publishReading(input) {
+    return request("/api/classroom/reading", { method: "POST", data: input });
+  },
+  unlockClassroomDevice(deviceId, input) {
+    return request(`/api/classroom/devices/${deviceId}/unlock`, { method: "POST", data: input || {} });
   },
   registerStudent(input) {
     return request("/api/students", { method: "POST", data: input });

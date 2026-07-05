@@ -89,16 +89,20 @@ if (!fs.existsSync(root)) {
   if (fs.existsSync(apiUtilPath)) {
     const source = fs.readFileSync(apiUtilPath, "utf8");
     const requiredApiNeedles = [
+      "/api/ai/vocabulary",
+      "/api/classroom/devices/",
       "/api/grading/workbench",
+      "/api/students/${studentId}/profile/draft",
       "listGradingWorkbenches",
-      "archiveGradingWorkbench"
+      "archiveGradingWorkbench",
+      "draftStudentProfile"
     ];
     for (const needle of requiredApiNeedles) {
       if (!source.includes(needle)) {
         failures.push({
-          type: "grading-contract",
+          type: "api-contract",
           file: relative(apiUtilPath),
-          message: `missing grading workbench API wrapper: ${needle}`
+          message: `missing miniprogram API wrapper: ${needle}`
         });
       }
     }
