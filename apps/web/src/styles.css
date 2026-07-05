@@ -4651,13 +4651,47 @@ button:disabled {
 
   .sidebar {
     position: relative;
+    width: 100%;
+    min-width: 0;
+    max-width: 100vw;
     height: auto;
+    overflow: hidden;
     border-right: 0;
     border-bottom: 1px solid #dbe4ea;
   }
 
+  .main {
+    width: 100%;
+    min-width: 0;
+    max-width: 100vw;
+  }
+
   .nav-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tv-display {
+    min-height: auto;
+    overflow: visible;
+  }
+
+  .tv-display-head {
+    display: grid;
+    align-items: start;
+  }
+
+  .tv-head-right {
+    width: 100%;
+    min-width: 0;
+    justify-items: stretch;
+  }
+
+  .tv-live-status {
+    justify-content: center;
+  }
+
+  .tv-trust-strip {
+    width: 100%;
   }
 
   .summary-band,
@@ -4740,6 +4774,29 @@ button:disabled {
     padding: 14px;
   }
 
+  .sidebar {
+    padding: 14px;
+  }
+
+  .brand {
+    margin-bottom: 12px;
+  }
+
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+  }
+
+  .role-switch {
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+
+  .role-switch button {
+    min-height: 36px;
+    padding: 0 8px;
+  }
+
   .topbar,
   .assignment-head,
   .access-card-head,
@@ -4762,7 +4819,6 @@ button:disabled {
     justify-content: flex-start;
   }
 
-  .nav-list,
   .assignment-grid,
   .grading-columns,
   .grading-workbench,
@@ -4782,11 +4838,179 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .nav-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
   .nav-item {
+    width: 100%;
+    min-width: 0;
     min-height: 48px;
+    padding: 0 10px;
   }
 
   .topbar h1 {
     font-size: 24px;
+  }
+
+  .topbar-status-stack {
+    max-width: 100%;
+    justify-items: stretch;
+  }
+
+  .api-sync-status {
+    justify-content: center;
+  }
+
+  .tv-display {
+    padding: 12px;
+  }
+
+  .tv-display-head h2 {
+    font-size: 23px;
+  }
+
+  .tv-running-note-row,
+  .tv-trust-strip,
+  .tv-flow-node-row {
+    grid-template-columns: 1fr;
+  }
+
+  .tv-trust-strip span {
+    min-height: 42px;
+    text-align: center;
+  }
+
+  .tv-ai-card {
+    gap: 18px;
+  }
+
+  .tv-orbit-stage {
+    min-height: 220px;
+    overflow: hidden;
+  }
+
+  .tv-ai-orbit {
+    width: 176px;
+    height: 176px;
+  }
+
+  .tv-ai-orbit::before {
+    inset: -28px;
+  }
+
+  .tv-ai-orbit::after {
+    inset: -48px;
+  }
+
+  .tv-ai-orbit strong {
+    font-size: 19px;
+  }
+
+  .tv-subject-head {
+    display: grid;
+    justify-items: start;
+  }
+
+  .tv-heat-row div {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .tv-heat-row i {
+    height: 16px;
+  }
+
+  .classroom-public-screen {
+    min-height: auto;
+    padding: 14px;
+    overflow: hidden;
+  }
+
+  .classroom-public-head {
+    display: grid;
+    align-items: start;
+  }
+
+  .classroom-public-head-actions {
+    justify-items: start;
+  }
+
+  .tablet-bind-row,
+  .classroom-action-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tablet-bind-row > span {
+    overflow-wrap: anywhere;
+  }
+
+  .tablet-stage-v1 {
+    display: grid;
+    gap: 12px;
+    min-height: auto;
+    margin-top: 14px;
+    padding: 0;
+  }
+
+  .tablet-drag-guide {
+    position: relative;
+    left: auto;
+    top: auto;
+    min-width: 0;
+    transform: none;
+  }
+
+  .tablet-avatar-rail,
+  .tablet-avatar-rail.top,
+  .tablet-avatar-rail.bottom,
+  .tablet-avatar-rail.left,
+  .tablet-avatar-rail.right {
+    position: relative;
+    inset: auto;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch;
+  }
+
+  .tablet-avatar-rail::before {
+    display: none;
+  }
+
+  .tablet-avatar-card {
+    width: 100%;
+    min-height: 76px;
+  }
+
+  .learning-halo-drop {
+    position: relative;
+    inset: auto;
+    min-height: 260px;
+  }
+
+  .learning-halo {
+    width: min(260px, calc(100vw - 84px));
+    height: min(260px, calc(100vw - 84px));
+  }
+
+  .learning-halo::before {
+    inset: 30px;
+  }
+
+  .learning-halo::after {
+    inset: 58px;
+  }
+
+  .halo-zone-label {
+    top: 22px;
+  }
+
+  .halo-waiting h3,
+  .halo-confirmed h3 {
+    font-size: 22px;
   }
 }
