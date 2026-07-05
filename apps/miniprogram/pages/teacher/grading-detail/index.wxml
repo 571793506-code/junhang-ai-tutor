@@ -41,11 +41,27 @@
 
   <view class="card teacher-card">
     <text class="section-title">逐题结果</text>
+    <view class="question-review-box">
+      <text class="field-title">{{questionReview.title}}</text>
+      <text class="muted">选择题目后填写老师确认得分和必要修正。提交后服务端会重新标记为待教师确认，不自动归档。</text>
+      <picker mode="selector" range="{{questionStatusNames}}" value="{{questionStatusIndex}}" bindchange="setQuestionStatus">
+        <view class="picker-field">题目状态：{{questionStatusNames[questionStatusIndex]}}</view>
+      </picker>
+      <view class="review-score-grid">
+        <input class="input" type="digit" placeholder="确认得分" value="{{questionReview.score}}" data-field="score" bindinput="setQuestionReviewField" />
+        <input class="input" type="digit" placeholder="该题满分" value="{{questionReview.maxScore}}" data-field="maxScore" bindinput="setQuestionReviewField" />
+      </view>
+      <textarea class="textarea review-note" placeholder="学生作答修正，可不填" value="{{questionReview.studentAnswer}}" data-field="studentAnswer" bindinput="setQuestionReviewField" />
+      <textarea class="textarea review-note" placeholder="参考答案修正，可不填" value="{{questionReview.correctAnswer}}" data-field="correctAnswer" bindinput="setQuestionReviewField" />
+      <textarea class="textarea review-note" placeholder="该题复核备注，可填写扣分原因或后续练习建议。" value="{{questionReview.teacherNote}}" data-field="teacherNote" bindinput="setQuestionReviewField" />
+      <button class="button secondary" loading="{{questionReviewSubmitting}}" bindtap="submitQuestionReview">提交该题修正</button>
+      <text wx:if="{{questionReviewMessage}}" class="subtitle">{{questionReviewMessage}}</text>
+    </view>
     <block wx:for="{{questions}}" wx:key="id">
       <view class="question-row">
         <view class="row between">
           <text class="row-title">第 {{item.questionNo}} 题</text>
-          <text class="pill">{{item.status}}</text>
+          <text class="pill">{{item.statusLabel}}</text>
         </view>
         <text class="row-meta">得分：{{item.scoreText}} · 置信度：{{item.confidenceText}}</text>
         <text class="field-title">学生作答</text>
@@ -57,6 +73,7 @@
         <text class="field-title">解析</text>
         <text class="row-body">{{item.explanation}}</text>
         <text class="row-meta">知识点：{{item.knowledgePoint}}</text>
+        <button class="small-button review-button" data-id="{{item.id}}" bindtap="startQuestionReview">复核此题</button>
       </view>
     </block>
     <text wx:if="{{!questions.length && !loading}}" class="muted">暂无逐题结果。</text>

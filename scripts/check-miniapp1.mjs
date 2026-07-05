@@ -95,6 +95,7 @@ if (!fs.existsSync(root)) {
       "/api/grading/workbench",
       "/api/students/${studentId}/profile/draft",
       "listGradingWorkbenches",
+      "updateGradingWorkbenchQuestion",
       "archiveGradingWorkbench",
       "draftStudentProfile"
     ];
@@ -119,7 +120,11 @@ if (!fs.existsSync(root)) {
       { source: jsSource, needle: "submitArchive", message: "grading detail page must expose teacher archive submit handler" },
       { source: wxmlSource, needle: "bindtap=\"submitArchive\"", message: "grading detail page must provide teacher archive button" },
       { source: wxmlSource, needle: "bindinput=\"setReviewScore\"", message: "grading detail page must require teacher score input before low-confidence archive" },
-      { source: wxmlSource, needle: "bindinput=\"setReviewNote\"", message: "grading detail page must allow teacher review note input" }
+      { source: wxmlSource, needle: "bindinput=\"setReviewNote\"", message: "grading detail page must allow teacher review note input" },
+      { source: jsSource, needle: "updateGradingWorkbenchQuestion", message: "grading detail page must call service-layer question review API" },
+      { source: jsSource, needle: "submitQuestionReview", message: "grading detail page must expose teacher question review submit handler" },
+      { source: wxmlSource, needle: "bindtap=\"startQuestionReview\"", message: "grading detail page must let teacher select a question to review" },
+      { source: wxmlSource, needle: "bindtap=\"submitQuestionReview\"", message: "grading detail page must provide teacher question review button" }
     ];
     for (const item of requiredDetailNeedles) {
       if (!item.source.includes(item.needle)) {
