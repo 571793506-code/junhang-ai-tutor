@@ -15,6 +15,7 @@
     "pages/teacher/content/index",
     "pages/teacher/assessments/index",
     "pages/teacher/grading/index",
+    "pages/teacher/grading-detail/index",
     "pages/teacher/review/index",
     "pages/teacher/profile/index",
     "pages/classroom/login/index",

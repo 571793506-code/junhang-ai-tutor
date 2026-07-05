@@ -1,8 +1,8 @@
 <view class="page teacher-page">
   <view class="hero">
-    <text class="eyebrow">批改复核 · 上传入口</text>
-    <text class="title">先绑定学生，再上传批改图片</text>
-    <text class="subtitle">上传后进入批改复核队列。教师确认前不写入学生档案。</text>
+    <text class="eyebrow">拍照批改</text>
+    <text class="title">批改要落到具体学生</text>
+    <text class="subtitle">先选学生和类型，再上传图片。年级共用生成以后仍要在批改时归到具体学生。</text>
   </view>
 
   <view class="card teacher-card">
@@ -36,6 +36,7 @@
         <text class="workbench-title">{{item.displayTitle}}</text>
         <text class="workbench-meta">{{item.statusText}} · {{item.pendingText}}</text>
         <text class="workbench-meta">{{item.subject}} · {{item.kind || '批改'}} · {{item.qualityText}}</text>
+        <button class="small-button" data-id="{{item.submissionId}}" bindtap="openWorkbenchDetail">查看详情</button>
       </view>
     </block>
   </view>

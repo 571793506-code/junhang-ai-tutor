@@ -1,0 +1,55 @@
+<view class="page teacher-page">
+  <view class="hero">
+    <text class="eyebrow">批改工作台</text>
+    <text class="title">逐题复核详情</text>
+    <text class="subtitle">本页只展示服务端识别、置信度和复核状态。教师确认前不写入学生档案。</text>
+  </view>
+
+  <view class="card teacher-card">
+    <view class="row between">
+      <text class="section-title">{{summary.title || '批改详情'}}</text>
+      <text class="pill">{{summary.statusText || '待加载'}}</text>
+    </view>
+    <view class="detail-grid">
+      <text>分数：{{summary.scoreText || '待确认'}}</text>
+      <text>质量：{{summary.qualityText || '待检查'}}</text>
+      <text>待确认：{{summary.pendingText || '0题待确认'}}</text>
+    </view>
+    <text wx:if="{{message}}" class="subtitle">{{message}}</text>
+  </view>
+
+  <view class="card teacher-card">
+    <text class="section-title">图片页</text>
+    <block wx:for="{{pages}}" wx:key="id">
+      <view class="detail-row">
+        <text class="row-title">{{item.title}} · {{item.qualityText}}</text>
+        <text class="row-meta">质量分：{{item.scoreText}}</text>
+        <text class="row-meta">{{item.issuesText}}</text>
+      </view>
+    </block>
+    <text wx:if="{{!pages.length && !loading}}" class="muted">暂无图片页信息。</text>
+  </view>
+
+  <view class="card teacher-card">
+    <text class="section-title">逐题结果</text>
+    <block wx:for="{{questions}}" wx:key="id">
+      <view class="question-row">
+        <view class="row between">
+          <text class="row-title">第 {{item.questionNo}} 题</text>
+          <text class="pill">{{item.status}}</text>
+        </view>
+        <text class="row-meta">得分：{{item.scoreText}} · 置信度：{{item.confidenceText}}</text>
+        <text class="field-title">学生作答</text>
+        <text class="row-body">{{item.studentAnswer}}</text>
+        <text class="field-title">参考答案</text>
+        <text class="row-body">{{item.correctAnswer}}</text>
+        <text class="field-title">错误步骤</text>
+        <text class="row-body">{{item.errorStep}}</text>
+        <text class="field-title">解析</text>
+        <text class="row-body">{{item.explanation}}</text>
+        <text class="row-meta">知识点：{{item.knowledgePoint}}</text>
+      </view>
+    </block>
+    <text wx:if="{{!questions.length && !loading}}" class="muted">暂无逐题结果。</text>
+  </view>
+</view>

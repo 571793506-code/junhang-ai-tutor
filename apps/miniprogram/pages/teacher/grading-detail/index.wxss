@@ -1,0 +1,35 @@
+.detail-grid {
+  display: grid;
+  gap: 10rpx;
+  margin-top: 18rpx;
+  color: #475467;
+  font-size: 25rpx;
+}
+
+.detail-row,
+.question-row {
+  display: grid;
+  gap: 10rpx;
+  margin-top: 18rpx;
+  padding: 18rpx;
+  border: 1rpx solid rgba(107, 141, 255, 0.14);
+  border-radius: 14rpx;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.row-title {
+  color: #172033;
+  font-size: 28rpx;
+  font-weight: 900;
+}
+
+.row-meta,
+.row-body {
+  color: #667085;
+  font-size: 24rpx;
+  line-height: 1.65;
+}
+
+.row-body {
+  color: #344054;
+}

@@ -74,6 +74,14 @@ Page({
   setQuestionRange(event) {
     this.setData({ questionRange: event.detail.value });
   },
+  openWorkbenchDetail(event) {
+    const submissionId = event.currentTarget.dataset.id;
+    if (!submissionId) {
+      wx.showToast({ title: "缺少批改记录 ID", icon: "none" });
+      return;
+    }
+    wx.navigateTo({ url: `/pages/teacher/grading-detail/index?submissionId=${encodeURIComponent(submissionId)}` });
+  },
   chooseImages() {
     wx.chooseMedia({
       count: 9,
