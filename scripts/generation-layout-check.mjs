@@ -77,6 +77,19 @@ function stripTemplateGuidanceText(text) {
     .join("\n");
 }
 
+function pageMetricText(metric = {}) {
+  return normalizeText(metric.text || metric.textSnippet || "");
+}
+
+function hasIntentionalMathWorkSpace(metric = {}, subject = "") {
+  if (!normalizeText(subject).includes("数学")) return false;
+  const text = pageMetricText(metric);
+  const drawingCount = Number(metric.drawingCount || 0);
+  const hasWorkSection = /计算题|解答题|解决问题|操作与思考题/.test(text);
+  const hasWorkPrompt = /解方程|计算[:：]|求比值|列式|如图|求.{0,12}(面积|体积|度数|角度)|应用题/.test(text);
+  return drawingCount >= 4 && (hasWorkSection || hasWorkPrompt);
+}
+
 export function evaluateGenerationLayoutPdf(pdf = {}) {
   const name = normalizeText(pdf.name);
   const text = normalizeText(pdf.text);
@@ -114,8 +127,9 @@ export function evaluateGenerationLayoutPdf(pdf = {}) {
   for (let index = 0; index < Math.max(0, pageMetrics.length - 1); index += 1) {
     const metric = pageMetrics[index] || {};
     const blankMm = Number(metric.bottomBlankMm || 0);
-    const allowedBlankMm = subject === "数学" && kind === "试卷"
-      ? 170
+    const intentionalMathWorkSpace = hasIntentionalMathWorkSpace(metric, subject);
+    const allowedBlankMm = intentionalMathWorkSpace
+      ? kind === "试卷" ? 170 : 145
       : subject === "语文" && kind === "试卷"
         ? 240
         : subject === "语文" && kind === "练习"
@@ -130,7 +144,8 @@ export function evaluateGenerationLayoutPdf(pdf = {}) {
   const finalBlankMm = Number(finalMetric.bottomBlankMm || 0);
   const finalDrawingCount = Number(finalMetric.drawingCount || 0);
   const hasWriting = /写作题|习作|书面表达|Writing/i.test(questionText);
-  const finalBlankLimit = kind === "试卷" ? 180 : subject === "数学" ? 135 : 125;
+  const hasIntentionalMathWorkArea = hasIntentionalMathWorkSpace(finalMetric, subject);
+  const finalBlankLimit = hasIntentionalMathWorkArea ? (kind === "试卷" ? 180 : 145) : kind === "试卷" ? 180 : 125;
   const hasIntentionalWritingArea = hasWriting && finalDrawingCount >= 16;
 
   if (finalBlankMm >= finalBlankLimit && !hasIntentionalWritingArea) {
@@ -207,6 +222,7 @@ for pdf_path in sorted(pdf_dir.glob("*.pdf"), key=lambda item: item.name):
             "bottomBlankMm": round(bottom_blank_mm, 1),
             "textBlockCount": len(bottoms),
             "drawingCount": len(page.get_drawings() or []),
+            "text": text.strip()[:2000],
         })
     items.append({
         "name": pdf_path.name,

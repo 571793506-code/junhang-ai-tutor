@@ -131,3 +131,18 @@ test("layout check allows intentional final math solution work space", () => {
   assert.equal(check.ok, true);
   assert.deepEqual(check.issues, []);
 });
+
+test("layout check still rejects sparse final math pages without work-space signals", () => {
+  const check = evaluateGenerationLayoutPdf({
+    name: "数学练习-题目.pdf",
+    pages: 2,
+    text: "五年级数学练习\n练习 · A4 · 第1/2页\n练习 · A4 · 第2/2页\n一、基础巩固",
+    pageMetrics: [
+      { page: 1, bottomBlankMm: 96.8, drawingCount: 10, text: "一、基础巩固\n1. 填空题。" },
+      { page: 2, bottomBlankMm: 132.0, drawingCount: 1, text: "一、基础巩固\n8. 填空题。" }
+    ]
+  });
+
+  assert.equal(check.ok, false);
+  assert.ok(check.issues.includes("末页底部留白 132.0mm，疑似题量或作答区分配不足。"));
+});
