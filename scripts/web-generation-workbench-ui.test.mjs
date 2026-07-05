@@ -11,6 +11,10 @@ test("generation workbench keeps selectable options for preview-matched fields",
   assert.match(source, /const examTypeOptions = \[/);
   assert.match(source, /const examTotalScoreOptions = \[/);
   assert.match(source, /const mathBonusQuestionOptions = \[/);
+  assert.match(source, /generationStudentId/);
+  assert.match(source, /const generationTargetStudents = students\.filter/);
+  assert.match(source, /selectGenerationStudent/);
+  assert.match(source, /student\.grade === targetGrade/);
   assert.match(source, /activeQuizChapterOptions\.map/);
   assert.match(source, /assessmentSubject === "数学"/);
   assert.match(source, /附加题/);

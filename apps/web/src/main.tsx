@@ -1257,6 +1257,7 @@ function TeacherWorkspace({
   textbooks: TextbookAsset[];
 }) {
   const [selectedStudentId, setSelectedStudentId] = useState(students[0]?.id || "");
+  const [generationStudentId, setGenerationStudentId] = useState(students[0]?.id || "");
   const [taskSubject, setTaskSubject] = useState<SubjectLabel>("英语");
   const [taskMinutes, setTaskMinutes] = useState(12);
   const [taskRequirement, setTaskRequirement] = useState("复习今日错题，完成英语词汇订正和 2 个例句。");
@@ -1328,6 +1329,10 @@ function TeacherWorkspace({
   }, [selectedStudentId, students]);
 
   useEffect(() => {
+    if (!students.some((item) => item.id === generationStudentId)) setGenerationStudentId(students[0]?.id || "");
+  }, [generationStudentId, students]);
+
+  useEffect(() => {
     if (!devices.some((item) => item.id === tabletDeviceId)) setTabletDeviceId(devices[0]?.id || "");
   }, [devices, tabletDeviceId]);
 
@@ -1346,7 +1351,10 @@ function TeacherWorkspace({
   const assessmentKind = activeGenerationMode.kind;
   const activeQuestionCountOptions = questionCountOptionsByMode[generationMode];
   const generationTargetScope: "student" | "grade" = generationMode === "practice" ? "student" : targetScope;
-  const generationTargetGrade = generationTargetScope === "student" ? selectedStudent?.grade || targetGrade : targetGrade;
+  const generationTargetStudents = students.filter((student) => student.grade === targetGrade);
+  const visibleGenerationStudents = generationTargetStudents.length ? generationTargetStudents : students;
+  const generationSelectedStudent = visibleGenerationStudents.find((student) => student.id === generationStudentId) || visibleGenerationStudents[0] || students[0];
+  const generationTargetGrade = generationTargetScope === "student" ? generationSelectedStudent?.grade || targetGrade : targetGrade;
   const activeQuizChapterOptions = quizChapterOptionsByGradeAndSubject[generationTargetGrade]?.[assessmentSubject] || quizChapterOptionsByGradeAndSubject["六年级"].数学;
   const updateRegistration = (field: keyof StudentRegistrationInput, value: string) => setStudentRegistration((current) => ({ ...current, [field]: value }));
   const textbookHint = selectedTextbookContext
@@ -1357,6 +1365,18 @@ function TeacherWorkspace({
       setAssessmentQuizChapter(activeQuizChapterOptions[0]);
     }
   }, [activeQuizChapterOptions, assessmentQuizChapter, generationMode]);
+
+  useEffect(() => {
+    if (generationTargetScope === "student" && generationSelectedStudent?.id && generationSelectedStudent.id !== generationStudentId) {
+      setGenerationStudentId(generationSelectedStudent.id);
+    }
+  }, [generationSelectedStudent?.id, generationStudentId, generationTargetScope]);
+
+  const selectGenerationStudent = (studentId: string) => {
+    const nextStudent = students.find((student) => student.id === studentId);
+    if (nextStudent?.grade) setTargetGrade(nextStudent.grade);
+    setGenerationStudentId(studentId);
+  };
 
   const selectedQuizChapterLabel = assessmentQuizChapter === activeQuizChapterOptions[0] && textbookHint ? textbookHint : assessmentQuizChapter;
   const assessmentSourceRange = generationMode === "quiz"
@@ -1387,7 +1407,7 @@ function TeacherWorkspace({
   const buildAssessmentRequirement = () => [
     `生成内容：${activeGenerationMode.title}`,
     `生成依据：${activeGenerationMode.sourceLabel}`,
-    `对象范围：${generationTargetScope === "student" ? selectedStudent?.displayName || "所选学生" : generationTargetGrade}`,
+    `对象范围：${generationTargetScope === "student" ? generationSelectedStudent?.displayName || "所选学生" : generationTargetGrade}`,
     `教材范围：${assessmentSourceRange}`,
     `题型结构：${assessmentStructure}`,
     `题量/页数：${generationMode === "exam" ? `4 页 A4，${assessmentTotalScore}` : assessmentQuestionCount}`,
@@ -1398,7 +1418,7 @@ function TeacherWorkspace({
   ].filter(Boolean).join("\n");
   const submitAssessmentDraft = () => onAssessment({
     targetScope: generationTargetScope,
-    studentId: generationTargetScope === "student" ? selectedStudent?.id : undefined,
+    studentId: generationTargetScope === "student" ? generationSelectedStudent?.id : undefined,
     targetGrade: generationTargetGrade,
     subject: assessmentSubject,
     kind: assessmentKind,
@@ -1567,9 +1587,10 @@ function TeacherWorkspace({
           </div>
           <div className="generation-form-grid">
             {generationMode !== "practice" ? <label>对象<select value={targetScope} onChange={(event) => setTargetScope(event.target.value as "student" | "grade")}><option value="student">单个学生</option><option value="grade">整个年级</option></select></label> : null}
+            <label>年级<select value={targetGrade} onChange={(event) => setTargetGrade(event.target.value)}>{gradeOptions.map((grade) => <option key={grade}>{grade}</option>)}</select></label>
             {generationTargetScope === "student"
-              ? <label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label>
-              : <label>年级<select value={targetGrade} onChange={(event) => setTargetGrade(event.target.value)}>{gradeOptions.map((grade) => <option key={grade}>{grade}</option>)}</select></label>}
+              ? <label>学生<select value={generationSelectedStudent?.id || ""} onChange={(event) => selectGenerationStudent(event.target.value)}>{visibleGenerationStudents.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label>
+              : null}
             <label>科目<select value={assessmentSubject} onChange={(event) => setAssessmentSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label>
             {generationMode === "exam"
               ? <label>考试类型<select value={assessmentExamType} onChange={(event) => setAssessmentExamType(event.target.value)}>{examTypeOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
