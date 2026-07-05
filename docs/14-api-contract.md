@@ -109,6 +109,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 报告复用 `StudentReport`，阶段交付状态写入 `metadata.termReport`，不新增首期数据库表。
   - 初始状态为 `draft`，可见性为 `teacher_pdf_only`，只返回给教师。
   - 草稿模板字段：`template`, `sections.overview`, `sections.stageConclusions`, `sections.growthTrajectory`, `sections.evidenceSummary`, `sections.evidenceCoverage`, `sections.subjectOverview`, `sections.subjectAbilityMap`, `sections.focusSubjects`, `sections.commonCauseAnalysis`, `sections.learningProcess`, `sections.stableGrowth`, `sections.tutoringFocus`, `sections.actionPlan`, `sections.homeSchoolCollaboration`, `sections.parentNextSteps`, `sections.parentCommunicationSummary`, `sections.teacherReviewChecklist`；其中重点科目最多 1 到 2 个，包含证据、能力观察、优先动作和老师下一步。
+  - `renderingPolicy.pdfTextSource=html_template`，正式 PDF 正文必须由服务端 HTML/PDF 模板渲染；`renderingPolicy.imagePreviewUsage=visual_reference_only`，image 2 候选图只用于教师端视觉和信息层级讨论。
   - `teacherReviewChecklist` 只供教师端保存前复核，不进入家长 PDF 正文或学生端状态卡。
   - 期中模板强调阶段掌握、共性错因和后续两到四周重点；期末模板强调学期成长、稳定强项和假期或下阶段建议。
 

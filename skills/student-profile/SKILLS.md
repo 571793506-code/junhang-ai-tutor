@@ -50,6 +50,7 @@
 - `pdfUrl`, `pdfTitle`, `pdfAssetId`：教师端保存资产信息。
 - `wechatMessage`：教师复制后微信私聊发送给家长的话术。
 - `sentManuallyAt`, `sentByTeacherId`：老师人工发送后的状态记录。
+- `renderingPolicy`：正式交付边界，`pdfTextSource` 固定为 `html_template`，`imagePreviewUsage` 固定为 `visual_reference_only`，避免把 image 2 位图文字当作正式 PDF 正文。
 
 期中/期末 `draft.sections` 使用综合成长报告结构：
 
@@ -116,6 +117,8 @@ AI 输出必须是严格 JSON 草稿。可以额外生成教师可编辑的纯�
 4. 教师通过微信私聊人工发送给家长。
 5. 教师在系统内标记“已人工发送”。
 6. 学生端只显示状态文案“老师已发送阶段报告给家长”，不展示报告正文、PDF 链接或下载入口。
+
+image 2 模板候选图只用于教师端 UI 视觉讨论，提示词应只包含模块标题、短标签和占位短句；正式报告长正文必须由结构化草稿和 HTML/PDF 模板渲染。
 
 ## 禁止项
 
