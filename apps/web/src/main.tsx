@@ -909,7 +909,7 @@ function App() {
         </nav>
       </aside>
       <main className="main">
-        <header className="topbar"><div><p className="eyebrow">{roleLabel(role)}</p><h1>{role === "teacher" ? `教师端 · ${currentModule}` : role === "student" ? `学生端 · ${currentModule}` : `课堂平板 · ${currentModule}`}</h1></div><ApiSyncStatus state={sync} /></header>
+        <header className="topbar"><div><p className="eyebrow">{roleLabel(role)}</p><h1>{role === "teacher" ? `教师端 · ${currentModule}` : role === "student" ? `学生端 · ${currentModule}` : `课堂平板 · ${currentModule}`}</h1></div><ApiSyncStatus state={syncForRole(sync, role)} /></header>
         {role === "teacher" ? <TeacherWorkspace activeModule={currentModule} ai={ai} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentReject={rejectAssessmentDraft} onContentIndexRebuild={rebuildTeachingContentIndex} onContentUpload={uploadTeachingContent} onExportPrint={exportLatestPrint} onKnowledgeRefresh={refreshKnowledgeLibrary} onKnowledgeReview={reviewKnowledgeLibrarySource} onKnowledgeSourceCreate={addKnowledgeSource} onKnowledgeSync={syncKnowledgeLibrary} onMarkReviewed={markReviewed} onOpenModule={(module) => setActiveModule((value) => ({ ...value, teacher: module }))} onOpenTextbook={openTextbookAsset} onProfileDraft={createStudentProfileDraft} onProfilePublish={publishStudentProfileDraft} onRecognize={recognizeSubmission} onRefreshOps={refreshReviewQueue} onRefreshTextbooks={refreshTextbookLibrary} onRescanTextbooks={rescanTextbookLibrary} onResetCode={resetStudentCode} onSaveTextbookChapters={saveTextbookChapters} onSelectTextbookContext={setSelectedTextbookContext} onStudentAccess={updateStudentAccess} onStudentCreate={async (input) => {
           const name = input.displayName.trim();
           if (!name || !input.guardianPhone.trim()) {
@@ -946,7 +946,7 @@ function App() {
   );
 }
 
-const teacherNav = ["工作台", "学生权限", "今日任务", "生成打印", "批改复核", "学生档案", "教材资料", "课堂设备", "电视动态屏", "系统状态"];
+const teacherNav = ["工作台", "学生权限", "今日任务", "生成打印", "批改复核", "学生档案", "教材资料", "课堂设备", "系统状态"];
 const studentNav = ["主页", "今日任务", "AI问答", "英语词汇", "拍照提交", "学生档案"];
 const classroomNav = ["课堂主页", "今日任务", "AI问答", "听写播报", "课文跟读"];
 
@@ -1210,7 +1210,7 @@ function TeacherWorkspace({
   return <div className="page-grid">
     <section className={moduleClass("工作台", "hero-band teacher-flow-hero")}><div><p className="eyebrow">教师工作台</p><h2>从登记到归档的教学闭环</h2><p>按“学生权限、今日任务、生成打印、批改复核、学生档案、课堂设备”串起日常操作。先看状态，再进入对应动作。</p></div><div className="teacher-flow-summary"><Metric label="可登录学生" value={activeStudents} suffix="人" tone="blue" /><Metric label="待完成任务" value={pendingTasks} suffix="项" tone="amber" /><Metric label="生成记录" value={assignments.length} suffix="份" tone="green" /></div></section>
     <section className={moduleClass("工作台", "panel full")}><PanelTitle icon={ClipboardList} title="教师端操作流程" /><div className="teacher-flow-grid"><FlowCard icon={UsersRound} index={1} label="学生权限" state={activeStudents ? "ready" : "blocked"} value={`${activeStudents}/${students.length}`} hint="登记学生、生成专属码、绑定负责老师。" /><FlowCard icon={CalendarDays} index={2} label="今日任务" state={pendingTasks ? "pending" : "ready"} value={`${pendingTasks}`} hint="按学生生成任务，家长端和平板端查看完成情况。" /><FlowCard icon={Printer} index={3} label="生成打印" state="pending" value={`${assignments.length}`} hint="小测、练习、试卷先审 PDF 草稿，再导出正式文件。" /><FlowCard icon={Upload} index={4} label="批改复核" state="pending" value={`${reviewSubmissions.length}`} hint="图片上传、AI初判、逐题复核和教师确认。" /><FlowCard icon={FileText} index={5} label="学生档案" state="ready" value="教师发布" hint="聚合任务、错题、问答、平板记录和阶段反馈。" /><FlowCard icon={TerminalSquare} index={6} label="课堂设备" state={readyTabletDevices ? "ready" : "pending"} value={`${readyTabletDevices}/${Math.max(devices.length, 1)}`} hint="控制平板、听写、跟读、播报和大屏连接。" /><FlowCard icon={Activity} index={7} label="系统状态" state={readyProviders === providerTotal ? "ready" : "blocked"} value={`${readyProviders}/${providerTotal}`} hint="教师端查看服务状态与审计记录。" /></div></section>
-    <section className={moduleClass("工作台", "panel full")}><PanelTitle icon={MonitorCheck} title="展示与互动控制台" /><p className="muted-line">这块先作为方案原型：老师决定电视展示、平板模式和互动插件状态，学生与家长只看到温和的使用结果，不看到排名、模型名称或隐私数据。</p><div className="teacher-display-console"><div className="display-control-card primary"><div className="display-control-head"><span><ScreenShare size={18} />电视动态屏</span><StatusPill label="可演示" status="ready" /></div><strong>家长参观数据屏</strong><p>展示整体任务运行、AI先分析老师再复核、匿名学习动态和学科知识互动热力。</p><div className="display-control-actions"><button className="primary-button" type="button" onClick={() => onOpenModule("电视动态屏")}><Eye size={16} />打开预览</button><button className="secondary-button" type="button" onClick={() => void navigator.clipboard?.writeText(`${window.location.origin}/?role=teacher&module=电视动态屏`)}><ScreenShare size={16} />复制大屏地址</button></div></div><div className="display-control-card"><div className="display-control-head"><span><TerminalSquare size={18} />平板展示模式</span><StatusPill label={`${readyTabletDevices}/${Math.max(devices.length, 1)} 已绑定`} status={readyTabletDevices ? "ready" : "pending"} /></div><div className="display-mode-grid"><span className="active">常规待机</span><span>家长参观</span><span>课堂互动</span><span>听写锁屏</span></div><p>共享平板只确认本次互动身份，拖拽头像进入学习光环后再选择插件。</p></div><div className="display-control-card"><div className="display-control-head"><span><Sparkles size={18} />互动插件开关</span><StatusPill label="状态展示" status="pending" /></div><div className="plugin-toggle-list">{["AI问答", "听写播报", "课文跟读", "课堂投票", "今日鼓励", "小组协作"].map((item, index) => <span key={item} className={index < 3 ? "ready" : "future"}>{item}<b>{index < 3 ? "可用" : "老师开启后"}</b></span>)}</div></div><div className="display-control-card"><div className="display-control-head"><span><ShieldCheck size={18} />迁移前配置</span><StatusPill label="先不迁移" status="pending" /></div><ul className="display-rule-list"><li>电视大屏继续保留 Web 展示。</li><li>学生端先按模块入口迁移。</li><li>平板端确认拖拽交互后再迁移。</li><li>教师端控制入口最后接真实权限。</li></ul></div></div></section>
+    <section className={moduleClass("工作台", "panel full")}><PanelTitle icon={MonitorCheck} title="展示与互动控制台" /><p className="muted-line">这块先作为方案原型：老师决定平板模式和互动插件状态，学生与家长只看到温和的使用结果，不看到排名、模型名称或隐私数据。</p><div className="teacher-display-console"><div className="display-control-card display-control-card-locked"><div className="display-control-head"><span><ScreenShare size={18} />电视公共屏</span><StatusPill label="已封锁" status="pending" /></div><strong>家长参观数据屏暂不开放</strong><p>公共屏内容先暂停操作和投放，后续确认独立全屏入口与展示规则后再重新开放。</p><div className="display-control-actions"><button className="secondary-button" disabled type="button"><Lock size={16} />暂不开放</button><button className="secondary-button" disabled type="button"><ScreenShare size={16} />地址暂停复制</button></div></div><div className="display-control-card"><div className="display-control-head"><span><TerminalSquare size={18} />平板展示模式</span><StatusPill label={`${readyTabletDevices}/${Math.max(devices.length, 1)} 已绑定`} status={readyTabletDevices ? "ready" : "pending"} /></div><div className="display-mode-grid"><span className="active">常规待机</span><span>家长参观</span><span>课堂互动</span><span>听写锁屏</span></div><p>共享平板只确认本次互动身份，拖拽头像进入学习光环后再选择插件。</p></div><div className="display-control-card"><div className="display-control-head"><span><Sparkles size={18} />互动插件开关</span><StatusPill label="状态展示" status="pending" /></div><div className="plugin-toggle-list">{["AI问答", "听写播报", "课文跟读", "课堂投票", "今日鼓励", "小组协作"].map((item, index) => <span key={item} className={index < 3 ? "ready" : "future"}>{item}<b>{index < 3 ? "可用" : "老师开启后"}</b></span>)}</div></div><div className="display-control-card"><div className="display-control-head"><span><ShieldCheck size={18} />迁移前配置</span><StatusPill label="先不迁移" status="pending" /></div><ul className="display-rule-list"><li>电视公共屏已封锁，暂不操作。</li><li>学生端先按模块入口迁移。</li><li>平板端确认拖拽交互后再迁移。</li><li>教师端控制入口最后接真实权限。</li></ul></div></div></section>
     <section className={moduleClass("课堂设备", "panel full")}><PanelTitle icon={TerminalSquare} title="课堂平板总控" /><p className="muted-line">平板端内容统一在教师端发布和控制。语音播报、听写、跟读由教师端下发，平板端只接收并执行；学生 AI 问答在平板端确认身份后使用。</p><div className="template-controls"><label>目标平板<select value={selectedTabletDevice?.id || ""} onChange={(event) => setTabletDeviceId(event.target.value)}>{devices.map((device) => <option key={device.id} value={device.id}>{device.label} · {device.grade || "未设年级"}</option>)}</select></label></div><div className="record-list">{devices.map((device) => <div className="record-row" key={device.id}><Volume2 size={17} /><div><strong>{device.label}</strong><span>{device.grade} · {device.className}</span></div><StatusPill label={device.status} status="ready" /></div>)}</div><div className="button-row"><button className="primary-button" onClick={() => onUnlock(true)}><Unlock size={17} />解锁平板</button><button className="secondary-button danger-button" onClick={() => onUnlock(false)}><Lock size={17} />锁定平板</button></div></section>
     <section className={moduleClass("课堂设备", "panel full")}>
       <PanelTitle icon={Volume2} title="发布平板任务" />
@@ -1883,11 +1883,7 @@ function ClassroomPublicScreen({ device, onOpenModule, students, tasks }: { devi
 }
 
 function AvatarRail({ draggingStudentId, onClick, onDragEnd, onDragStart, side, students }: { draggingStudentId: string; onClick: (studentId: string) => void; onDragEnd: () => void; onDragStart: (studentId: string) => void; side: "top" | "right" | "bottom" | "left"; students: StudentProfile[] }) {
-  return <div className={`tablet-avatar-rail ${side}`} data-rail={railLabel(side)} onMouseDownCapture={(event) => {
-    const target = (event.target as HTMLElement).closest("[data-student-id]");
-    const studentId = target?.getAttribute("data-student-id");
-    if (studentId) onClick(studentId);
-  }}>{students.map((student) => <button className={`tablet-avatar-card ${draggingStudentId === student.id ? "dragging" : ""}`} data-student-id={student.id} draggable key={student.id} onClick={() => onClick(student.id)} onDragEnd={onDragEnd} onDragStart={(event) => { event.dataTransfer.setData("student-id", student.id); onDragStart(student.id); }} onPointerDown={() => onClick(student.id)} type="button"><StudentAvatar student={student} /><span>{student.displayName}</span><small>点击确认</small></button>)}</div>;
+  return <div className={`tablet-avatar-rail ${side}`} data-rail={railLabel(side)}>{students.map((student) => <button className={`tablet-avatar-card ${draggingStudentId === student.id ? "dragging" : ""}`} data-student-id={student.id} draggable key={student.id} onClick={() => onClick(student.id)} onDragEnd={onDragEnd} onDragStart={(event) => { event.dataTransfer.setData("student-id", student.id); onDragStart(student.id); }} type="button"><StudentAvatar student={student} /><span>{student.displayName}</span><small>点击或拖拽</small></button>)}</div>;
 }
 
 function StudentAvatar({ large, student }: { large?: boolean; student: StudentProfile }) {
@@ -1908,6 +1904,12 @@ function railLabel(side: "top" | "right" | "bottom" | "left") {
   if (side === "right") return "右侧头像轨道";
   if (side === "bottom") return "下方头像轨道";
   return "左侧头像轨道";
+}
+
+function masteryTrendLabel(value: number) {
+  if (value >= 82) return "稳定";
+  if (value >= 72) return "观察中";
+  return "需巩固";
 }
 
 function LoginPanel({ code, onCode, onLogin, onPhone, phone, title }: { code: string; onCode: (v: string) => void; onLogin: () => void; onPhone: (v: string) => void; phone: string; title: string }) {
@@ -2892,7 +2894,7 @@ function StudentArchive({ corrections, logs, reports, student }: { corrections: 
         <p className="eyebrow">学生档案 · 家长查看</p>
         <h3>{student.displayName} 的学习档案</h3>
         <span>只展示老师确认或可追踪的学习过程，不公开排名和分数压力。</span>
-        <div className="student-archive-mastery">{Object.entries(student.mastery).map(([subject, value]) => <span key={subject}><b>{subject}</b><i><em style={{ width: `${value}%` }} /></i><strong>{value}%</strong></span>)}</div>
+        <div className="student-archive-mastery">{Object.entries(student.mastery).map(([subject, value]) => <span key={subject}><b>{subject}</b><i><em style={{ width: `${value}%` }} /></i><strong>{masteryTrendLabel(value)}</strong></span>)}</div>
       </div>
       <div className="student-archive-kpis">
         <Metric label="已发布反馈" value={reports.length + (student.publishedProfileText ? 1 : 0)} suffix="份" tone="green" />
@@ -2917,6 +2919,11 @@ function ClockIcon() {
 
 function ApiSyncStatus({ state }: { state: SyncState }) {
   return <div className={`api-sync-status ${state.busy ? "busy" : state.ok === false ? "error" : state.ok ? "ready" : "idle"}`}><StatusDot status={state.busy ? "pending" : state.ok === false ? "blocked" : state.ok ? "ready" : "pending"} /><span>{state.message}</span></div>;
+}
+
+function syncForRole(state: SyncState, role: Role): SyncState {
+  if (role === "teacher" || state.ok !== false) return state;
+  return { ...state, message: "数据同步暂不可用，请稍后重试或联系老师。" };
 }
 
 function Metric({ label, suffix, tone, value }: { label: string; suffix: string; tone: string; value: number }) {

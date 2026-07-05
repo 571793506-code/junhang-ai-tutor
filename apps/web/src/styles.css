@@ -4861,7 +4861,7 @@ button:disabled {
   }
 }
 
-@media (max-width: 1020px) {
+@media (max-width: 1100px) {
   .app-shell {
     grid-template-columns: 1fr;
   }
@@ -4985,6 +4985,80 @@ button:disabled {
 
   .insight-columns {
     grid-template-columns: 1fr;
+  }
+
+  .classroom-public-screen {
+    min-height: auto;
+    overflow: hidden;
+  }
+
+  .tablet-stage-v1 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    min-height: auto;
+    margin-top: 14px;
+    padding: 0;
+  }
+
+  .tablet-drag-guide,
+  .learning-halo-drop {
+    position: relative;
+    left: auto;
+    top: auto;
+    inset: auto;
+    grid-column: 1 / -1;
+    min-width: 0;
+    transform: none;
+  }
+
+  .tablet-avatar-rail,
+  .tablet-avatar-rail.top,
+  .tablet-avatar-rail.bottom,
+  .tablet-avatar-rail.left,
+  .tablet-avatar-rail.right {
+    position: relative;
+    inset: auto;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch;
+  }
+
+  .tablet-avatar-rail::before {
+    display: none;
+  }
+
+  .tablet-avatar-card {
+    width: 100%;
+    min-height: 76px;
+  }
+
+  .tablet-public-overview,
+  .tablet-ai-flow {
+    position: relative;
+    left: auto;
+    right: auto;
+    top: auto;
+    width: auto;
+  }
+
+  .learning-halo-drop {
+    min-height: 320px;
+  }
+
+  .learning-halo {
+    width: min(320px, calc(100vw - 96px));
+    height: min(320px, calc(100vw - 96px));
+  }
+
+  .tablet-plugin-guide {
+    display: grid;
+    margin: 0;
+  }
+
+  .tablet-plugin-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 8px 0 0;
   }
 }
 
@@ -5203,51 +5277,17 @@ button:disabled {
   }
 
   .tablet-stage-v1 {
-    display: grid;
     gap: 12px;
-    min-height: auto;
-    margin-top: 14px;
-    padding: 0;
-  }
-
-  .tablet-drag-guide {
-    position: relative;
-    left: auto;
-    top: auto;
-    min-width: 0;
-    transform: none;
-  }
-
-  .tablet-avatar-rail,
-  .tablet-avatar-rail.top,
-  .tablet-avatar-rail.bottom,
-  .tablet-avatar-rail.left,
-  .tablet-avatar-rail.right {
-    position: relative;
-    inset: auto;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    justify-content: stretch;
-  }
-
-  .tablet-avatar-rail::before {
-    display: none;
-  }
-
-  .tablet-avatar-card {
-    width: 100%;
-    min-height: 76px;
-  }
-
-  .learning-halo-drop {
-    position: relative;
-    inset: auto;
-    min-height: 260px;
+    grid-template-columns: 1fr;
   }
 
   .learning-halo {
     width: min(260px, calc(100vw - 84px));
     height: min(260px, calc(100vw - 84px));
+  }
+
+  .tablet-plugin-row {
+    grid-template-columns: 1fr;
   }
 
   .learning-halo::before {
