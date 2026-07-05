@@ -135,7 +135,7 @@ C:\Users\86188\Desktop\君航Codex启动API.cmd
 日志位置：
 
 ```text
-storage/logs/api-autostart.log
+%LOCALAPPDATA%\JunhangAITutor\logs\api-autostart.log
 ```
 
 默认方案会写入：
@@ -150,7 +150,7 @@ HKCU\Software\Microsoft\Windows\CurrentVersion\Run\JunhangAITutorAPI
 C:\Users\86188\AppData\Local\JunhangAITutorAPI\launch-api.vbs
 ```
 
-登录 Windows 后隐藏启动 `scripts/run-api-autostart.cmd`。脚本会调用 `.\jh.cmd start:api`，如果 API 异常退出，会等待 8 秒后自动重启。
+登录 Windows 后隐藏启动 `scripts/run-api-autostart.cmd`。脚本会调用 `.\jh.cmd start:api`，如果 API 异常退出，会等待 8 秒后自动重启。日志默认写入 `%LOCALAPPDATA%\JunhangAITutor\logs\api-autostart.log`，避免运行日志污染 Git 工作区；如需改路径，可设置 `JUNHANG_API_AUTOSTART_LOG_DIR`。
 
 启动文件夹备用方案会写入：
 

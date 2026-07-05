@@ -5,8 +5,13 @@ chcp 65001 >nul
 set "ROOT=%~dp0.."
 cd /d "%ROOT%"
 
-if not exist "storage\logs" mkdir "storage\logs"
-set "LOG_FILE=%ROOT%\storage\logs\api-autostart.log"
+if "%JUNHANG_API_AUTOSTART_LOG_DIR%"=="" (
+  set "LOG_DIR=%LOCALAPPDATA%\JunhangAITutor\logs"
+) else (
+  set "LOG_DIR=%JUNHANG_API_AUTOSTART_LOG_DIR%"
+)
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+set "LOG_FILE=%LOG_DIR%\api-autostart.log"
 
 echo ==================================================>> "%LOG_FILE%"
 echo [%date% %time%] Junhang API autostart runner booted.>> "%LOG_FILE%"
