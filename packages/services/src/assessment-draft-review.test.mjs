@@ -426,9 +426,10 @@ test("draftAssessmentService does not pad Chinese exam reading passages with rep
 
   const modernReading = result.draftItems.find((item) => item.metadata?.passageGroupId === "chinese-modern-reading");
   const passageText = modernReading?.metadata?.passageText || "";
+  const passageChars = passageText.replace(/[^\u4e00-\u9fa5]/g, "").length;
   const guidanceCount = (passageText.match(/老师在讲评时提醒大家/g) || []).length;
 
   assert.equal(result.usedDynamicFallback, true);
-  assert.ok(passageText.length > 0);
+  assert.ok(passageChars >= 850);
   assert.ok(guidanceCount <= 1);
 });
