@@ -155,6 +155,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 - `POST /api/assessments/draft`
   - 生成小测、练习、试卷草稿。
   - 关键字段：`kind`, `grade`, `subject`, `difficulty`, `requirement`。
+  - 可选字段：`assessmentTotalTimeoutMs` 或 `generationTimeoutMs`，用于给单次模型生成设置总预算；预算耗尽后服务层返回可复核动态兜底草稿，不继续等待后续模型 fallback。
   - 默认规则：小测/练习两页 A4，试卷四页 A4。
   - 服务层模型链路：DeepSeek assessment v4 优先生成；超时或不可用时由 GPT5.5 高级生成接管；MiniMax M3 作为备份生成；随后由服务层修复结构并做本地结构审查。
   - 默认不在草稿主链路同步执行 MiniMax M3 和 GPT5.5 质量审查，避免生成接口被多模型审查拖慢；只有显式传入 `runModelReview=true` 或服务端配置开启时，才执行深度模型审查。

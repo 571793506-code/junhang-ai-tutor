@@ -108,3 +108,27 @@ test("draftAssessmentService can run model review when explicitly requested", as
   assert.equal(result.generationPipeline.modelReview.status, "passed");
   assert.equal(result.generationPipeline.gates.modelReviewRequired, true);
 });
+
+test("draftAssessmentService forwards assessment timeout budget to runner", async () => {
+  let runnerInput = null;
+  await draftAssessmentService(
+    {},
+    {
+      subject: "数学",
+      kind: "小测",
+      grade: "五年级",
+      requirement: "短预算测试",
+      assessmentTotalTimeoutMs: 1200
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async (_config, input) => {
+        runnerInput = input;
+        return fakeAssessmentResult();
+      }
+    }
+  );
+
+  assert.equal(runnerInput.assessmentTotalTimeoutMs, 1200);
+  assert.ok(runnerInput.generationContext);
+});

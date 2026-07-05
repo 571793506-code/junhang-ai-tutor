@@ -24,6 +24,7 @@ const teacherPhone = env.SMOKE_TEACHER_PHONE || "13800000001";
 const teacherCode = env.SMOKE_TEACHER_CODE || "T8JH21";
 const defaultRequestTimeoutMs = Number(env.CONTENT_CONTEXT_E2E_REQUEST_TIMEOUT_MS || 60000);
 const generationRequestTimeoutMs = Number(env.CONTENT_CONTEXT_E2E_GENERATION_TIMEOUT_MS || 180000);
+const generationModelBudgetMs = Number(env.CONTENT_CONTEXT_E2E_GENERATION_MODEL_BUDGET_MS || 45000);
 const exportRequestTimeoutMs = Number(env.CONTENT_CONTEXT_E2E_EXPORT_TIMEOUT_MS || 120000);
 const nodeScriptTimeoutMs = Number(env.CONTENT_CONTEXT_E2E_NODE_SCRIPT_TIMEOUT_MS || 60000);
 const corruptNeedles = ["\u951f", "\ufffd", "\u935a", "\u947b", "\u93c1", "\u7487"];
@@ -396,6 +397,7 @@ const assessment = teacherToken
         kind: zh.quiz,
         difficulty: zh.base,
         requirement: zh.guardRequirement,
+        assessmentTotalTimeoutMs: generationModelBudgetMs,
         knowledgePoints: [zh.decimalMultiplication, zh.figure]
       }
     })
@@ -408,6 +410,9 @@ pass("assessment draft injects clean content context", assessment?.ok && assessm
   message: assessment?.body.message || null,
   assignmentId: assessmentId || null,
   matchedCount: assessmentResult.contentContext?.matchedCount || 0,
+  modelAvailable: assessmentResult.modelAvailable ?? null,
+  usedDynamicFallback: assessmentResult.usedDynamicFallback ?? null,
+  modelBudgetMs: generationModelBudgetMs,
   requirement: assessmentResult.generationContext?.request?.requirement || null
 });
 

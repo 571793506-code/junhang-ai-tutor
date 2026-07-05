@@ -38,7 +38,7 @@
 | P19 | 外部服务状态未先健康检查 | DeepSeek、MiniMax、飞书 CLI、机器人 token、额度或区域配置变化 | 运行中才发现 429、认证失败、token 过期或接口不可达 | 操作前跑对应诊断脚本或健康检查；错误信息只给内部教师/运维摘要，不传普通端 |
 | P20 | 长日志和大 diff 一次性读取 | 直接看超长 `git diff`、测试日志、生成日志 | 工具输出截断，遗漏关键问题 | 先用 `git diff --stat`、`git diff --name-status`、分文件 diff、`rg` 定位，再读片段 |
 | P21 | 完整 E2E 替代小范围验证 | 只改生成模板、兜底内容或审查规则，却直接运行完整 `check:teaching-content` | 触发 API 启动、资料上传、内容索引、模型生成、PDF 导出和教师复核，耗时长且问题定位困难 | 先跑 `check:generation:blueprint`；只有资料上下文、导出边界、大改或发布前才跑 `check:content-context` 或 `check:teaching-content:full` |
-| P22 | 长时间无进度输出被误判为卡死 | 脚本使用缓存 stdout 的子进程执行方式，或 API fetch 没有统一超时 | 生成类任务看起来半小时无结果，无法判断是模型慢、PDF 慢还是请求挂起 | 检查脚本必须输出 start/done/fail 和耗时；API 请求、生成草稿、PDF 导出必须有超时预算 |
+| P22 | 长时间无进度输出被误判为卡死 | 脚本使用缓存 stdout 的子进程执行方式，或 API fetch 没有统一超时 | 生成类任务看起来半小时无结果，无法判断是模型慢、PDF 慢还是请求挂起 | 检查脚本必须输出 start/done/fail 和耗时；API 请求、生成草稿、PDF 导出必须有超时预算；生成草稿预算要通过 `assessmentTotalTimeoutMs` 或 `generationTimeoutMs` 进入服务层，不能只缩短脚本 fetch timeout |
 
 ## 按任务类型的验证要求
 

@@ -435,6 +435,14 @@ async function timedCall(run) {
   }
 }
 
+function firstPositiveNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return null;
+}
+
 function fallbackUnavailable(providerId, reason, fallback) {
   return {
     available: false,
@@ -747,33 +755,62 @@ export async function draftAssessment(config, input = {}) {
     }
   ];
 
-  const assessmentTimeoutMs = Number(
+  const assessmentTimeoutMs = firstPositiveNumber(
     config.DEEPSEEK_ASSESSMENT_DRAFT_TIMEOUT_MS ||
     config.deepseekAssessmentDraftTimeoutMs ||
     config.DEEPSEEK_ASSESSMENT_TIMEOUT_MS ||
     config.deepseekAssessmentTimeoutMs ||
     180000
   );
-  const premiumAssessmentTimeoutMs = Number(
+  const premiumAssessmentTimeoutMs = firstPositiveNumber(
     config.GPT55_ASSESSMENT_TIMEOUT_MS ||
     config.gpt55AssessmentTimeoutMs ||
     runtime.gpt55ReviewTimeoutMs ||
     180000
   );
-  const minimaxAssessmentTimeoutMs = Number(
+  const minimaxAssessmentTimeoutMs = firstPositiveNumber(
     config.MINIMAX_ASSESSMENT_TIMEOUT_MS ||
     config.minimaxAssessmentTimeoutMs ||
     90000
   );
+  const assessmentTotalTimeoutMs = firstPositiveNumber(
+    input.assessmentTotalTimeoutMs,
+    input.generationTimeoutMs,
+    config.ASSESSMENT_DRAFT_TOTAL_TIMEOUT_MS,
+    config.assessmentDraftTotalTimeoutMs
+  );
+  const totalStartedAt = Date.now();
+  let totalBudgetExhausted = false;
+  const remainingBudgetMs = () => {
+    if (!assessmentTotalTimeoutMs) return null;
+    return Math.max(1, assessmentTotalTimeoutMs - (Date.now() - totalStartedAt));
+  };
+  const attemptTimeoutMs = (configuredTimeoutMs) => {
+    const remaining = remainingBudgetMs();
+    return remaining == null ? configuredTimeoutMs : Math.min(configuredTimeoutMs, remaining);
+  };
+  const hasBudget = () => {
+    const remaining = remainingBudgetMs();
+    if (remaining == null || remaining > 1) return true;
+    totalBudgetExhausted = true;
+    return false;
+  };
+  const markBudgetFromResult = (attemptResult) => {
+    if (/MODEL_TIMEOUT|ASSESSMENT_TOTAL_TIMEOUT/.test(String(attemptResult?.error || ""))) {
+      const remaining = remainingBudgetMs();
+      if (remaining != null && remaining <= 5) totalBudgetExhausted = true;
+    }
+  };
   const callAssessmentModel = (model) => callDeepSeekChat(config, messages, {
     model,
     temperature: 0.2,
     responseFormat: { type: "json_object" },
     maxTokens: 12000,
-    timeoutMs: assessmentTimeoutMs
+    timeoutMs: attemptTimeoutMs(assessmentTimeoutMs)
   });
   const attempts = [];
   const recordAttempt = (role, providerId, model, attemptResult) => {
+    markBudgetFromResult(attemptResult);
     attempts.push({
       role,
       providerId,
@@ -787,7 +824,7 @@ export async function draftAssessment(config, input = {}) {
   let usedAssessmentProvider = "deepseek";
   let result = await timedCall(() => callAssessmentModel(runtime.deepseekAssessmentModel));
   recordAttempt("primary", "deepseek", runtime.deepseekAssessmentModel, result);
-  if (result.status !== "SUCCESS" && runtime.deepseekAssessmentFallbackModel && runtime.deepseekAssessmentFallbackModel !== runtime.deepseekAssessmentModel) {
+  if (result.status !== "SUCCESS" && hasBudget() && runtime.deepseekAssessmentFallbackModel && runtime.deepseekAssessmentFallbackModel !== runtime.deepseekAssessmentModel) {
     const primaryError = result.error;
     usedAssessmentModel = runtime.deepseekAssessmentFallbackModel;
     result = await timedCall(() => callAssessmentModel(runtime.deepseekAssessmentFallbackModel));
@@ -796,7 +833,7 @@ export async function draftAssessment(config, input = {}) {
       result.primaryError = primaryError;
     }
   }
-  if (result.status !== "SUCCESS" && runtime.gpt55ApiKey && runtime.gpt55BaseUrl && runtime.gpt55Model) {
+  if (result.status !== "SUCCESS" && hasBudget() && runtime.gpt55ApiKey && runtime.gpt55BaseUrl && runtime.gpt55Model) {
     const deepseekError = result.error;
     usedAssessmentProvider = "gpt55";
     usedAssessmentModel = runtime.gpt55Model;
@@ -805,13 +842,13 @@ export async function draftAssessment(config, input = {}) {
       temperature: 0.2,
       responseFormat: { type: "json_object" },
       maxTokens: 12000,
-      timeoutMs: premiumAssessmentTimeoutMs
+      timeoutMs: attemptTimeoutMs(premiumAssessmentTimeoutMs)
     }));
     recordAttempt("premium-fallback", "gpt55", runtime.gpt55Model, result);
     result.primaryError = deepseekError;
     result.fallbackProvider = "gpt55";
   }
-  if (result.status !== "SUCCESS" && runtime.minimaxApiKey && ["restored", "ready", "enabled", "ok"].includes(runtime.minimaxBalanceStatus)) {
+  if (result.status !== "SUCCESS" && hasBudget() && runtime.minimaxApiKey && ["restored", "ready", "enabled", "ok"].includes(runtime.minimaxBalanceStatus)) {
     const previousPrimaryError = result.primaryError || null;
     const previousError = result.error;
     usedAssessmentProvider = "minimax";
@@ -821,7 +858,7 @@ export async function draftAssessment(config, input = {}) {
       temperature: 0.2,
       responseFormat: { type: "json_object" },
       maxTokens: 12000,
-      timeoutMs: minimaxAssessmentTimeoutMs
+      timeoutMs: attemptTimeoutMs(minimaxAssessmentTimeoutMs)
     }));
     recordAttempt("backup-fallback", "minimax", runtime.minimaxModel, result);
     result.primaryError = previousPrimaryError || previousError;
@@ -856,6 +893,8 @@ export async function draftAssessment(config, input = {}) {
         assessmentTimeoutMs,
         minimaxAssessmentTimeoutMs,
         premiumAssessmentTimeoutMs,
+        assessmentTotalTimeoutMs: assessmentTotalTimeoutMs || null,
+        totalBudgetExhausted,
         fallbackProvider: result.fallbackProvider || null,
         attempts,
         primaryError: result.primaryError || null,
