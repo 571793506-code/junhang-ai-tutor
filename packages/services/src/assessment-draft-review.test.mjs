@@ -153,7 +153,7 @@ test("draftAssessmentService assigns standard quiz generation budget", async () 
   );
 
   assert.equal(runnerInput.generationProfile, "quiz-standard");
-  assert.equal(runnerInput.assessmentTotalTimeoutMs, 150000);
+  assert.equal(runnerInput.assessmentTotalTimeoutMs, 210000);
   assert.equal(runnerInput.assessmentMaxTokens, 20000);
   assert.equal(runnerInput.generationContext.output.generationProfile, "quiz-standard");
   assert.equal(result.generationPipeline.model.generationProfile, "quiz-standard");
@@ -190,7 +190,7 @@ test("draftAssessmentService expands all configured generation profile budgets",
     [
       { profile: "e2e-fast", timeout: 105000, maxTokens: 16000 },
       { profile: "fast-check", timeout: 105000, maxTokens: 16000 },
-      { profile: "practice-standard", timeout: 150000, maxTokens: 20000 }
+      { profile: "practice-standard", timeout: 210000, maxTokens: 20000 }
     ]
   );
 });
@@ -228,7 +228,7 @@ test("draftAssessmentService assigns formal budget to exams and personalized pra
   assert.equal(runnerInputs[0].assessmentTotalTimeoutMs, 270000);
   assert.equal(runnerInputs[0].assessmentMaxTokens, 24000);
   assert.equal(runnerInputs[1].generationProfile, "formal-full");
-  assert.equal(runnerInputs[1].assessmentTotalTimeoutMs, 210000);
+  assert.equal(runnerInputs[1].assessmentTotalTimeoutMs, 270000);
   assert.equal(runnerInputs[1].assessmentMaxTokens, 24000);
 });
 
@@ -333,6 +333,85 @@ test("draftAssessmentService keeps exam total score at 100 when bonus is request
 
   assert.equal(result.totalScore, 100);
   assert.equal(result.generationPipeline.repair.totalScore, 100);
+});
+
+test("draftAssessmentService repairs missing requested math bonus item without changing exam total", async () => {
+  const result = await draftAssessmentService(
+    {},
+    {
+      subject: "数学",
+      kind: "试卷",
+      grade: "六年级",
+      requirement: "小升初难度偏高，题量适中，必须有一个附加题"
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async () => ({
+        available: true,
+        providerId: "fake",
+        draftText: JSON.stringify({
+          title: "六年级小升初数学试卷",
+          sections: [
+            {
+              title: "一、填空题",
+              items: Array.from({ length: 12 }).map((_, index) => ({
+                itemType: "fill",
+                prompt: `填空题 ${index + 1}`,
+                answer: "1",
+                analysisSteps: ["根据题意计算。"],
+                knowledgePoint: "数与代数"
+              }))
+            },
+            {
+              title: "二、选择题",
+              items: Array.from({ length: 8 }).map((_, index) => ({
+                itemType: "choice",
+                prompt: `选择题 ${index + 1}`,
+                options: ["A. 1", "B. 2", "C. 3", "D. 4"],
+                answer: "A",
+                analysisSteps: ["排除错误选项。"],
+                knowledgePoint: "综合判断"
+              }))
+            },
+            {
+              title: "三、计算题",
+              items: Array.from({ length: 8 }).map((_, index) => ({
+                itemType: "calculation",
+                prompt: `计算题 ${index + 1}`,
+                answer: "10",
+                analysisSteps: ["写出计算过程。"],
+                knowledgePoint: "计算能力"
+              }))
+            },
+            {
+              title: "四、解答题",
+              items: Array.from({ length: 6 }).map((_, index) => ({
+                itemType: "solution",
+                prompt: `解决问题 ${index + 1}`,
+                answer: "略",
+                analysisSteps: ["分析数量关系。"],
+                knowledgePoint: "解决问题"
+              }))
+            }
+          ]
+        }),
+        modelRun: {
+          provider: "fake",
+          model: "fake-assessment",
+          skill: "assessment-draft",
+          status: "SUCCESS",
+          metadata: { attempts: [] }
+        }
+      })
+    }
+  );
+
+  assert.equal(result.totalScore, 100);
+  assert.equal(result.generationPipeline.repair.totalScore, 100);
+  assert.equal(
+    result.draftItems.some((item) => /附加题|挑战|拓展/.test(`${item.metadata?.sectionTitle || ""} ${item.prompt || ""}`)),
+    true
+  );
 });
 
 test("draftAssessmentService replaces exam-style English quiz items during local repair", async () => {

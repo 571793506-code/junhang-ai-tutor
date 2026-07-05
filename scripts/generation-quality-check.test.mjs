@@ -16,8 +16,8 @@ test("quiz quality samples use medium budget for three subject quizzes", () => {
     "英语-小测"
   ]);
   assert.equal(cases.every((item) => item.generationProfile === "quiz-standard"), true);
-  assert.equal(cases.every((item) => item.assessmentTotalTimeoutMs === 60000), true);
-  assert.equal(cases.every((item) => item.assessmentMaxTokens === 16000), true);
+  assert.equal(cases.every((item) => item.assessmentTotalTimeoutMs === 210000), true);
+  assert.equal(cases.every((item) => item.assessmentMaxTokens === 20000), true);
 });
 
 test("formal quality samples use formal budget for exams and personalized practice", () => {
@@ -30,10 +30,10 @@ test("formal quality samples use formal budget for exams and personalized practi
     "语文-阅读表达练习"
   ]);
   assert.equal(cases.every((item) => item.generationProfile === "formal-full"), true);
-  assert.equal(cases.every((item) => item.assessmentMaxTokens === 20000), true);
-  assert.equal(cases[0].assessmentTotalTimeoutMs, 180000);
-  assert.equal(cases[1].assessmentTotalTimeoutMs, 120000);
-  assert.equal(cases[2].assessmentTotalTimeoutMs, 120000);
+  assert.equal(cases.every((item) => item.assessmentMaxTokens === 24000), true);
+  assert.equal(cases[0].assessmentTotalTimeoutMs, 270000);
+  assert.equal(cases[1].assessmentTotalTimeoutMs, 270000);
+  assert.equal(cases[2].assessmentTotalTimeoutMs, 270000);
 });
 
 test("generation quality verification rejects dynamic fallback samples", () => {
@@ -47,17 +47,17 @@ test("generation quality verification rejects dynamic fallback samples", () => {
     generationPipeline: {
       model: {
         generationProfile: "quiz-standard",
-        assessmentTotalTimeoutMs: 60000,
-        assessmentMaxTokens: 16000,
-        primaryError: "MODEL_TIMEOUT after 60000ms",
+        assessmentTotalTimeoutMs: 210000,
+        assessmentMaxTokens: 20000,
+        primaryError: "MODEL_TIMEOUT after 210000ms",
         attempts: [
           {
             role: "primary",
             providerId: "deepseek",
             model: "deepseek-v4-pro",
             status: "ERROR",
-            latencyMs: 60000,
-            error: "MODEL_TIMEOUT after 60000ms"
+            latencyMs: 210000,
+            error: "MODEL_TIMEOUT after 210000ms"
           }
         ]
       },
@@ -78,7 +78,7 @@ test("generation quality verification rejects dynamic fallback samples", () => {
   assert.equal(check.ok, false);
   assert.ok(check.detail.issues.includes("质量样本必须来自真实模型生成，不能使用动态兜底。"));
   assert.equal(check.detail.issues.some((issue) => issue.includes("数学质量样本必须包含")), false);
-  assert.equal(check.detail.primaryError, "MODEL_TIMEOUT after 60000ms");
+  assert.equal(check.detail.primaryError, "MODEL_TIMEOUT after 210000ms");
   assert.equal(check.detail.attempts.length, 1);
   assert.equal(check.detail.attempts[0].providerId, "deepseek");
 });
@@ -94,8 +94,8 @@ test("english quiz quality sample rejects full exam writing patterns", () => {
     generationPipeline: {
       model: {
         generationProfile: "quiz-standard",
-        assessmentTotalTimeoutMs: 60000,
-        assessmentMaxTokens: 16000
+        assessmentTotalTimeoutMs: 210000,
+        assessmentMaxTokens: 20000
       },
       repair: { itemCount: 8, totalScore: 60 }
     },
@@ -114,6 +114,54 @@ test("english quiz quality sample rejects full exam writing patterns", () => {
 
   assert.equal(check.ok, false);
   assert.ok(check.detail.issues.includes("英语小测质量样本不得出现写作题。"));
+});
+
+test("generation quality verification evaluates repaired draft items", () => {
+  const sample = buildGenerationQualityCases("formal").find((item) => item.name === "语文-阅读表达练习");
+  const readingItems = Array.from({ length: 4 }, (_, index) => ({
+    itemType: "reading",
+    prompt: `阅读理解第 ${index + 1} 题`,
+    answer: "参考答案",
+    metadata: {
+      sectionTitle: "三、阅读理解",
+      knowledgePoint: "阅读理解",
+      commonMistake: "答题要回到原文找依据。",
+      passageText: "这是一段服务层修复后的完整现代文阅读材料。",
+      analysisSteps: ["阅读全文。", "定位依据。", "组织答案。"]
+    }
+  }));
+  const fillItems = Array.from({ length: 4 }, (_, index) => ({
+    itemType: "fill",
+    prompt: `基础填空第 ${index + 1} 题`,
+    answer: "参考答案",
+    metadata: {
+      sectionTitle: "一、基础知识",
+      knowledgePoint: "基础知识",
+      commonMistake: "注意结合语境判断。",
+      analysisSteps: ["审清题意。", "联系知识点。", "写出答案。"]
+    }
+  }));
+
+  const check = evaluateGenerationQualityResult(sample, {
+    modelAvailable: true,
+    draftAvailable: true,
+    usedDynamicFallback: false,
+    totalScore: 60,
+    audit: { status: "passed", itemCount: 8, issues: [] },
+    generationPipeline: {
+      model: {
+        generationProfile: "formal-full",
+        assessmentTotalTimeoutMs: 270000,
+        assessmentMaxTokens: 24000
+      },
+      repair: { itemCount: 8, totalScore: 60 }
+    },
+    parsedDraft: { sections: [] },
+    draftItems: [...fillItems, ...readingItems]
+  });
+
+  assert.equal(check.ok, true);
+  assert.ok(check.detail.itemTypes.includes("reading"));
 });
 
 test("generation quality verification metadata is separate from link guard e2e", () => {

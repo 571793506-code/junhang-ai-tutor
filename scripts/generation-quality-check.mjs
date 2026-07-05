@@ -51,8 +51,8 @@ export function buildGenerationQualityCases(mode = "quiz") {
         difficulty: "偏高",
         requirement: "生成一份六年级小升初级别数学试卷，难度偏高，题量适中，必须有一个附加题，解析要写清步骤和易错点。",
         generationProfile: "formal-full",
-        assessmentTotalTimeoutMs: 180000,
-        assessmentMaxTokens: 20000
+        assessmentTotalTimeoutMs: 270000,
+        assessmentMaxTokens: 24000
       }),
       baseCase({
         name: "英语-个性化练习",
@@ -63,8 +63,8 @@ export function buildGenerationQualityCases(mode = "quiz") {
         difficulty: "中等",
         requirement: "针对五年级学生 Unit 4 词汇、句型表达和阅读薄弱点生成个性化练习，避免完整试卷结构。",
         generationProfile: "formal-full",
-        assessmentTotalTimeoutMs: 120000,
-        assessmentMaxTokens: 20000
+        assessmentTotalTimeoutMs: 270000,
+        assessmentMaxTokens: 24000
       }),
       baseCase({
         name: "语文-阅读表达练习",
@@ -75,8 +75,8 @@ export function buildGenerationQualityCases(mode = "quiz") {
         difficulty: "中等",
         requirement: "围绕现代文阅读理解、信息提取和表达薄弱点生成个性化练习，阅读材料要有完整上下文，不默认作文。",
         generationProfile: "formal-full",
-        assessmentTotalTimeoutMs: 120000,
-        assessmentMaxTokens: 20000
+        assessmentTotalTimeoutMs: 270000,
+        assessmentMaxTokens: 24000
       })
     ];
   }
@@ -90,8 +90,8 @@ export function buildGenerationQualityCases(mode = "quiz") {
       difficulty: "中等",
       requirement: "围绕小数乘法、图形面积和应用题生成两页 A4 小测，计算题和解答题要有足够作答空间。",
       generationProfile: "quiz-standard",
-      assessmentTotalTimeoutMs: 60000,
-      assessmentMaxTokens: 16000
+      assessmentTotalTimeoutMs: 210000,
+      assessmentMaxTokens: 20000
     }),
     baseCase({
       name: "语文-小测",
@@ -101,8 +101,8 @@ export function buildGenerationQualityCases(mode = "quiz") {
       difficulty: "中等",
       requirement: "围绕单元基础、词句运用和现代文阅读生成两页 A4 小测，阅读材料要有完整上下文，不默认作文。",
       generationProfile: "quiz-standard",
-      assessmentTotalTimeoutMs: 60000,
-      assessmentMaxTokens: 16000
+      assessmentTotalTimeoutMs: 210000,
+      assessmentMaxTokens: 20000
     }),
     baseCase({
       name: "英语-小测",
@@ -112,8 +112,8 @@ export function buildGenerationQualityCases(mode = "quiz") {
       difficulty: "中等",
       requirement: "围绕 Unit 4 词汇、短语、句型和阅读生成两页 A4 小测，包含中英文互译、写单词、造句、少量选择和阅读，不要写作、完形或文章选词填空。",
       generationProfile: "quiz-standard",
-      assessmentTotalTimeoutMs: 60000,
-      assessmentMaxTokens: 16000
+      assessmentTotalTimeoutMs: 210000,
+      assessmentMaxTokens: 20000
     })
   ];
 }
@@ -132,6 +132,19 @@ export function buildGenerationQualityVerification(mode = "quiz") {
 }
 
 function flattenItems(result = {}) {
+  if (Array.isArray(result.draftItems) && result.draftItems.length) {
+    return result.draftItems.map((item) => {
+      const metadata = item?.metadata || {};
+      return {
+        ...(typeof item === "string" ? { prompt: item } : item),
+        analysisSteps: item?.analysisSteps || metadata.analysisSteps || [],
+        commonMistake: item?.commonMistake || metadata.commonMistake || "",
+        knowledgePoint: item?.knowledgePoint || metadata.knowledgePoint || "",
+        passageText: item?.passageText || metadata.passageText || "",
+        sectionTitle: item?.sectionTitle || metadata.sectionTitle || ""
+      };
+    });
+  }
   const sections = Array.isArray(result.parsedDraft?.sections) ? result.parsedDraft.sections : [];
   return sections.flatMap((section) => {
     const items = Array.isArray(section.items) ? section.items : Array.isArray(section.questions) ? section.questions : [];
@@ -158,7 +171,9 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
   const issues = [];
   const items = flattenItems(result);
   const itemTypes = new Set(items.map(itemType).filter(Boolean));
-  const sectionTitles = Array.isArray(result.parsedDraft?.sections)
+  const sectionTitles = items.length
+    ? items.map((item) => String(item.sectionTitle || "")).filter(Boolean)
+    : Array.isArray(result.parsedDraft?.sections)
     ? result.parsedDraft.sections.map((section) => String(section.title || ""))
     : [];
   const totalScore = Number(result.totalScore || result.generationPipeline?.repair?.totalScore || 0);

@@ -185,7 +185,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 生成小测、练习、试卷草稿。
   - 关键字段：`kind`, `grade`, `subject`, `difficulty`, `requirement`。
   - 可选字段：`generationProfile`, `assessmentTotalTimeoutMs` / `generationTimeoutMs`, `assessmentMaxTokens` / `generationMaxTokens`。其中 timeout 控制最多等待多久，maxTokens 控制模型最大输出长度；预算耗尽后服务层返回可复核动态兜底草稿，不继续等待后续模型 fallback。
-  - 默认生成预算由服务层按场景推导：E2E/联调可显式传短预算；小测使用 `quiz-standard` 中预算，默认 60s / 16000 tokens；普通练习使用 `practice-standard`，默认 60s / 16000 tokens；试卷和个性化练习使用 `formal-full`，默认 120-180s / 20000 tokens。
+  - 默认生成预算由服务层按场景推导：E2E/联调可显式传短预算；小测使用 `quiz-standard` 中预算，默认 210s / 20000 tokens；普通练习使用 `practice-standard`，默认 210s / 20000 tokens；试卷和个性化练习使用 `formal-full`，默认 270s / 24000 tokens。
   - `check:content-context` 中的低预算 E2E 已降级为 `link-guard`，只验证资料上下文、预算退出、教师复核和 PDF 导出链路，不作为生成内容质量验收。
   - 默认规则：小测/练习两页 A4，试卷四页 A4。
   - 服务层模型链路：DeepSeek assessment v4 优先生成；超时或不可用时由 GPT5.5 高级生成接管；MiniMax M3 作为备份生成；随后由服务层修复结构并做本地结构审查。

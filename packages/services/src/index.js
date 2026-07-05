@@ -80,10 +80,10 @@ function resolveAssessmentGenerationBudget(input = {}, config = {}) {
   const profileDefaults = {
     "e2e-fast": { assessmentTotalTimeoutMs: 105000, assessmentMaxTokens: 16000 },
     "fast-check": { assessmentTotalTimeoutMs: 105000, assessmentMaxTokens: 16000 },
-    "quiz-standard": { assessmentTotalTimeoutMs: 150000, assessmentMaxTokens: 20000 },
-    "practice-standard": { assessmentTotalTimeoutMs: 150000, assessmentMaxTokens: 20000 },
+    "quiz-standard": { assessmentTotalTimeoutMs: 210000, assessmentMaxTokens: 20000 },
+    "practice-standard": { assessmentTotalTimeoutMs: 210000, assessmentMaxTokens: 20000 },
     "formal-full": {
-      assessmentTotalTimeoutMs: kind === "试卷" ? 270000 : 210000,
+      assessmentTotalTimeoutMs: 270000,
       assessmentMaxTokens: 24000
     }
   };
@@ -1438,6 +1438,9 @@ function reviewAndRepairAssessmentItems(items = [], input = {}) {
       notes.push("已将生成类题目数量调整为偶数，便于排版和作答。");
     }
   }
+  if (ensureRequestedMathBonusItem(evenRepaired, input)) {
+    notes.push("老师明确要求附加题，已将最后一道数学解答题标记为附加题。");
+  }
   const limitedRaw = evenRepaired.map((item, index) => ({
     ...item,
     metadata: {
@@ -1597,8 +1600,33 @@ function stripLeadingQuestionNumber(value) {
 
 function isUnrequestedBonusItem(item = {}, input = {}) {
   if (wantsBonusQuestions(input)) return false;
+  return hasBonusMarker(item);
+}
+
+function hasBonusMarker(item = {}) {
   const text = compactText(`${item.prompt || ""} ${item.metadata?.sectionTitle || ""}`);
   return /附加题|拓展题|挑战题|Bonus/i.test(text);
+}
+
+function ensureRequestedMathBonusItem(items = [], input = {}) {
+  if (normalizeSubject(input.subject) !== "数学") return false;
+  if (normalizeAssessmentKind(input.kind) !== "试卷") return false;
+  if (!wantsBonusQuestions(input)) return false;
+  if (items.some(hasBonusMarker)) return false;
+  const targetIndex = items.reduce((lastIndex, item, index) => (
+    printableType(item) === "solution" ? index : lastIndex
+  ), -1);
+  if (targetIndex < 0) return false;
+  const item = items[targetIndex];
+  items[targetIndex] = {
+    ...item,
+    prompt: `附加题：${stripLeadingQuestionNumber(item.prompt || "综合应用题")}`,
+    metadata: {
+      ...(item.metadata || {}),
+      isBonus: true
+    }
+  };
+  return true;
 }
 
 function isForbiddenEnglishShortAssessmentItem(item = {}, input = {}) {
