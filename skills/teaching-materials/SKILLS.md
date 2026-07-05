@@ -16,6 +16,16 @@
 - 多端只展示资料摘要、数量、科目、知识点和入库状态，不展示完整 chunk、模型信息或内部调试字段。
 - 内容索引是服务层上下文来源，不能只存在 Web 页面状态里。
 
+## 外部工具与 Skill 参考
+
+- MarkItDown：作为本项目普通教学资料转 Markdown 的默认路线，优先服务 `scripts/convert-to-markdown.mjs` 和资料索引链路。
+- Docling：作为复杂 PDF、表格、图片、版式材料解析增强候选；只有 MarkItDown 结果不足以支持教师复核或知识点抽取时再评估接入。
+- Marker：只作为能力候选；接入前必须审查 license、依赖体积、OCR 质量、公式/表格可靠性和本地运行成本。
+- book-to-skill：只参考“资料集合变成可查询知识”的组织方式；不要把教材全文直接做成学生可见 skill。
+- education-agent-skills：只吸收课程结构、测评、学习反馈和教师复核规则；不直接复制外部实现。
+
+外部资料处理工具进入项目时，必须先满足本项目边界：`.edupdf` 不转换、不改写；资料只进入教师端和服务端 `generationContext.teaching.contentContext`；学生、家长、课堂平板和公共屏不展示完整资料内容。
+
 ## 当前项目可参考位置
 
 - `scripts/convert-to-markdown.mjs`：普通资料转 Markdown。
