@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
 import path from "node:path";
 
 const DEFAULT_RUNTIME_SCAN_PATHS = [
@@ -55,7 +56,7 @@ export async function buildWorkspaceGuardianReport(options = {}) {
   const clean = !status.stagedFiles.length &&
     !status.unstagedFiles.length &&
     !status.untrackedFiles.length &&
-    !hasAhead(status.branchLine) &&
+    !ignoredRuntimeFiles.length &&
     !hasBehind(status.branchLine);
 
   return {
@@ -64,6 +65,51 @@ export async function buildWorkspaceGuardianReport(options = {}) {
     ignoredRuntimeFiles,
     recentCommits,
     recommendations: recommendWorkspaceActions({ ...status, ignoredRuntimeFiles })
+  };
+}
+
+export async function archiveRuntimeResidue(options = {}) {
+  const cwd = path.resolve(options.cwd || process.cwd());
+  const ignoredRuntimeFiles = options.ignoredRuntimeFiles || [];
+  const timestamp = options.timestamp || timestampForArchive(new Date());
+  const archiveRoot = path.resolve(options.archiveRoot || path.join(cwd, "..", `${path.basename(cwd)}-local-archive`));
+  const archiveDir = path.join(archiveRoot, `${timestamp}-run-residue`);
+  const movedFiles = [];
+  const skippedFiles = [];
+
+  await fs.mkdir(archiveDir, { recursive: true });
+
+  for (const relativeFile of ignoredRuntimeFiles) {
+    const safeRelativePath = normalizeRelativePath(relativeFile);
+    if (!safeRelativePath) {
+      skippedFiles.push({ file: relativeFile, reason: "INVALID_PATH" });
+      continue;
+    }
+
+    const sourcePath = path.resolve(cwd, safeRelativePath);
+    if (!sourcePath.startsWith(cwd + path.sep)) {
+      skippedFiles.push({ file: relativeFile, reason: "OUTSIDE_WORKSPACE" });
+      continue;
+    }
+
+    const targetPath = path.resolve(archiveDir, safeRelativePath);
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    try {
+      await fs.rename(sourcePath, targetPath);
+      movedFiles.push({ file: safeRelativePath, target: targetPath });
+    } catch (error) {
+      skippedFiles.push({
+        file: safeRelativePath,
+        reason: error?.code || "MOVE_FAILED"
+      });
+    }
+  }
+
+  return {
+    ok: skippedFiles.length === 0,
+    archiveDir,
+    movedFiles,
+    skippedFiles
   };
 }
 
@@ -80,6 +126,7 @@ export function recommendWorkspaceActions(report) {
   }
   if (report.ignoredRuntimeFiles?.length) {
     recommendations.push("存在被忽略运行残留；默认保留本地，不纳入 Git。");
+    recommendations.push("可运行 cmd /c npm.cmd run workspace:archive-residue 将运行残留移到本地归档。");
   }
   if (hasAhead(report.branchLine)) {
     recommendations.push("本地领先远端；验证后可推送。");
@@ -123,6 +170,25 @@ function hasAhead(branchLine = "") {
 
 function hasBehind(branchLine = "") {
   return /\bbehind\s+\d+/.test(branchLine);
+}
+
+function normalizeRelativePath(filePath = "") {
+  const normalized = String(filePath).replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!normalized || normalized.includes("../") || normalized === "..") return "";
+  return normalized;
+}
+
+function timestampForArchive(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate())
+  ].join("-") + "T" + [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds())
+  ].join("-");
 }
 
 function formatItems(items = []) {

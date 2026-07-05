@@ -31,6 +31,7 @@
     "check:feishu": "node scripts/check-feishu-app.mjs",
     "check:services": "node scripts/service-smoke.mjs",
     "workspace:guard": "node scripts/workspace-guardian.mjs",
+    "workspace:archive-residue": "node scripts/workspace-archive-residue.mjs",
     "check:workspace-guardian": "node --test scripts/workspace-guardian.test.mjs",
     "check:generation:blueprint": "node scripts/generation-blueprint-check.mjs",
     "check:content-context": "node scripts/content-context-e2e.mjs",

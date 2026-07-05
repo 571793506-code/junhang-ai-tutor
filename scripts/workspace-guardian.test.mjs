@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
+  archiveRuntimeResidue,
   buildWorkspaceGuardianReport,
   formatWorkspaceGuardianReport,
   parseGitStatus,
@@ -64,6 +68,20 @@ test("buildWorkspaceGuardianReport collects git state without mutating the works
   assert.ok(calls.every((args) => !args.includes("add") && !args.includes("clean")));
 });
 
+test("buildWorkspaceGuardianReport treats local ahead as push reminder instead of dirty workspace", async () => {
+  const runGit = async (args) => {
+    if (args.includes("--ignored")) return [];
+    if (args[0] === "status") return ["## main...origin/main [ahead 2]"];
+    if (args[0] === "log") return ["abc1234 docs: update guard"];
+    return [];
+  };
+
+  const report = await buildWorkspaceGuardianReport({ runGit });
+
+  assert.equal(report.clean, true);
+  assert.ok(report.recommendations.includes("本地领先远端；验证后可推送。"));
+});
+
 test("recommendWorkspaceActions classifies next actions conservatively", () => {
   const recommendations = recommendWorkspaceActions({
     stagedFiles: ["SKILLS.md"],
@@ -77,6 +95,7 @@ test("recommendWorkspaceActions classifies next actions conservatively", () => {
   assert.ok(recommendations.includes("存在未暂存修改；先按文档、脚本、服务层、Web、小程序或本地保存分组。"));
   assert.ok(recommendations.includes("存在未跟踪文件；不要使用 git add .，先确认是否为源码、文档、资产或运行产物。"));
   assert.ok(recommendations.includes("存在被忽略运行残留；默认保留本地，不纳入 Git。"));
+  assert.ok(recommendations.includes("可运行 cmd /c npm.cmd run workspace:archive-residue 将运行残留移到本地归档。"));
   assert.ok(recommendations.includes("本地领先远端；验证后可推送。"));
   assert.ok(recommendations.includes("本地落后远端；开始新任务前先 fetch/rebase 或确认同步策略。"));
 });
@@ -98,4 +117,34 @@ test("formatWorkspaceGuardianReport renders a readable Chinese summary", () => {
   assert.match(text, /未跟踪：1/);
   assert.match(text, /被忽略运行残留：1/);
   assert.match(text, /不要使用 git add \./);
+});
+
+test("archiveRuntimeResidue moves ignored runtime files outside the workspace", async () => {
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "guardian-workspace-"));
+  const archiveRoot = fs.mkdtempSync(path.join(os.tmpdir(), "guardian-archive-"));
+  const relativeFiles = [
+    "exports/markdown-ingestion-e2e/manifest.json",
+    "storage/e2e-fixtures/content-context-upload-fixture.md"
+  ];
+
+  for (const relativePath of relativeFiles) {
+    const sourcePath = path.join(workspaceRoot, relativePath);
+    fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+    fs.writeFileSync(sourcePath, relativePath, "utf8");
+  }
+
+  const result = await archiveRuntimeResidue({
+    cwd: workspaceRoot,
+    archiveRoot,
+    ignoredRuntimeFiles: relativeFiles,
+    timestamp: "2026-07-05T11-00-00"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.movedFiles.length, 2);
+  assert.deepEqual(result.skippedFiles, []);
+  for (const relativePath of relativeFiles) {
+    assert.equal(fs.existsSync(path.join(workspaceRoot, relativePath)), false);
+    assert.equal(fs.readFileSync(path.join(result.archiveDir, relativePath), "utf8"), relativePath);
+  }
 });

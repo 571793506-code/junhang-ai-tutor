@@ -20,6 +20,7 @@ cmd /c npm.cmd run workspace:guard
 ```
 
 该命令只读取 Git 状态、被忽略运行残留和最近提交；不执行 stage、删除、恢复或清理。
+本地分支只显示 `ahead` 时，守护脚本只提示“验证后可推送”，不把它视为脏工作区；如果显示 `behind`，开始新任务前必须先确认同步策略。
 3. 如守护命令报告不通过，再运行 `git status --short`，确认 staged、unstaged、untracked 三类状态。
 4. 运行 `git diff --name-status` 和 `git diff --cached --name-status`，先看文件范围，不直接读超长 diff。
 5. 按下面四类分组：
@@ -30,6 +31,22 @@ cmd /c npm.cmd run workspace:guard
 6. 只用显式路径 stage，不使用 `git add .`。
 7. 提交前运行与本组相关的验证命令。
 8. 提交后再次运行 `cmd /c npm.cmd run workspace:guard`，报告剩余未收口文件属于哪一类。
+
+## 运行残留本地归档
+
+`workspace:guard` 永远保持只读。需要把被忽略运行残留移出工作区时，显式运行：
+
+```bat
+cmd /c npm.cmd run workspace:archive-residue
+```
+
+该命令只处理守护脚本识别到的 ignored 运行残留，并按原相对路径移动到仓库同级本地目录：
+
+```text
+..\君航AI助教-local-archive\<时间戳>-run-residue\
+```
+
+归档命令有文件移动副作用，因此不要把它作为普通审查命令自动触发。归档后重新运行 `cmd /c npm.cmd run workspace:guard`，确认“被忽略运行残留”为 0。
 
 ## 当前阶段分类
 
@@ -100,7 +117,10 @@ cmd /c npm.cmd run check:encoding
 ```bat
 cmd /c npm.cmd run check:workspace-guardian
 cmd /c npm.cmd run workspace:guard
+cmd /c npm.cmd run workspace:archive-residue
 ```
+
+如当前工作区确有 ignored 残留，`workspace:archive-residue` 会把它们移动到本地归档；如没有残留，应输出“无残留需要归档”。
 
 涉及代码组提交时，根据范围追加：
 
