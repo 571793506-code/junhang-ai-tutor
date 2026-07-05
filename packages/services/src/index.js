@@ -1945,10 +1945,8 @@ function ensureLongChinesePassage(title, text, targetChars = 550) {
   };
   let combined = `${text}${extras[title] || ""}`.trim();
   const genericExtra = "  老师在讲评时提醒大家，阅读这样的材料，不能只抓住一两个词就下结论。要先弄清事情的发展顺序，再联系人物的语言、动作和心理变化，最后把文章表达的意思说完整。答题时还要写出依据，例如人物为什么这样做、事情后来发生了什么变化、作者想通过细节说明什么。只有把原文信息和自己的理解连起来，答案才会完整、有说服力。";
-  let guard = 0;
-  while (combined.replace(/[^\u4e00-\u9fa5]/g, "").length < targetChars && guard < 4) {
+  if (combined.replace(/[^\u4e00-\u9fa5]/g, "").length < targetChars) {
     combined = `${combined}${genericExtra}`;
-    guard += 1;
   }
   return combined;
 }
