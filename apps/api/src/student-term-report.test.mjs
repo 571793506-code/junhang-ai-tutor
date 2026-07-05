@@ -115,6 +115,30 @@ test("buildTermReportDraft applies midterm and final content templates", () => {
   }
 });
 
+test("buildTermReportDraft includes deeper stage report content blocks", () => {
+  const draft = buildTermReportDraft(student, {
+    reportType: "midterm",
+    periodLabel: "2026春季期中",
+    now: new Date("2026-07-05T12:00:00.000Z")
+  });
+
+  assert.ok(draft.sections.stageConclusions.length >= 3);
+  assert.ok(draft.sections.stageConclusions.every((item) => item.title && item.text && item.evidence));
+  assert.ok(draft.sections.evidenceSummary.length >= 3);
+  assert.ok(draft.sections.subjectAbilityMap.length === 3);
+  assert.ok(draft.sections.subjectAbilityMap.every((item) => (
+    item.subject &&
+    item.currentLevel &&
+    item.keyAbility &&
+    item.evidence &&
+    item.nextStep
+  )));
+  assert.ok(draft.sections.commonCauseAnalysis.length >= 2);
+  assert.ok(draft.sections.actionPlan.length >= 3);
+  assert.ok(draft.sections.parentCommunicationSummary.text.includes("家长"));
+  assert.equal(JSON.stringify(draft).includes("平均表现约"), false);
+});
+
 test("mapTermReportForRole hides PDF and body from student until sent", () => {
   const report = {
     id: "report_1",
@@ -215,7 +239,7 @@ test("renderTermReportHtml includes term report template sections", () => {
     metadata: { termReport: draft }
   });
 
-  for (const heading of ["三科总览", "重点科目展开", "稳定表现", "下阶段辅导重点", "家长下一步"]) {
+  for (const heading of ["阶段关键结论", "证据摘要", "三科总览", "学科能力拆解", "重点科目展开", "共性错因分析", "跟进计划", "家长沟通摘要"]) {
     assert.ok(html.includes(heading), `missing heading: ${heading}`);
   }
   assert.ok(html.includes("教师确认后生成"));

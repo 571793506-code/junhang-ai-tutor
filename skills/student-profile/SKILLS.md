@@ -54,11 +54,17 @@
 期中/期末 `draft.sections` 使用综合成长报告结构：
 
 - `overview`：阶段综合摘要；期中强调阶段掌握、共性错因和后续两到四周重点，期末强调学期成长、稳定强项和假期或下阶段安排。
+- `stageConclusions`：阶段关键结论，至少包含阶段掌握或学期成长、学习过程和复盘依据。
+- `evidenceSummary`：证据摘要，区分学习任务、教师确认批改、错题订正和问答互动。
 - `subjectOverview`：语文、数学、英语三科总览，每科 1 条观察，证据不足时写继续观察。
+- `subjectAbilityMap`：学科能力拆解，按语文、数学、英语分别写当前观察、能力点、依据和下一步。
 - `focusSubjects`：重点科目展开，最多 1 到 2 个；每项包含 `evidence`, `abilityObservation`, `priorityAction`, `teacherNextStep`。
+- `commonCauseAnalysis`：共性错因分析，优先覆盖审题复述、订正闭环和表达完整度。
 - `stableGrowth`：稳定表现，每项包含 `text` 和 `evidence`。
 - `tutoringFocus`：老师下阶段辅导动作。
+- `actionPlan`：跟进计划，按第一步、第二步、第三步描述可执行动作。
 - `parentNextSteps`：家长在家可执行动作；`parentNextStep` 仅作为兼容字段保留。
+- `parentCommunicationSummary`：教师给家长微信私聊发送前可参考的沟通摘要，强调过程观察，不要求家长替代老师讲课。
 
 `publishedView` 中每条观察尽量保留：
 

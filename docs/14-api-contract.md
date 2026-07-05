@@ -108,7 +108,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 请求字段：`reportType` 可选 `midterm` 或 `final`；`periodLabel` 为教师填写的阶段名称，例如 `2026春季期中`。
   - 报告复用 `StudentReport`，阶段交付状态写入 `metadata.termReport`，不新增首期数据库表。
   - 初始状态为 `draft`，可见性为 `teacher_pdf_only`，只返回给教师。
-  - 草稿模板字段：`template`, `sections.overview`, `sections.subjectOverview`, `sections.focusSubjects`, `sections.stableGrowth`, `sections.tutoringFocus`, `sections.parentNextSteps`；其中重点科目最多 1 到 2 个，包含证据、能力观察、优先动作和老师下一步。
+  - 草稿模板字段：`template`, `sections.overview`, `sections.stageConclusions`, `sections.evidenceSummary`, `sections.subjectOverview`, `sections.subjectAbilityMap`, `sections.focusSubjects`, `sections.commonCauseAnalysis`, `sections.stableGrowth`, `sections.tutoringFocus`, `sections.actionPlan`, `sections.parentNextSteps`, `sections.parentCommunicationSummary`；其中重点科目最多 1 到 2 个，包含证据、能力观察、优先动作和老师下一步。
   - 期中模板强调阶段掌握、共性错因和后续两到四周重点；期末模板强调学期成长、稳定强项和假期或下阶段建议。
 
 - `POST /api/students/:studentId/term-report/:reportId/pdf`
