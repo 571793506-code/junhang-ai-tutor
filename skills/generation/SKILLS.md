@@ -20,6 +20,7 @@
 - E2E、联调或低延迟入口可以传 `assessmentTotalTimeoutMs` / `generationTimeoutMs` 给服务层；预算耗尽后必须走结构化动态兜底草稿和教师复核，不能让接口长时间等待模型。
 - timeout 预算和 token 上限必须分开处理：timeout 防止生成长时间不收口，`assessmentMaxTokens` / `generationMaxTokens` 给真实模型保留输出空间，不能用提高 token 上限替代超时边界。
 - 生成预算默认由服务层推导：E2E/联调可用短预算；小测走 `quiz-standard` 中预算；普通练习走 `practice-standard`；试卷和个性化练习走 `formal-full`，正式生成默认允许 20000 tokens。
+- `check:content-context` 低预算 E2E 只作为 `link-guard` 链路守卫，证明资料上下文、预算退出、动态兜底、教师复核和导出链路能收口；不得用它判断题目原创性、教师要求贴合度、个性化程度、解析质量或 PDF 视觉质量。
 
 ## 教育规则 Skill 参考
 
@@ -96,4 +97,4 @@
 - 修改服务层结构时运行 `cmd /c npm.cmd run check --workspace apps/api`。
 - 修改中文提示词、题型规则或文案时运行 `cmd /c npm.cmd run check:encoding`。
 - 当前已知 `check:services` 可能因生成草稿耗时超时，不能把它作为生成完全健康的唯一结论。
-- 完整 E2E 只作为大改或发布前门禁；日常修生成规则时不要用完整 E2E 代替分层验证。
+- 低预算 `check:content-context` 只验证链路守卫；完整 E2E 只作为大改或发布前门禁；日常修生成规则时不要用 E2E 代替分层验证或中/正式预算质量样本。

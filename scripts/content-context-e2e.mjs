@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -39,6 +40,29 @@ const zh = {
     "\u7aef\u5230\u7aef\u5b88\u536b\u6d4b\u8bd5\uff0c\u56f4\u7ed5\u5c0f\u6570\u4e58\u6cd5\u548c\u56fe\u5f62\uff0c\u751f\u62102\u9875A4\u5c0f\u6d4b\uff0c\u5305\u542b\u7b54\u6848\u89e3\u6790\u3002"
 };
 
+export function buildContentContextE2eVerificationMeta({ generationModelBudgetMs } = {}) {
+  return {
+    verificationScope: "link-guard",
+    assessesGenerationQuality: false,
+    assessesModelCreativity: false,
+    allowsDynamicFallback: true,
+    modelBudgetMs: Number(generationModelBudgetMs) || null,
+    qualityBoundary: "This low-budget E2E only proves the content-context, review-gate, timeout, fallback, and export link can close; it does not assess generation content quality.",
+    proves: [
+      "api-session-content-context-flow",
+      "bounded-assessment-draft-return",
+      "teacher-review-gate",
+      "draft-and-final-pdf-export"
+    ]
+  };
+}
+
+export function isDirectContentContextE2eRun(moduleUrl, argvPath = process.argv[1]) {
+  return Boolean(argvPath) && moduleUrl === pathToFileURL(path.resolve(argvPath)).href;
+}
+
+async function main() {
+const verificationMeta = buildContentContextE2eVerificationMeta({ generationModelBudgetMs });
 const checks = [];
 const fixtureDir = path.resolve("storage", "e2e-fixtures");
 const fixturePath = path.join(fixtureDir, "content-context-upload-fixture.md");
@@ -405,6 +429,9 @@ const assessment = teacherToken
 const assessmentResult = assessment?.body.result || {};
 const assessmentId = assessmentResult.persisted?.assignmentId;
 pass("assessment draft injects clean content context", assessment?.ok && assessmentId && assessmentResult.contentContext?.matchedCount >= 1 && !hasCorrupt(assessment.body), {
+  verificationScope: verificationMeta.verificationScope,
+  assessesGenerationQuality: verificationMeta.assessesGenerationQuality,
+  qualityBoundary: verificationMeta.qualityBoundary,
   status: assessment?.status || 0,
   error: assessment?.body.error || null,
   message: assessment?.body.message || null,
@@ -473,7 +500,16 @@ console.log(JSON.stringify({
   ok: failed.length === 0,
   apiBaseUrl,
   generatedAt: new Date().toISOString(),
+  verification: verificationMeta,
   checks
 }, null, 2));
 
 if (failed.length) process.exitCode = 1;
+}
+
+if (isDirectContentContextE2eRun(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
