@@ -270,6 +270,42 @@ export async function publishStudentProfile(studentId: string, snapshot: Record<
   }>(response);
 }
 
+export type TermReportType = "midterm" | "final";
+
+export async function draftStudentTermReport(studentId: string, input: { reportType: TermReportType; periodLabel?: string }) {
+  const response = await fetch(`${API_BASE_URL}/api/students/${studentId}/term-report/draft`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(input)
+  });
+  return readJson<{ ok: boolean; report: StudentReportCard }>(response);
+}
+
+export async function generateStudentTermReportPdf(studentId: string, reportId: string, input: { teacherText: string }) {
+  const response = await fetch(`${API_BASE_URL}/api/students/${studentId}/term-report/${reportId}/pdf`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(input)
+  });
+  return readJson<{ ok: boolean; report: StudentReportCard; asset: { id: string; url: string; title: string } }>(response);
+}
+
+export async function markStudentTermReportSent(studentId: string, reportId: string) {
+  const response = await fetch(`${API_BASE_URL}/api/students/${studentId}/term-report/${reportId}/mark-sent`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({})
+  });
+  return readJson<{ ok: boolean; report: StudentReportCard }>(response);
+}
+
+export async function listStudentTermReports(studentId: string) {
+  const response = await fetch(`${API_BASE_URL}/api/students/${studentId}/term-reports`, {
+    headers: authHeaders()
+  });
+  return readJson<{ ok: boolean; reports: StudentReportCard[] }>(response);
+}
+
 export async function loginStudent(input: { displayName: string; guardianPhone: string; accessCode: string }) {
   const response = await fetch(`${API_BASE_URL}/api/student-login`, {
     method: "POST",

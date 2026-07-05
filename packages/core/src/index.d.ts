@@ -246,6 +246,17 @@ export interface StudentReportCard {
   highlights: string[];
   concerns: string[];
   nextActions: string[];
+  reportType?: "midterm" | "final";
+  periodLabel?: string;
+  status?: string;
+  statusRaw?: string;
+  sentManuallyAt?: string | null;
+  pdfUrl?: string | null;
+  pdfTitle?: string | null;
+  pdfAssetId?: string | null;
+  wechatMessage?: string;
+  teacherEditedText?: string;
+  draft?: Record<string, unknown>;
 }
 
 export interface StartupMode {
