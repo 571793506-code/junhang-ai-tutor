@@ -95,11 +95,19 @@ if (!fs.existsSync(root)) {
       "/api/content/index/rebuild",
       "/api/grading/workbench",
       "/api/students/${studentId}/profile/draft",
+      "/api/students/${studentId}/term-report/draft",
+      "/api/students/${studentId}/term-report/${reportId}/pdf",
+      "/api/students/${studentId}/term-report/${reportId}/mark-sent",
+      "/api/students/${studentId}/term-reports",
       "getStudentProfile",
       "listGradingWorkbenches",
       "updateGradingWorkbenchQuestion",
       "archiveGradingWorkbench",
-      "draftStudentProfile"
+      "draftStudentProfile",
+      "draftStudentTermReport",
+      "generateStudentTermReportPdf",
+      "markStudentTermReportSent",
+      "listStudentTermReports"
     ];
     for (const needle of requiredApiNeedles) {
       if (!source.includes(needle)) {
@@ -141,9 +149,12 @@ if (!fs.existsSync(root)) {
     const wxmlSource = fs.readFileSync(studentProfileWxmlPath, "utf8");
     const requiredStudentProfileNeedles = [
       { source: jsSource, needle: "getStudentProfile", message: "student profile page must use the dedicated profile API instead of bootstrap-only data" },
+      { source: jsSource, needle: "listStudentTermReports", message: "student profile page must use the dedicated term reports API" },
       { source: jsSource, needle: "publishedProfileText", message: "student profile page must handle teacher-published profile text" },
       { source: jsSource, needle: "unresolvedMistakes", message: "student profile page must use unresolved mistakes from profile API" },
+      { source: jsSource, needle: "sentTermReports", message: "student profile page must keep term report status cards separate from online profile text" },
       { source: wxmlSource, needle: "publishedProfileText", message: "student profile page must show teacher-published feedback when available" },
+      { source: wxmlSource, needle: "sentTermReports", message: "student profile page must show sent term report status cards" },
       { source: wxmlSource, needle: "未发布", message: "student profile page must show unpublished feedback empty state" }
     ];
     for (const item of requiredStudentProfileNeedles) {
@@ -151,6 +162,41 @@ if (!fs.existsSync(root)) {
         failures.push({
           type: "student-profile",
           file: item.source === jsSource ? relative(studentProfileJsPath) : relative(studentProfileWxmlPath),
+          message: item.message
+        });
+      }
+    }
+    for (const forbidden of ["pdfUrl", "teacherEditedText", "wechatMessage"]) {
+      if (jsSource.includes(forbidden) || wxmlSource.includes(forbidden)) {
+        failures.push({
+          type: "student-profile-visibility",
+          file: relative(studentProfileJsPath),
+          message: `student profile page must not expose teacher-only term report field: ${forbidden}`
+        });
+      }
+    }
+  }
+
+  const teacherProfileJsPath = path.join(root, "pages/teacher/profile/index.js");
+  const teacherProfileWxmlPath = path.join(root, "pages/teacher/profile/index.wxml");
+  if (fs.existsSync(teacherProfileJsPath) && fs.existsSync(teacherProfileWxmlPath)) {
+    const jsSource = fs.readFileSync(teacherProfileJsPath, "utf8");
+    const wxmlSource = fs.readFileSync(teacherProfileWxmlPath, "utf8");
+    const requiredTeacherProfileNeedles = [
+      { source: jsSource, needle: "draftStudentTermReport", message: "teacher profile page must call service-layer term report draft API" },
+      { source: jsSource, needle: "generateStudentTermReportPdf", message: "teacher profile page must call service-layer term report PDF API" },
+      { source: jsSource, needle: "markStudentTermReportSent", message: "teacher profile page must call service-layer manual sent marker" },
+      { source: jsSource, needle: "listStudentTermReports", message: "teacher profile page must load teacher-visible term report list" },
+      { source: wxmlSource, needle: "bindtap=\"generateTermReportDraft\"", message: "teacher profile page must expose term report draft action" },
+      { source: wxmlSource, needle: "bindtap=\"saveTermReportPdf\"", message: "teacher profile page must expose term report PDF save action" },
+      { source: wxmlSource, needle: "bindtap=\"markTermReportSent\"", message: "teacher profile page must expose manual sent marker" },
+      { source: wxmlSource, needle: "微信私聊人工发送", message: "teacher profile page must state manual WeChat delivery boundary" }
+    ];
+    for (const item of requiredTeacherProfileNeedles) {
+      if (!item.source.includes(item.needle)) {
+        failures.push({
+          type: "teacher-term-report",
+          file: item.source === jsSource ? relative(teacherProfileJsPath) : relative(teacherProfileWxmlPath),
           message: item.message
         });
       }

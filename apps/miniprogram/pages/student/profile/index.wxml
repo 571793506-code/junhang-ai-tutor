@@ -12,6 +12,21 @@
   </view>
 
   <view class="card">
+    <text class="section-title">期中/期末报告</text>
+    <view class="list">
+      <view wx:for="{{sentTermReports}}" wx:key="id" class="term-report-card">
+        <view>
+          <text class="item-title">{{item.displayPeriod}}</text>
+          <text class="item-meta">老师已发送阶段报告给家长</text>
+          <text wx:if="{{item.sentTimeText}}" class="item-meta">发送日期：{{item.sentTimeText}}</text>
+        </view>
+        <text class="status-pill">已发送</text>
+      </view>
+    </view>
+    <text wx:if="{{!sentTermReports.length && !loading}}" class="muted">暂无已发送的期中/期末报告。</text>
+  </view>
+
+  <view class="card">
     <text class="section-title">知识掌握</text>
     <view wx:for="{{subjects}}" wx:key="name" class="mastery-row">
       <text class="item-title">{{item.name}}</text>

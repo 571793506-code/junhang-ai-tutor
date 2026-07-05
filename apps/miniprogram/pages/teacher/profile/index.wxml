@@ -33,4 +33,51 @@
     <textarea class="profile-textarea" value="{{draftText}}" bindinput="setDraftText" maxlength="-1" />
     <text wx:if="{{message}}" class="message">{{message}}</text>
   </view>
+
+  <view class="profile-panel">
+    <view class="panel-head">
+      <view>
+        <text class="panel-title">期中/期末阶段报告</text>
+        <text class="panel-subtitle">只在教师端生成 PDF 或 HTML 资产，下载后由老师微信私聊人工发送给家长。</text>
+      </view>
+      <text class="panel-tag">{{selectedTermReport.status || '待生成'}}</text>
+    </view>
+
+    <view class="term-report-switch">
+      <button class="{{termReportType === 'midterm' ? 'active' : ''}}" data-type="midterm" bindtap="setTermReportType">期中</button>
+      <button class="{{termReportType === 'final' ? 'active' : ''}}" data-type="final" bindtap="setTermReportType">期末</button>
+    </view>
+
+    <input class="term-report-input" value="{{termReportPeriodLabel}}" bindinput="setTermReportPeriodLabel" placeholder="阶段名称，例如：2026春季期末" />
+
+    <view class="button-row">
+      <button class="primary-button" loading="{{loading}}" bindtap="generateTermReportDraft">生成阶段报告草稿</button>
+      <button class="secondary-button" loading="{{loading}}" bindtap="saveTermReportPdf">保存并生成 PDF</button>
+    </view>
+
+    <textarea class="profile-textarea term-report-textarea" value="{{termReportText}}" bindinput="setTermReportText" maxlength="-1" placeholder="阶段报告正文会在这里显示，老师确认后再保存 PDF。" />
+
+    <view class="button-row">
+      <button class="secondary-button" bindtap="copyTermReportPdfUrl">复制报告链接</button>
+      <button class="secondary-button" bindtap="copyTermReportMessage">复制微信话术</button>
+      <button class="primary-button" loading="{{loading}}" bindtap="markTermReportSent">标记已人工发送</button>
+    </view>
+
+    <view wx:if="{{selectedTermReport.pdfUrl}}" class="term-report-asset">
+      <text class="item-title">报告资产已生成</text>
+      <text class="item-meta">{{selectedTermReport.pdfTitle || selectedTermReport.title}}</text>
+      <text class="item-meta">{{selectedTermReport.pdfUrl}}</text>
+    </view>
+    <text wx:if="{{selectedTermReport.wechatMessage}}" class="context-note">{{selectedTermReport.wechatMessage}}</text>
+    <text wx:if="{{termReportMessage}}" class="message">{{termReportMessage}}</text>
+    <text wx:if="{{termReportCopyState}}" class="message">{{termReportCopyState}}</text>
+
+    <view wx:if="{{termReports.length}}" class="term-report-list">
+      <text class="panel-subtitle">最近阶段报告</text>
+      <view wx:for="{{termReports}}" wx:key="id" class="term-report-row">
+        <text class="item-title">{{item.periodLabel || item.period}}</text>
+        <text class="item-meta">{{item.status}} · {{item.title}}</text>
+      </view>
+    </view>
+  </view>
 </view>

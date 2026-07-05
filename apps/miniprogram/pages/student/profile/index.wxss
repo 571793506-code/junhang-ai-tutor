@@ -24,3 +24,26 @@
   line-height: 1.65;
   white-space: pre-wrap;
 }
+
+.term-report-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 18rpx 0;
+  border-bottom: 1rpx solid rgba(99, 124, 113, 0.12);
+}
+
+.term-report-card:last-child {
+  border-bottom: 0;
+}
+
+.status-pill {
+  flex: 0 0 auto;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: #e7f6ef;
+  color: #238161;
+  font-size: 22rpx;
+  font-weight: 900;
+}

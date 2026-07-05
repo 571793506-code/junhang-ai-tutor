@@ -223,6 +223,18 @@ module.exports = {
   publishStudentProfile(studentId, input) {
     return request(`/api/students/${studentId}/profile/publish`, { method: "POST", data: input || {} });
   },
+  draftStudentTermReport(studentId, input) {
+    return request(`/api/students/${studentId}/term-report/draft`, { method: "POST", data: input || {} });
+  },
+  generateStudentTermReportPdf(studentId, reportId, input) {
+    return request(`/api/students/${studentId}/term-report/${reportId}/pdf`, { method: "POST", data: input || {} });
+  },
+  markStudentTermReportSent(studentId, reportId) {
+    return request(`/api/students/${studentId}/term-report/${reportId}/mark-sent`, { method: "POST", data: {} });
+  },
+  listStudentTermReports(studentId) {
+    return request(`/api/students/${studentId}/term-reports`);
+  },
   verifySession() {
     return request("/api/session/verify");
   },

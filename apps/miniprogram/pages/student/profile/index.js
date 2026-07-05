@@ -1,6 +1,12 @@
 const api = require("../../../utils/api");
 const guard = require("../../../utils/guard");
-const session = require("../../../utils/session");
+
+function formatSentTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 
 Page({
   data: {
@@ -9,6 +15,7 @@ Page({
     profileMessage: "",
     publishedProfileText: "",
     reports: [],
+    sentTermReports: [],
     student: {},
     subjects: []
   },
@@ -19,18 +26,28 @@ Page({
     }
     this.setData({ loading: true, profileMessage: "" });
     try {
-      const response = await api.getStudentProfile(student.id);
+      const [response, termReportsResponse] = await Promise.all([
+        api.getStudentProfile(student.id),
+        api.listStudentTermReports(student.id).catch(() => ({ reports: [] }))
+      ]);
       const fullStudent = response.student || student;
       const snapshot = response.snapshot || {};
       const mastery = fullStudent.mastery || snapshot.mastery || {};
       const publishedProfileText =
         fullStudent.publishedProfileText ||
         snapshot.publishedText ||
-        snapshot.narrative?.teacherEditedText ||
         "";
+      const sentTermReports = (termReportsResponse.reports || [])
+        .filter((report) => report.status === "已发送")
+        .map((report) => ({
+          ...report,
+          displayPeriod: report.periodLabel || report.period || "阶段报告",
+          sentTimeText: formatSentTime(report.sentManuallyAt)
+        }));
       this.setData({
         corrections: (response.unresolvedMistakes || []).slice(0, 8),
-        reports: (response.reports || []).slice(0, 4),
+        reports: (response.reports || []).filter((report) => !report.reportType).slice(0, 4),
+        sentTermReports: sentTermReports.slice(0, 4),
         student: fullStudent,
         subjects: ["语文", "数学", "英语"].map((name) => ({ name, value: mastery[name] || 0 })),
         publishedProfileText,
