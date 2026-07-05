@@ -2126,6 +2126,84 @@ button:disabled {
   box-shadow: 0 0 0 1px rgba(51, 123, 171, 0.16);
 }
 
+.student-profile-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.82fr);
+  gap: 14px;
+  align-items: start;
+  margin-top: 14px;
+}
+
+.profile-online-panel,
+.term-report-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.term-report-panel {
+  border-color: var(--accent-line);
+  background: rgba(247, 252, 252, 0.92);
+}
+
+.term-report-controls,
+.term-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+
+.term-report-controls label {
+  display: grid;
+  gap: 6px;
+  min-width: min(240px, 100%);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.term-report-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.term-report-archive-list {
+  display: grid;
+  gap: 10px;
+}
+
+.term-report-status-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid var(--accent-line);
+  border-radius: 8px;
+  background: rgba(243, 253, 249, 0.92);
+}
+
+.term-report-status-card svg {
+  color: var(--accent);
+}
+
+.term-report-status-card p {
+  margin: 5px 0 0;
+  color: #4d6572;
+  line-height: 1.55;
+}
+
+.term-report-status-card small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+
 .profile-structured-review,
 .growth-archive-view {
   display: grid;
@@ -5472,6 +5550,7 @@ button:disabled {
   .topbar h1 {
     font-size: 24px;
   }
+
 
   .student-archive-hero,
   .student-archive-detail {

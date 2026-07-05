@@ -39,11 +39,13 @@ import {
   completeLearningTask,
   type ContentIndexSummary,
   type VocabularyCard,
+  draftStudentTermReport,
   draftStudentProfile,
   draftAssessment,
   draftTeacherTask,
   exportAssessmentDraft,
   exportAssessmentPrint,
+  generateStudentTermReportPdf,
   getAdminAudit,
   getApiStatus,
   getBootstrapData,
@@ -60,6 +62,7 @@ import {
   listReviewSubmissions,
   listTextbooks,
   openTextbook,
+  markStudentTermReportSent,
   publishClassroomBroadcast,
   publishDictation,
   publishReading,
@@ -74,6 +77,7 @@ import {
   setClassroomDeviceLock,
   setSessionToken,
   syncKnowledgeSourcesFromIndex,
+  type TermReportType,
   updateTextbookChapters,
   updateStudentAccessStatusApi,
   uploadTeachingMaterials,
@@ -94,6 +98,7 @@ type TextbookChapter = NonNullable<TextbookAsset["chapters"]>[number];
 type PrintAssetLink = { id: string; title: string; url: string };
 type ProfileDraft = { studentId: string; studentName: string; snapshot: Record<string, unknown>; text: string };
 type ProfilePeriodType = "weekly" | "monthly";
+type TermReportDraftState = { report: StudentReportCard; teacherText: string };
 type AssessmentRequestInput = { targetScope?: "student" | "grade"; studentId?: string; targetGrade?: string; subject?: SubjectLabel; kind?: string; difficulty?: string; requirement?: string; textbookAssetId?: string; textbookTitle?: string; textbookChapterId?: string; textbookChapterTitle?: string };
 type AssessmentDraftRef = { assignmentId: string; title: string; subject: SubjectLabel; kind: string; targetLabel: string; request: AssessmentRequestInput; draftAsset?: PrintAssetLink; reviewStatus: "pending" | "accepted" | "rejected" };
 type StudentRegistrationInput = { displayName: string; grade: string; className: string; school: string; textbookVersion: string; guardianName: string; guardianPhone: string; notes: string; enrollmentStatus: string };
@@ -423,6 +428,7 @@ function App() {
   const [selectedTextbookContext, setSelectedTextbookContext] = useState<{ asset: TextbookAsset; chapter?: TextbookChapter } | null>(null);
   const [printAssets, setPrintAssets] = useState<PrintAssetLink[]>([]);
   const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null);
+  const [termReportDraft, setTermReportDraft] = useState<TermReportDraftState | null>(null);
   const [latestAssessmentDraft, setLatestAssessmentDraft] = useState<AssessmentDraftRef | null>(null);
   const [question, setQuestion] = useState("等腰三角形一个角是40度，应该怎么思考？");
   const [answer, setAnswer] = useState("");
@@ -881,6 +887,46 @@ function App() {
     }
   }
 
+  async function createStudentTermReportDraft(studentId: string, reportType: TermReportType, periodLabel: string) {
+    try {
+      const response = await draftStudentTermReport(studentId, { reportType, periodLabel });
+      const teacherText = response.report.teacherEditedText || response.report.summary || "";
+      setTermReportDraft({ report: response.report, teacherText });
+      setReports((items) => [response.report, ...items.filter((item) => item.id !== response.report.id)]);
+      setSync({ busy: false, ok: true, message: `${response.report.title} 草稿已生成，可编辑后保存为 PDF` });
+      return response.report;
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `阶段报告草稿生成失败：${error instanceof Error ? error.message : String(error)}` });
+      return null;
+    }
+  }
+
+  async function generateStudentTermReportPdfFile(studentId: string, reportId: string, teacherText: string) {
+    try {
+      const response = await generateStudentTermReportPdf(studentId, reportId, { teacherText });
+      setTermReportDraft({ report: response.report, teacherText: response.report.teacherEditedText || teacherText });
+      setReports((items) => [response.report, ...items.filter((item) => item.id !== response.report.id)]);
+      setSync({ busy: false, ok: true, message: response.report.pdfUrl ? "阶段报告已保存，老师可下载后微信私聊发送" : "阶段报告已保存，PDF运行时不可用时会保留HTML文件" });
+      return response.report;
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `阶段报告保存失败：${error instanceof Error ? error.message : String(error)}` });
+      return null;
+    }
+  }
+
+  async function markStudentTermReportManuallySent(studentId: string, reportId: string) {
+    try {
+      const response = await markStudentTermReportSent(studentId, reportId);
+      setTermReportDraft((current) => current?.report.id === response.report.id
+        ? { report: response.report, teacherText: response.report.teacherEditedText || current.teacherText }
+        : current);
+      setReports((items) => [response.report, ...items.filter((item) => item.id !== response.report.id)]);
+      setSync({ busy: false, ok: true, message: "已记录：老师已发送阶段报告给家长" });
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `发送状态记录失败：${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
   async function askQa(input?: { subject?: "全科" | SubjectLabel; images?: File[] }) {
     try {
       setQaBusy(true);
@@ -988,11 +1034,11 @@ function App() {
           } catch (error) {
             setSync({ busy: false, ok: false, message: `学生登记失败：${error instanceof Error ? error.message : String(error)}` });
           }
-        }} onTabletBroadcast={publishTabletBroadcast} onTabletDictation={publishTabletDictation} onTabletReading={publishTabletReading} onTask={createTask} onUnlock={async (unlocked) => {
+        }} onTermReportDraft={createStudentTermReportDraft} onTermReportPdf={generateStudentTermReportPdfFile} onTermReportSent={markStudentTermReportManuallySent} onTabletBroadcast={publishTabletBroadcast} onTabletDictation={publishTabletDictation} onTabletReading={publishTabletReading} onTask={createTask} onUnlock={async (unlocked) => {
           if (!currentDevice?.id) return;
           await setClassroomDeviceLock(currentDevice.id, unlocked);
           setSync({ busy: false, ok: true, message: unlocked ? "平板已解锁" : "平板已锁定" });
-        }} gradingWorkbenches={gradingWorkbenches} onUploadReview={uploadForReview} printAssets={printAssets} profileDraft={profileDraft} reports={reports} reviewSubmissions={reviewSubmissions} selectedTextbookContext={selectedTextbookContext} students={students} tasks={tasks} teacher={currentTeacher} textbooks={textbooks} /> : null}
+        }} gradingWorkbenches={gradingWorkbenches} onUploadReview={uploadForReview} printAssets={printAssets} profileDraft={profileDraft} reports={reports} reviewSubmissions={reviewSubmissions} selectedTextbookContext={selectedTextbookContext} students={students} tasks={tasks} teacher={currentTeacher} termReportDraft={termReportDraft} textbooks={textbooks} /> : null}
         {role === "student" ? <StudentWorkspace activeModule={currentModule} answer={answer} assignments={assignments} corrections={corrections} isLoggedIn={Boolean(auth.studentId)} logs={logs} onAsk={askQa} onLogin={handleStudentLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, student: module }))} onUploadReview={uploadStudentSubmission} qaBusy={qaBusy} question={question} reports={reports} setGuardianPhone={setGuardianPhone} setQuestion={setQuestion} setStudentCode={setStudentCode} setStudentName={setStudentName} student={currentStudent} tasks={tasks} /> : null}
         {role === "classroom" ? <ClassroomWorkspace activeModule={currentModule} classroomBroadcasts={classroomBroadcasts} device={currentDevice} devices={devices} dictationTasks={dictationTasks} onAsk={askClassroomQa} onLogin={handleClassroomLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, classroom: module }))} onTaskComplete={completeTaskFromTablet} readingTasks={readingTasks} setDeviceCode={setDeviceCode} students={students} tasks={tasks} /> : null}
         {role === "teacher" && !auth.teacherId ? <LoginPanel code={teacherCode} onCode={setTeacherCode} onLogin={handleTeacherLogin} onPhone={setTeacherPhone} phone={teacherPhone} title="教师端登录" /> : null}
@@ -1059,6 +1105,9 @@ function TeacherWorkspace({
   onSelectTextbookContext,
   onStudentAccess,
   onStudentCreate,
+  onTermReportDraft,
+  onTermReportPdf,
+  onTermReportSent,
   onTabletBroadcast,
   onTabletDictation,
   onTabletReading,
@@ -1073,6 +1122,7 @@ function TeacherWorkspace({
   students,
   tasks,
   teacher,
+  termReportDraft,
   textbooks
 }: {
   activeModule: string;
@@ -1109,6 +1159,9 @@ function TeacherWorkspace({
   onSelectTextbookContext: (context: { asset: TextbookAsset; chapter?: TextbookChapter } | null) => void;
   onStudentAccess: (studentId: string, enabled: boolean) => void;
   onStudentCreate: (input: StudentRegistrationInput) => void;
+  onTermReportDraft: (studentId: string, reportType: TermReportType, periodLabel: string) => Promise<StudentReportCard | null>;
+  onTermReportPdf: (studentId: string, reportId: string, teacherText: string) => Promise<StudentReportCard | null>;
+  onTermReportSent: (studentId: string, reportId: string) => Promise<void>;
   onTabletBroadcast: (input: Record<string, unknown>) => void;
   onTabletDictation: (input: Record<string, unknown>) => void;
   onTabletReading: (input: Record<string, unknown>) => void;
@@ -1123,6 +1176,7 @@ function TeacherWorkspace({
   students: StudentProfile[];
   tasks: LearningTaskCard[];
   teacher: TeacherProfile;
+  termReportDraft: TermReportDraftState | null;
   textbooks: TextbookAsset[];
 }) {
   const [selectedStudentId, setSelectedStudentId] = useState(students[0]?.id || "");
@@ -1144,6 +1198,10 @@ function TeacherWorkspace({
   const [taskEvidenceTitle, setTaskEvidenceTitle] = useState("");
   const [profileDraftText, setProfileDraftText] = useState("");
   const [profilePeriodType, setProfilePeriodType] = useState<ProfilePeriodType>("weekly");
+  const [termReportType, setTermReportType] = useState<TermReportType>("midterm");
+  const [termReportPeriodLabel, setTermReportPeriodLabel] = useState("2026春季期中");
+  const [termReportText, setTermReportText] = useState("");
+  const [termReportCopyState, setTermReportCopyState] = useState("");
   const [studentRegistration, setStudentRegistration] = useState<StudentRegistrationInput>({
     displayName: "",
     grade: "三年级",
@@ -1192,7 +1250,13 @@ function TeacherWorkspace({
     if (profileDraft?.studentId === selectedStudentId) setProfileDraftText(profileDraft.text);
   }, [profileDraft, selectedStudentId]);
 
+  useEffect(() => {
+    if (termReportDraft?.report.studentId === selectedStudentId) setTermReportText(termReportDraft.teacherText);
+  }, [selectedStudentId, termReportDraft]);
+
   const selectedStudent = useMemo(() => students.find((item) => item.id === selectedStudentId) || students[0], [selectedStudentId, students]);
+  const selectedTermReport = termReportDraft?.report.studentId === selectedStudentId ? termReportDraft.report : reports.find((item) => item.studentId === selectedStudentId && item.reportType);
+  const selectedTermReportText = termReportText || selectedTermReport?.teacherEditedText || selectedTermReport?.summary || "";
   const updateRegistration = (field: keyof StudentRegistrationInput, value: string) => setStudentRegistration((current) => ({ ...current, [field]: value }));
   const textbookHint = selectedTextbookContext
     ? `${selectedTextbookContext.asset.title}${selectedTextbookContext.chapter ? ` / ${selectedTextbookContext.chapter.title}` : ""}`
@@ -1213,6 +1277,15 @@ function TeacherWorkspace({
   const recentGenerationAssignments = assignments
     .filter((item) => ["小测", "练习", "试卷"].includes(item.kind))
     .slice(0, 4);
+  const copyTermReportMessage = async () => {
+    const message = selectedTermReport?.wechatMessage || "您好，老师已将阶段成长报告发送给您，请查收。";
+    try {
+      await navigator.clipboard.writeText(message);
+      setTermReportCopyState("微信话术已复制");
+    } catch {
+      setTermReportCopyState(message);
+    }
+  };
   const moduleClass = (module: string, className: string) => `${className} ${activeModule === module ? "" : "module-hidden"}`;
   const estimateReviewTime = (imageCount: number) => {
     const minSeconds = Math.max(10, Math.min(90, imageCount * 10));
@@ -1358,28 +1431,63 @@ function TeacherWorkspace({
     </section>
     <section className={moduleClass("学生档案", "panel full")}>
       <PanelTitle badge="AI生成" icon={FileText} title="学生档案草稿与发布" />
-      <p className="muted-line">教师端先生成档案草稿，确认内容、修改措辞或删减敏感内容后，再发布到学生端。未点击发布前，家长和学生不会看到这份草稿。</p>
+      <p className="muted-line">周/月成长档案经老师复核后发布到学生端；期中、期末阶段报告只在教师端生成 PDF，保存后由老师微信私聊人工发送给家长。</p>
       <div className="template-controls">
         <label>归档学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label>
-        <div className="profile-period-switch" role="group" aria-label="档案周期">
-          <button className={profilePeriodType === "weekly" ? "active" : ""} onClick={() => setProfilePeriodType("weekly")} type="button">周档案</button>
-          <button className={profilePeriodType === "monthly" ? "active" : ""} onClick={() => setProfilePeriodType("monthly")} type="button">月度综合</button>
-        </div>
-        <button className="primary-button" onClick={() => selectedStudent && onProfileDraft(selectedStudent.id, profilePeriodType)}><FileText size={17} />生成{periodTypeLabel(profilePeriodType)}草稿</button>
         <button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新归档数据</button>
       </div>
-      {profileDraft?.studentId === selectedStudentId ? <div className="profile-draft-editor">
-        <div className="review-card-head">
-          <div><h3>{profileDraft.studentName} 的待发布{periodTypeLabel(recordValue(profileDraft.snapshot.publishedView).periodType || profilePeriodType)}草稿</h3><p>先查看结构化模块和复核提示，再编辑最终发布正文。</p></div>
-          <StatusPill label="待教师确认" status="pending" />
+      <div className="student-profile-workspace">
+        <div className="profile-online-panel">
+          <div className="review-card-head">
+            <div><h3>周/月在线成长档案</h3><p>老师审核后发布到学生端，家长登录学生端查看。</p></div>
+            <StatusPill label="学生端可见" status="ready" />
+          </div>
+          <div className="term-report-controls">
+            <div className="profile-period-switch" role="group" aria-label="档案周期">
+              <button className={profilePeriodType === "weekly" ? "active" : ""} onClick={() => setProfilePeriodType("weekly")} type="button">周档案</button>
+              <button className={profilePeriodType === "monthly" ? "active" : ""} onClick={() => setProfilePeriodType("monthly")} type="button">月度综合</button>
+            </div>
+            <button className="primary-button" onClick={() => selectedStudent && onProfileDraft(selectedStudent.id, profilePeriodType)}><FileText size={17} />生成{periodTypeLabel(profilePeriodType)}草稿</button>
+          </div>
+          {profileDraft?.studentId === selectedStudentId ? <div className="profile-draft-editor">
+            <div className="review-card-head">
+              <div><h3>{profileDraft.studentName} 的待发布{periodTypeLabel(recordValue(profileDraft.snapshot.publishedView).periodType || profilePeriodType)}草稿</h3><p>先查看结构化模块和复核提示，再编辑最终发布正文。</p></div>
+              <StatusPill label="待教师确认" status="pending" />
+            </div>
+            <ProfileDraftStructuredReview snapshot={profileDraft.snapshot} />
+            <label className="field-label">档案反馈正文<textarea className="wide-textarea profile-draft-textarea" value={profileDraftText} onChange={(event) => setProfileDraftText(event.target.value)} /></label>
+            <div className="button-row">
+              <button className="primary-button" onClick={() => selectedStudent && onProfilePublish({ studentId: selectedStudent.id, text: profileDraftText })}><ShieldCheck size={17} />确认发布至学生端</button>
+              <button className="secondary-button" onClick={() => setProfileDraftText(profileDraft.text)}><RotateCcw size={17} />恢复草稿原文</button>
+            </div>
+          </div> : <p className="review-empty">请先选择学生并生成周/月档案草稿，预览确认后再发布。</p>}
         </div>
-        <ProfileDraftStructuredReview snapshot={profileDraft.snapshot} />
-        <label className="field-label">档案反馈正文<textarea className="wide-textarea profile-draft-textarea" value={profileDraftText} onChange={(event) => setProfileDraftText(event.target.value)} /></label>
-        <div className="button-row">
-          <button className="primary-button" onClick={() => selectedStudent && onProfilePublish({ studentId: selectedStudent.id, text: profileDraftText })}><ShieldCheck size={17} />确认发布至学生端</button>
-          <button className="secondary-button" onClick={() => setProfileDraftText(profileDraft.text)}><RotateCcw size={17} />恢复草稿原文</button>
+        <div className="term-report-panel">
+          <div className="review-card-head">
+            <div><h3>期中/期末 PDF 阶段报告</h3><p>报告只在教师端生成和保存，下载后由老师微信私聊人工发送。</p></div>
+            <StatusPill label={selectedTermReport?.status || "待生成"} status={selectedTermReport?.status === "已发送" ? "ready" : selectedTermReport?.pdfUrl ? "pending" : "pending"} />
+          </div>
+          <div className="term-report-controls">
+            <div className="profile-period-switch" role="group" aria-label="阶段报告类型">
+              <button className={termReportType === "midterm" ? "active" : ""} onClick={() => setTermReportType("midterm")} type="button">期中报告</button>
+              <button className={termReportType === "final" ? "active" : ""} onClick={() => setTermReportType("final")} type="button">期末报告</button>
+            </div>
+            <label>阶段名称<input value={termReportPeriodLabel} onChange={(event) => setTermReportPeriodLabel(event.target.value)} placeholder="例如：2026春季期中" /></label>
+            <button className="primary-button" onClick={() => selectedStudent && onTermReportDraft(selectedStudent.id, termReportType, termReportPeriodLabel)}><FileText size={17} />生成阶段报告草稿</button>
+          </div>
+          {selectedTermReport ? <div className="term-report-editor">
+            <label className="field-label">教师确认正文<textarea className="wide-textarea profile-draft-textarea" value={selectedTermReportText} onChange={(event) => setTermReportText(event.target.value)} /></label>
+            <div className="term-report-actions">
+              <button className="primary-button" onClick={() => selectedStudent && onTermReportPdf(selectedStudent.id, selectedTermReport.id, selectedTermReportText)}><Printer size={17} />保存并生成 PDF</button>
+              {selectedTermReport.pdfUrl ? <a className="draft-pdf-link" href={selectedTermReport.pdfUrl} target="_blank" rel="noreferrer"><FileText size={17} />下载阶段报告</a> : null}
+              <button className="secondary-button" onClick={copyTermReportMessage} type="button"><MessageSquareText size={17} />复制微信话术</button>
+              <button className="secondary-button" disabled={!selectedTermReport.pdfUrl || selectedTermReport.status === "已发送"} onClick={() => selectedStudent && onTermReportSent(selectedStudent.id, selectedTermReport.id)} type="button"><CheckCircle2 size={17} />标记已人工发送</button>
+            </div>
+            {selectedTermReport.wechatMessage ? <p className="context-note">{selectedTermReport.wechatMessage}</p> : null}
+            {termReportCopyState ? <p className="muted-line">{termReportCopyState}</p> : null}
+          </div> : <p className="review-empty">期中、期末报告不会发布到学生端正文，只在老师标记发送后显示状态。</p>}
         </div>
-      </div> : <p className="review-empty">请先选择学生并生成档案草稿，预览确认后再发布。</p>}
+      </div>
       {selectedStudent ? <TeacherStudentArchivePanel assignments={assignments} audit={audit} corrections={corrections} logs={logs} reports={reports} student={selectedStudent} tasks={tasks} /> : null}
     </section>
     <section className={moduleClass("系统状态", "panel full")}><PanelTitle icon={Settings2} title="服务状态" /><div className="feature-list">{(ai?.providers || []).map((item) => <div className="feature-row" key={item.id}><div><strong>{item.label}</strong><span>{item.model} · {item.capabilities.join(" / ")}</span></div><StatusPill label={item.status === "ready" ? "可用" : "不可用"} status={item.status} /></div>)}{(ai?.features || []).filter((item) => item.id !== "avatar-dialog").map((item) => <div className="feature-row" key={item.id}><div><strong>{item.label}</strong><span>{item.appSurface}</span></div><StatusPill label={item.status === "ready" ? "可用" : "不可用"} status={item.status} /></div>)}</div></section>
@@ -3083,8 +3191,11 @@ function StudentArchive({ corrections, logs, reports, student }: { corrections: 
   const publishedView = profilePublishedView(publishedProfileSnapshot);
   const publishedOverview = evidenceText(recordValue(publishedView.overview));
   const hasStructuredProfile = Object.keys(publishedView).length > 0;
+  const termReports = reports.filter((report) => report.reportType === "midterm" || report.reportType === "final");
+  const visibleSentTermReports = termReports.filter((report) => report.status === "已发送");
+  const onlineReports = reports.filter((report) => !report.reportType);
   const weakSubjects = Object.entries(student.mastery).sort((a, b) => a[1] - b[1]).slice(0, 2);
-  const latestReport = reports[0];
+  const latestReport = onlineReports[0] || visibleSentTermReports[0];
   const latestCorrection = corrections[0];
   const latestLog = logs[0] ? formatLearningLog(logs[0]) : null;
   const fallbackNeeds = weakSubjects.map(([subject, value]) => ({
@@ -3107,9 +3218,9 @@ function StudentArchive({ corrections, logs, reports, student }: { corrections: 
       id: "feedback" as const,
       icon: FileText,
       label: "教师发布反馈",
-      count: reports.length + (student.publishedProfileText || hasStructuredProfile ? 1 : 0),
+      count: onlineReports.length + visibleSentTermReports.length + (student.publishedProfileText || hasStructuredProfile ? 1 : 0),
       summary: publishedOverview || latestReport?.summary || student.publishedProfileText || "老师复核后的周/月反馈会展示在这里。",
-      status: reports.length || student.publishedProfileText || hasStructuredProfile ? "已发布" : "待发布"
+      status: onlineReports.length || visibleSentTermReports.length || student.publishedProfileText || hasStructuredProfile ? "已发布" : "待发布"
     },
     {
       id: "needs" as const,
@@ -3143,7 +3254,8 @@ function StudentArchive({ corrections, logs, reports, student }: { corrections: 
         </div>
         {activeTab === "feedback" ? <div className="student-archive-detail-list">
           {hasStructuredProfile ? <GrowthArchivePublishedView snapshot={publishedProfileSnapshot} /> : student.publishedProfileText ? <pre className="published-profile-text">{student.publishedProfileText}</pre> : null}
-          {reports.length ? reports.map((report) => <div className="archive-detail-row" key={report.id}><span className="subject subject-英语">{report.period}</span><div><strong>{report.title}</strong><p>{report.summary}</p>{report.highlights.length ? <small>亮点：{report.highlights.join("、")}</small> : null}{report.nextActions.length ? <small>建议：{report.nextActions.join("、")}</small> : null}</div></div>) : !student.publishedProfileText && !hasStructuredProfile ? <p className="review-empty">暂无已发布阶段反馈。老师复核发布后，家长和学生可在这里查看。</p> : null}
+          {visibleSentTermReports.length ? <div className="term-report-archive-list">{visibleSentTermReports.map((report) => <div className="term-report-status-card" key={report.id}><FileText size={17} /><div><strong>{report.periodLabel || report.period}</strong><p>老师已发送阶段报告给家长</p>{report.sentManuallyAt ? <small>{new Date(report.sentManuallyAt).toLocaleString("zh-CN")}</small> : null}</div><StatusPill label="已发送" status="ready" /></div>)}</div> : null}
+          {onlineReports.length ? onlineReports.map((report) => <div className="archive-detail-row" key={report.id}><span className="subject subject-英语">{report.period}</span><div><strong>{report.title}</strong><p>{report.summary}</p>{report.highlights.length ? <small>亮点：{report.highlights.join("、")}</small> : null}{report.nextActions.length ? <small>建议：{report.nextActions.join("、")}</small> : null}</div></div>) : !student.publishedProfileText && !hasStructuredProfile && !visibleSentTermReports.length ? <p className="review-empty">暂无已发布阶段反馈。老师复核发布后，家长和学生可在这里查看。</p> : null}
         </div> : null}
         {activeTab === "needs" ? <div className="student-archive-detail-list">
           {needs.map((item) => <div className="archive-detail-row" key={item.id}><SubjectBadge subject={item.subject} /><div><strong>{item.title}</strong><p>{item.detail}</p><StatusPill label={item.state} status={statusToProviderStatus(item.state)} /></div></div>)}
@@ -3163,7 +3275,7 @@ function StudentArchive({ corrections, logs, reports, student }: { corrections: 
         <div className="student-archive-mastery">{Object.entries(student.mastery).map(([subject, value]) => <span key={subject}><b>{subject}</b><i><em style={{ width: `${value}%` }} /></i><strong>{masteryTrendLabel(value)}</strong></span>)}</div>
       </div>
       <div className="student-archive-kpis">
-        <Metric label="已发布反馈" value={reports.length + (student.publishedProfileText || hasStructuredProfile ? 1 : 0)} suffix="份" tone="green" />
+        <Metric label="已发布反馈" value={onlineReports.length + visibleSentTermReports.length + (student.publishedProfileText || hasStructuredProfile ? 1 : 0)} suffix="份" tone="green" />
         <Metric label="待巩固" value={needs.length} suffix="项" tone="amber" />
         <Metric label="学习记录" value={timeline.length} suffix="条" tone="blue" />
       </div>
