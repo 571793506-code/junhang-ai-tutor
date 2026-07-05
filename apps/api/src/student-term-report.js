@@ -1,0 +1,248 @@
+const SUBJECTS = ["语文", "数学", "英语"];
+
+export function normalizeTermReportType(value) {
+  return value === "midterm" ? "midterm" : "final";
+}
+
+export function termReportTypeToDb(value) {
+  return normalizeTermReportType(value) === "midterm" ? "MIDTERM" : "FINAL";
+}
+
+export function dbTermReportTypeToClient(value) {
+  return value === "MIDTERM" ? "midterm" : "final";
+}
+
+export function termReportTypeLabel(value) {
+  return normalizeTermReportType(value) === "midterm" ? "期中成长报告" : "期末成长报告";
+}
+
+export function buildTermReportDraft(student, options = {}) {
+  const reportType = normalizeTermReportType(options.reportType);
+  const now = options.now instanceof Date ? options.now : new Date();
+  const periodLabel = String(options.periodLabel || defaultPeriodLabel(reportType, now)).trim();
+  const subjects = SUBJECTS.map((subject) => subjectSection(student, subject));
+  const focus = subjects.find((item) => item.concerns.length) || subjects[0];
+  const title = `${student.displayName} ${periodLabel}${termReportTypeLabel(reportType)}`;
+
+  return {
+    reportType,
+    status: "draft",
+    visibility: "teacher_pdf_only",
+    periodLabel,
+    title,
+    generatedAt: now.toISOString(),
+    sections: {
+      overview: {
+        text: `${student.displayName}本阶段学习记录已完成汇总，建议重点关注${focus.subject}的持续巩固和订正闭环。`
+      },
+      subjects,
+      correctionLoop: correctionLoop(student),
+      learningHabits: learningHabits(student),
+      progress: progressList(student),
+      nextActions: nextActions(subjects),
+      parentSuggestions: parentSuggestions(subjects)
+    },
+    wechatMessage: `您好，这是${student.displayName}同学${periodLabel}${termReportTypeLabel(reportType)}，请查收。`
+  };
+}
+
+export function mapTermReportForRole(report, role = "student") {
+  const metadata = safeObject(report.metadata);
+  const termReport = safeObject(metadata.termReport);
+  if (!termReport.reportType) return null;
+
+  const sent = termReport.status === "sent_manually";
+  const base = {
+    id: report.id,
+    studentId: report.studentId || "",
+    studentName: report.student?.displayName || "",
+    period: termReport.reportType === "midterm" ? "期中" : "期末",
+    reportType: termReport.reportType,
+    periodLabel: termReport.periodLabel || report.periodKey,
+    title: report.title,
+    summary: sent ? "老师已发送阶段报告给家长" : report.content,
+    status: sent ? "已发送" : termReport.status === "pdf_ready" ? "PDF已生成" : "草稿",
+    sentManuallyAt: termReport.sentManuallyAt || null,
+    highlights: [],
+    concerns: [],
+    nextActions: []
+  };
+
+  if (role !== "teacher") return sent ? base : null;
+  return {
+    ...base,
+    summary: report.content,
+    teacherEditedText: termReport.teacherEditedText || report.content,
+    pdfUrl: termReport.pdfUrl || null,
+    pdfTitle: termReport.pdfTitle || null,
+    pdfAssetId: termReport.pdfAssetId || null,
+    wechatMessage: termReport.wechatMessage || "",
+    statusRaw: termReport.status || "draft",
+    draft: termReport.draft || termReport
+  };
+}
+
+export function renderTermReportHtml(student, report) {
+  const metadata = safeObject(report.metadata);
+  const termReport = safeObject(metadata.termReport);
+  const draft = safeObject(termReport.draft || termReport);
+  const sections = safeObject(draft.sections);
+  const subjects = Array.isArray(sections.subjects) ? sections.subjects : [];
+
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>${escapeHtml(report.title)}</title>
+<style>
+@page { size: A4; margin: 16mm 15mm; }
+body { margin: 0; color: #1f2a36; font-family: "SimSun", "Microsoft YaHei", Arial, sans-serif; font-size: 10.5pt; line-height: 1.58; }
+.cover { min-height: 210mm; display: grid; align-content: center; gap: 16px; border-bottom: 4px solid #226b8f; }
+.badge { color: #226b8f; font-weight: 700; letter-spacing: 0; }
+h1 { margin: 0; font-size: 24pt; font-family: "SimHei", "Microsoft YaHei", sans-serif; }
+h2 { margin: 14px 0 6px; font-size: 15pt; color: #164b65; border-bottom: 1px solid #c8d8e3; padding-bottom: 4px; }
+h3 { margin: 8px 0 4px; font-size: 12pt; color: #1f2a36; }
+.meta { display: grid; gap: 5px; color: #526575; }
+.section { break-inside: avoid; margin: 0 0 8px; }
+.card { border: 1px solid #d8e2ea; border-radius: 6px; padding: 10px 12px; margin: 7px 0; background: #fbfdff; }
+ul { margin: 5px 0 0 18px; padding: 0; }
+li { margin: 2px 0; }
+.foot { margin-top: 12px; color: #6b7a86; font-size: 9pt; }
+</style>
+</head>
+<body>
+<section class="cover">
+  <div class="badge">君航 AI 助教 · 教师确认版</div>
+  <h1>${escapeHtml(report.title)}</h1>
+  <div class="meta">
+    <span>报告类型：${escapeHtml(termReportTypeLabel(termReport.reportType))}</span>
+    <span>学生：${escapeHtml(student.displayName || "")}</span>
+    <span>年级：${escapeHtml(student.grade || "")}</span>
+    <span>班级：${escapeHtml(student.className || "")}</span>
+    <span>周期：${escapeHtml(termReport.periodLabel || report.periodKey || "")}</span>
+  </div>
+</section>
+<section>
+  <h2>一、综合成长摘要</h2>
+  <div class="card">${paragraphs(termReport.teacherEditedText || report.content || sections.overview?.text)}</div>
+  <h2>二、学科表现</h2>
+  ${subjects.map((item) => `<div class="section card"><h3>${escapeHtml(item.subject)}</h3><p>${escapeHtml(item.summary || "")}</p>${list("优势", item.highlights)}${list("关注点", item.concerns)}</div>`).join("")}
+  <h2>三、错题与订正闭环</h2>
+  ${listBlock(sections.correctionLoop)}
+  <h2>四、学习习惯与阶段进步</h2>
+  ${listBlock([...(sections.learningHabits || []), ...(sections.progress || [])])}
+  <h2>五、下阶段建议</h2>
+  ${listBlock(sections.nextActions)}
+  <h2>六、家长配合建议</h2>
+  ${listBlock(sections.parentSuggestions)}
+  <div class="foot">本报告由教师确认后生成，供家长通过微信私聊查收。</div>
+</section>
+</body>
+</html>`;
+}
+
+function defaultPeriodLabel(reportType, nowValue) {
+  const now = nowValue instanceof Date ? nowValue : new Date();
+  const year = now.getFullYear();
+  const term = now.getMonth() + 1 >= 9 || now.getMonth() + 1 <= 1 ? "秋季" : "春季";
+  return `${year}${term}${reportType === "midterm" ? "期中" : "期末"}`;
+}
+
+function subjectSection(student, subject) {
+  const tasks = (student.tasks || []).filter((item) => subjectFromValue(item.subject?.name || item.metadata?.subject) === subject);
+  const submissions = (student.submissions || []).filter((item) => subjectFromValue(item.assignment?.subject?.name || item.assignment?.metadata?.subject) === subject);
+  const mistakes = (student.mistakes || []).filter((item) => subjectFromValue(item.subject) === subject);
+  const reviewed = submissions.filter((item) => item.status === "REVIEWED" && item.grading);
+  const avg = reviewed.length
+    ? Math.round(reviewed.reduce((sum, item) => sum + Number(item.grading?.score || 0), 0) / reviewed.length)
+    : null;
+
+  return {
+    subject,
+    summary: reviewed.length
+      ? `${subject}已有 ${reviewed.length} 次教师确认批改记录，平均表现约 ${avg} 分。`
+      : `${subject}本阶段记录较少，建议继续观察课堂和作业表现。`,
+    highlights: tasks.some((item) => item.status === "COMPLETED" || item.status === "REVIEWED")
+      ? ["能按要求完成部分学习任务。"]
+      : ["继续积累学习任务记录。"],
+    concerns: mistakes.slice(0, 2).map((item) => item.knowledgePoint?.name || item.prompt || "待巩固知识点")
+  };
+}
+
+function correctionLoop(student) {
+  const mistakes = student.mistakes || [];
+  return mistakes.length
+    ? mistakes.slice(0, 5).map((item) => `${item.subject}：${item.knowledgePoint?.name || item.prompt || "错题"}，${item.masteryResolved ? "已订正，可用同类题确认稳定。" : item.cause || "需继续订正复盘。"}`)
+    : ["本阶段暂无可发布的错题订正闭环，建议继续积累批改记录。"];
+}
+
+function learningHabits(student) {
+  const qaCount = (student.qaSessions || []).length + (student.voiceInteractions || []).length;
+  const completed = (student.tasks || []).filter((item) => item.status === "COMPLETED" || item.status === "REVIEWED").length;
+  return [
+    completed ? `已完成 ${completed} 项学习任务，学习节奏有记录可追踪。` : "学习任务完成记录仍需继续积累。",
+    qaCount ? `主动提问或课堂互动 ${qaCount} 次，问题意识正在形成。` : "主动提问和课堂互动记录较少，后续继续观察。"
+  ];
+}
+
+function progressList(student) {
+  const reviewed = (student.submissions || []).filter((item) => item.status === "REVIEWED" && item.grading);
+  return reviewed.length ? ["已形成教师确认的批改记录，可作为后续补弱依据。"] : ["阶段进步需要更多教师确认记录支撑。"];
+}
+
+function nextActions(subjects) {
+  const focus = subjects.find((item) => item.concerns.length) || subjects[0];
+  return [
+    `${focus.subject}：围绕${focus.concerns[0] || "基础知识和订正质量"}安排下一阶段巩固。`,
+    "每周复盘一次错题订正，确认是否能独立复述解题思路。"
+  ];
+}
+
+function parentSuggestions(subjects) {
+  const focus = subjects.find((item) => item.concerns.length) || subjects[0];
+  return [
+    `每天 5 到 10 分钟，请孩子口头复述${focus.subject}中最容易出错的一步。`,
+    "关注订正过程，不只关注分数。"
+  ];
+}
+
+function subjectFromValue(value) {
+  const text = String(value || "");
+  if (text.includes("语文") || text.toLowerCase().includes("chinese")) return "语文";
+  if (text.includes("数学") || text.toLowerCase().includes("math")) return "数学";
+  if (text.includes("英语") || text.toLowerCase().includes("english")) return "英语";
+  return "";
+}
+
+function list(label, items = []) {
+  const visible = Array.isArray(items) ? items.filter(Boolean) : [];
+  return visible.length
+    ? `<strong>${escapeHtml(label)}</strong><ul>${visible.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+    : "";
+}
+
+function listBlock(items = []) {
+  const visible = Array.isArray(items) ? items.filter(Boolean) : [];
+  return `<div class="card"><ul>${(visible.length ? visible : ["暂无记录，继续观察。"]).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`;
+}
+
+function paragraphs(text) {
+  return String(text || "")
+    .split(/\n+/)
+    .filter(Boolean)
+    .map((line) => `<p>${escapeHtml(line)}</p>`)
+    .join("");
+}
+
+function safeObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
