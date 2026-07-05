@@ -1,9 +1,9 @@
 <view class="page teacher-page">
   <view class="hero">
-    <text class="eyebrow">生成打印</text>
-    <text class="title">先审 PDF 草稿，再导出正式文件</text>
+    <text class="eyebrow">生成类模板</text>
+    <text class="title">先确定类型、难度和要求</text>
     <text class="ai-generated-badge">AI生成</text>
-    <text class="subtitle">小测和练习默认两页 A4，试卷默认四页 A4。特殊要求会写进排版提示。</text>
+    <text class="subtitle">小测、练习、试卷使用不同服务层模板；教师要求只作为生成目标进入草稿审查。</text>
   </view>
 
   <view class="card teacher-card">

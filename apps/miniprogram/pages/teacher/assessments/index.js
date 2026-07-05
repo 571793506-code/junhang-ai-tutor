@@ -52,7 +52,8 @@ Page({
       subject: this.data.subjects[this.data.subjectIndex],
       grade: this.data.grades[this.data.gradeIndex],
       difficulty: this.data.difficulties[this.data.difficultyIndex],
-      requirement: `${this.data.requirement.trim()}。排版要求：${kind}默认${pages}页A4，以试卷式排版为前提，保证题目清晰、答题空间充足。`,
+      requirement: this.data.requirement.trim(),
+      pages,
       createAssignment: true
     };
     this.setData({ loading: true, draftAsset: null, finalAssets: [] });

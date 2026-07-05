@@ -34,6 +34,17 @@
 - `apps/miniprogram` 只作为本次源代码转入来源，不再作为后续小程序开发入口。
 - 同步时必须保留 `miniapp-1` 自己的 `project.config.json`、`project.private.config.json`、`project.miniapp.json` 和 `app.miniapp.json`，不能用普通导出包覆盖。
 
+### Git 可追踪边界
+
+`C:\Users\86188\WeChatProjects\miniapp-1` 是微信开发者工具的实际运行目录，但当前不是 Git 仓库。后续在 `miniapp-1` 中修改非配置源码后，必须把同路径源码同步回 `apps/miniprogram`，让小程序页面、样式、工具函数和共享文案进入本仓库 Git 管理。
+
+同步规则：
+
+- `miniapp-1` 的 `project.config.json`、`project.private.config.json`、`project.miniapp.json`、`app.miniapp.json` 只保留在运行目录，不从 `apps/miniprogram` 覆盖。
+- 页面、组件、`utils/`、`styles/`、`assets/` 等非配置源码改动，完成验证后同步到 `apps/miniprogram` 同路径。
+- 如果 `miniapp-1` 与 `apps/miniprogram` 路由不同，先用人工 diff 判断差异来源，不直接全量覆盖。
+- 每次同步后至少运行 `cmd.exe /c .\jh.cmd check:miniapp1`、`cmd.exe /c .\jh.cmd check:miniprogram-js` 和 `cmd.exe /c .\jh.cmd check:encoding`。
+
 ## 第一轮迁移范围
 
 ### 统一入口

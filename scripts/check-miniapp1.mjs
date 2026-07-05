@@ -73,6 +73,18 @@ if (!fs.existsSync(root)) {
     }
   }
 
+  const assessmentPagePath = path.join(root, "pages/teacher/assessments/index.js");
+  if (fs.existsSync(assessmentPagePath)) {
+    const source = fs.readFileSync(assessmentPagePath, "utf8");
+    if (source.includes("试卷式排版")) {
+      failures.push({
+        type: "generation-boundary",
+        file: relative(assessmentPagePath),
+        message: "assessment page must not append the old exam-style layout prompt; submit kind, subject, grade, difficulty, requirement, and pages to the service layer"
+      });
+    }
+  }
+
   for (const file of files) {
     const source = fs.readFileSync(file, "utf8");
     for (const needle of providerNeedles) {
