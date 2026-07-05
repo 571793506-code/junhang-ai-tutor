@@ -132,3 +132,95 @@ test("draftAssessmentService forwards assessment timeout budget to runner", asyn
   assert.equal(runnerInput.assessmentTotalTimeoutMs, 1200);
   assert.ok(runnerInput.generationContext);
 });
+
+test("draftAssessmentService assigns standard quiz generation budget", async () => {
+  let runnerInput = null;
+  const result = await draftAssessmentService(
+    {},
+    {
+      subject: "英语",
+      kind: "小测",
+      grade: "五年级",
+      requirement: "第四单元小测"
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async (_config, input) => {
+        runnerInput = input;
+        return fakeAssessmentResult();
+      }
+    }
+  );
+
+  assert.equal(runnerInput.generationProfile, "quiz-standard");
+  assert.equal(runnerInput.assessmentTotalTimeoutMs, 60000);
+  assert.equal(runnerInput.assessmentMaxTokens, 16000);
+  assert.equal(runnerInput.generationContext.output.generationProfile, "quiz-standard");
+  assert.equal(result.generationPipeline.model.generationProfile, "quiz-standard");
+  assert.equal(result.generationPipeline.model.assessmentMaxTokens, 16000);
+});
+
+test("draftAssessmentService assigns formal budget to exams and personalized practice", async () => {
+  const runnerInputs = [];
+  const runner = async (_config, input) => {
+    runnerInputs.push(input);
+    return fakeAssessmentResult();
+  };
+
+  await draftAssessmentService(
+    {},
+    {
+      subject: "数学",
+      kind: "试卷",
+      grade: "六年级",
+      requirement: "小升初难度偏高"
+    },
+    { persist: false, assessmentDraftRunner: runner }
+  );
+  await draftAssessmentService(
+    {},
+    {
+      subject: "数学",
+      kind: "练习",
+      grade: "五年级",
+      studentId: "student-1",
+      requirement: "针对近期错题做个性化练习"
+    },
+    { persist: false, assessmentDraftRunner: runner }
+  );
+
+  assert.equal(runnerInputs[0].generationProfile, "formal-full");
+  assert.equal(runnerInputs[0].assessmentTotalTimeoutMs, 180000);
+  assert.equal(runnerInputs[0].assessmentMaxTokens, 20000);
+  assert.equal(runnerInputs[1].generationProfile, "formal-full");
+  assert.equal(runnerInputs[1].assessmentTotalTimeoutMs, 120000);
+  assert.equal(runnerInputs[1].assessmentMaxTokens, 20000);
+});
+
+test("draftAssessmentService preserves explicit generation budget overrides", async () => {
+  let runnerInput = null;
+  await draftAssessmentService(
+    {},
+    {
+      subject: "数学",
+      kind: "小测",
+      grade: "五年级",
+      requirement: "手动预算",
+      generationProfile: "manual",
+      generationTimeoutMs: 9000,
+      assessmentMaxTokens: 7777
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async (_config, input) => {
+        runnerInput = input;
+        return fakeAssessmentResult();
+      }
+    }
+  );
+
+  assert.equal(runnerInput.generationProfile, "manual");
+  assert.equal(runnerInput.assessmentTotalTimeoutMs, 9000);
+  assert.equal(runnerInput.generationTimeoutMs, 9000);
+  assert.equal(runnerInput.assessmentMaxTokens, 7777);
+});

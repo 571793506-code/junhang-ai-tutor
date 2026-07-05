@@ -45,6 +45,81 @@ function normalizeAssessmentKind(kind) {
   return "练习";
 }
 
+function firstPositiveNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return null;
+}
+
+function isPersonalizedAssessmentRequest(input = {}) {
+  const text = [
+    input.requirement,
+    input.specialRequirements,
+    input.targetScope,
+    input.studentId,
+    ...(Array.isArray(input.studentSignals) ? input.studentSignals : []),
+    ...(Array.isArray(input.weaknesses) ? input.weaknesses : []),
+    ...(Array.isArray(input.mistakePoints) ? input.mistakePoints : [])
+  ].filter(Boolean).join(" ");
+  return Boolean(input.studentId) || /个性化|错题|薄弱|弱点|补弱|针对|学情|近期/.test(text);
+}
+
+function resolveAssessmentGenerationBudget(input = {}, config = {}) {
+  const kind = normalizeAssessmentKind(input.kind);
+  const explicitProfile = typeof input.generationProfile === "string" && input.generationProfile.trim()
+    ? input.generationProfile.trim()
+    : null;
+  const profile = explicitProfile ||
+    (kind === "试卷" || (kind === "练习" && isPersonalizedAssessmentRequest(input))
+      ? "formal-full"
+      : kind === "小测"
+        ? "quiz-standard"
+        : "practice-standard");
+  const profileDefaults = {
+    "e2e-fast": { assessmentTotalTimeoutMs: 15000, assessmentMaxTokens: 12000 },
+    "fast-check": { assessmentTotalTimeoutMs: 15000, assessmentMaxTokens: 12000 },
+    "quiz-standard": { assessmentTotalTimeoutMs: 60000, assessmentMaxTokens: 16000 },
+    "practice-standard": { assessmentTotalTimeoutMs: 60000, assessmentMaxTokens: 16000 },
+    "formal-full": {
+      assessmentTotalTimeoutMs: kind === "试卷" ? 180000 : 120000,
+      assessmentMaxTokens: 20000
+    }
+  };
+  const defaults = profileDefaults[profile] || profileDefaults["practice-standard"];
+  const explicitTimeoutMs = firstPositiveNumber(
+    input.assessmentTotalTimeoutMs,
+    input.generationTimeoutMs
+  );
+  const configTimeoutMs = firstPositiveNumber(
+    config.ASSESSMENT_DRAFT_TOTAL_TIMEOUT_MS,
+    config.assessmentDraftTotalTimeoutMs
+  );
+  const explicitMaxTokens = firstPositiveNumber(
+    input.assessmentMaxTokens,
+    input.generationMaxTokens
+  );
+  const configMaxTokens = firstPositiveNumber(
+    config.ASSESSMENT_DRAFT_MAX_TOKENS,
+    config.assessmentDraftMaxTokens
+  );
+  const assessmentTotalTimeoutMs = explicitTimeoutMs || configTimeoutMs || defaults.assessmentTotalTimeoutMs;
+  const assessmentMaxTokens = explicitMaxTokens || configMaxTokens || defaults.assessmentMaxTokens;
+  return {
+    profile,
+    kind,
+    assessmentTotalTimeoutMs,
+    generationTimeoutMs: input.generationTimeoutMs || null,
+    assessmentMaxTokens,
+    source: {
+      profile: explicitProfile ? "input" : "service-default",
+      timeoutMs: explicitTimeoutMs ? "input" : configTimeoutMs ? "config" : "profile-default",
+      maxTokens: explicitMaxTokens ? "input" : configMaxTokens ? "config" : "profile-default"
+    }
+  };
+}
+
 function normalizeSubject(subject) {
   const text = String(subject || "").toLowerCase();
   if (text.includes("英语") || text.includes("英") || text.includes("english")) return "英语";
@@ -2985,6 +3060,9 @@ function buildAssessmentGenerationPipeline({ result = {}, draft = {}, input = {}
       modelRunId: modelRun?.id || null,
       status: modelStatus,
       available: modelAvailable,
+      generationProfile: input.generationProfile || result.modelRun?.metadata?.generationProfile || null,
+      assessmentTotalTimeoutMs: input.assessmentTotalTimeoutMs || result.modelRun?.metadata?.assessmentTotalTimeoutMs || null,
+      assessmentMaxTokens: input.assessmentMaxTokens || result.modelRun?.metadata?.assessmentMaxTokens || null,
       fallbackProvider: result.modelRun?.metadata?.fallbackProvider || null,
       primaryError: result.modelRun?.metadata?.primaryError || null,
       secondaryError: result.modelRun?.metadata?.secondaryError || null,
@@ -3165,6 +3243,7 @@ export async function draftTeacherTaskService(config, input = {}, options = {}) 
 
 export async function draftAssessmentService(config, input = {}, options = {}) {
   const contentContext = input.contentContext || matchContentContext(input);
+  const generationBudget = resolveAssessmentGenerationBudget(input, config);
   const generationContext = {
     ...(input.generationContext && typeof input.generationContext === "object" ? input.generationContext : {}),
     request: {
@@ -3189,6 +3268,9 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     output: {
       paper: "A4",
       kind: input.kind || null,
+      generationProfile: generationBudget.profile,
+      assessmentTotalTimeoutMs: generationBudget.assessmentTotalTimeoutMs,
+      assessmentMaxTokens: generationBudget.assessmentMaxTokens,
       teacherReviewRequired: true,
       includeAnswerAnalysis: true
     },
@@ -3201,9 +3283,19 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
   const modelInput = {
     ...input,
     requestId: input.requestId || randomUUID(),
+    generationProfile: generationBudget.profile,
+    assessmentTotalTimeoutMs: generationBudget.assessmentTotalTimeoutMs,
+    assessmentMaxTokens: generationBudget.assessmentMaxTokens,
+    generationBudget,
     generationContext,
     contentContext
   };
+  if (input.generationTimeoutMs != null) {
+    modelInput.generationTimeoutMs = input.generationTimeoutMs;
+  }
+  if (input.generationMaxTokens != null) {
+    modelInput.generationMaxTokens = input.generationMaxTokens;
+  }
   const assessmentDraftRunner = options.assessmentDraftRunner || draftAssessment;
   const result = await assessmentDraftRunner(config, modelInput);
   const modelRun = await persistRun(result.modelRun, options);

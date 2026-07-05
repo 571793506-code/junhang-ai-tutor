@@ -57,3 +57,67 @@ test("draftAssessment honors request-level total timeout", { timeout: 2000 }, as
     await close(server);
   }
 });
+
+test("draftAssessment forwards request-level max token budget", async () => {
+  let requestPayload = null;
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      requestPayload = JSON.parse(body);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                title: "六年级数学试卷",
+                sections: [
+                  {
+                    title: "一、计算",
+                    items: [
+                      {
+                        itemType: "calculation",
+                        prompt: "计算：125×32。",
+                        answer: "4000",
+                        analysisSteps: ["把 32 拆成 8×4。"],
+                        knowledgePoint: "乘法运算"
+                      }
+                    ]
+                  }
+                ]
+              })
+            }
+          }
+        ]
+      }));
+    });
+  });
+  const address = await listen(server);
+  try {
+    const result = await draftAssessment(
+      {
+        DEEPSEEK_API_KEY: "test-key",
+        DEEPSEEK_BASE_URL: `http://127.0.0.1:${address.port}`,
+        DEEPSEEK_ASSESSMENT_MODEL: "token-model",
+        DEEPSEEK_ASSESSMENT_FALLBACK_MODEL: "token-model"
+      },
+      {
+        subject: "数学",
+        kind: "试卷",
+        grade: "六年级",
+        requirement: "高质量正式生成",
+        assessmentMaxTokens: 20000
+      }
+    );
+
+    assert.equal(result.available, true);
+    assert.equal(requestPayload.max_tokens, 20000);
+    assert.equal(result.modelRun.metadata.assessmentMaxTokens, 20000);
+  } finally {
+    await close(server);
+  }
+});

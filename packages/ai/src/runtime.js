@@ -779,6 +779,13 @@ export async function draftAssessment(config, input = {}) {
     config.ASSESSMENT_DRAFT_TOTAL_TIMEOUT_MS,
     config.assessmentDraftTotalTimeoutMs
   );
+  const assessmentMaxTokens = firstPositiveNumber(
+    input.assessmentMaxTokens,
+    input.generationMaxTokens,
+    config.ASSESSMENT_DRAFT_MAX_TOKENS,
+    config.assessmentDraftMaxTokens,
+    12000
+  );
   const totalStartedAt = Date.now();
   let totalBudgetExhausted = false;
   const remainingBudgetMs = () => {
@@ -805,7 +812,7 @@ export async function draftAssessment(config, input = {}) {
     model,
     temperature: 0.2,
     responseFormat: { type: "json_object" },
-    maxTokens: 12000,
+    maxTokens: assessmentMaxTokens,
     timeoutMs: attemptTimeoutMs(assessmentTimeoutMs)
   });
   const attempts = [];
@@ -841,7 +848,7 @@ export async function draftAssessment(config, input = {}) {
       model: runtime.gpt55Model,
       temperature: 0.2,
       responseFormat: { type: "json_object" },
-      maxTokens: 12000,
+      maxTokens: assessmentMaxTokens,
       timeoutMs: attemptTimeoutMs(premiumAssessmentTimeoutMs)
     }));
     recordAttempt("premium-fallback", "gpt55", runtime.gpt55Model, result);
@@ -857,7 +864,7 @@ export async function draftAssessment(config, input = {}) {
       model: runtime.minimaxModel,
       temperature: 0.2,
       responseFormat: { type: "json_object" },
-      maxTokens: 12000,
+      maxTokens: assessmentMaxTokens,
       timeoutMs: attemptTimeoutMs(minimaxAssessmentTimeoutMs)
     }));
     recordAttempt("backup-fallback", "minimax", runtime.minimaxModel, result);
@@ -894,6 +901,8 @@ export async function draftAssessment(config, input = {}) {
         minimaxAssessmentTimeoutMs,
         premiumAssessmentTimeoutMs,
         assessmentTotalTimeoutMs: assessmentTotalTimeoutMs || null,
+        assessmentMaxTokens,
+        generationProfile: input.generationProfile || null,
         totalBudgetExhausted,
         fallbackProvider: result.fallbackProvider || null,
         attempts,
