@@ -1002,6 +1002,9 @@ function enrollmentStatusToDb(status) {
 
 function mapStudent(student) {
   const profile = student.profiles?.[0]?.snapshot || {};
+  const publishedProfileSnapshot = Object.keys(profile).length
+    ? filterStudentProfileSnapshot(profile, "student")
+    : null;
   const guardianLink = student.guardians?.[0];
   return {
     id: student.id,
@@ -1025,6 +1028,7 @@ function mapStudent(student) {
     strengths: profile.strengths || [],
     risks: profile.risks || [],
     tone: profile.tone || "持续观察",
+    publishedProfileSnapshot,
     publishedProfileText: profile.publishedText || profile.narrative?.teacherEditedText || ""
   };
 }

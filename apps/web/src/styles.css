@@ -1928,6 +1928,128 @@ button:disabled {
   line-height: 1.75;
 }
 
+.profile-period-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 220px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7fbfd;
+}
+
+.profile-period-switch button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.profile-period-switch button.active {
+  background: #ffffff;
+  color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(51, 123, 171, 0.16);
+}
+
+.profile-structured-review,
+.growth-archive-view {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(248, 252, 255, 0.88);
+}
+
+.profile-structured-head,
+.growth-archive-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profile-structured-head > div,
+.growth-archive-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.profile-structured-head strong,
+.growth-archive-head strong {
+  color: var(--text);
+}
+
+.profile-structured-head span,
+.growth-archive-head span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.profile-structured-grid,
+.growth-module-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profile-structured-grid article,
+.growth-module {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.profile-structured-grid span,
+.growth-module span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.profile-structured-grid p,
+.growth-archive-overview {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.profile-structured-grid ul,
+.growth-module ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.profile-review-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profile-review-checklist span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #315a70;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .published-profile-text {
   max-height: 360px;
   overflow: auto;
@@ -1941,6 +2063,33 @@ button:disabled {
   font-size: 14px;
   line-height: 1.75;
   white-space: pre-wrap;
+}
+
+.growth-subject-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.growth-subject-grid div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.growth-subject-grid b {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.growth-subject-grid span {
+  color: var(--muted);
+  line-height: 1.55;
+  font-size: 13px;
 }
 
 .student-archive-hub {

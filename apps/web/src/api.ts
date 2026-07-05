@@ -244,11 +244,11 @@ export async function aggregateStudentProfile(studentId: string) {
   }>(response);
 }
 
-export async function draftStudentProfile(studentId: string) {
+export async function draftStudentProfile(studentId: string, periodType: "weekly" | "monthly" = "weekly") {
   const response = await fetch(`${API_BASE_URL}/api/students/${studentId}/profile/draft`, {
     method: "POST",
     headers: jsonHeaders(),
-    body: JSON.stringify({})
+    body: JSON.stringify({ periodType })
   });
   return readJson<{
     ok: boolean;

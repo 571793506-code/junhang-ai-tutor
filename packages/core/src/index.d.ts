@@ -56,6 +56,7 @@ export interface StudentProfile {
   strengths: string[];
   risks: string[];
   tone: string;
+  publishedProfileSnapshot?: Record<string, unknown> | null;
   publishedProfileText?: string;
 }
 

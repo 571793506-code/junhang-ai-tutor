@@ -93,6 +93,7 @@ type TextbookAsset = Awaited<ReturnType<typeof listTextbooks>>["assets"][number]
 type TextbookChapter = NonNullable<TextbookAsset["chapters"]>[number];
 type PrintAssetLink = { id: string; title: string; url: string };
 type ProfileDraft = { studentId: string; studentName: string; snapshot: Record<string, unknown>; text: string };
+type ProfilePeriodType = "weekly" | "monthly";
 type AssessmentRequestInput = { targetScope?: "student" | "grade"; studentId?: string; targetGrade?: string; subject?: SubjectLabel; kind?: string; difficulty?: string; requirement?: string; textbookAssetId?: string; textbookTitle?: string; textbookChapterId?: string; textbookChapterTitle?: string };
 type AssessmentDraftRef = { assignmentId: string; title: string; subject: SubjectLabel; kind: string; targetLabel: string; request: AssessmentRequestInput; draftAsset?: PrintAssetLink; reviewStatus: "pending" | "accepted" | "rejected" };
 type StudentRegistrationInput = { displayName: string; grade: string; className: string; school: string; textbookVersion: string; guardianName: string; guardianPhone: string; notes: string; enrollmentStatus: string };
@@ -146,6 +147,28 @@ function stringList(value: unknown) {
   return Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean) : [];
 }
 
+function recordList(value: unknown) {
+  return Array.isArray(value) ? value.map(recordValue) : [];
+}
+
+function evidenceText(item: Record<string, unknown>) {
+  return stringValue(item.text) || stringValue(item.summary) || stringValue(item.evidenceSummary) || stringValue(item.whyFocus) || stringValue(item.title);
+}
+
+function profilePublishedView(snapshot: Record<string, unknown> | null | undefined) {
+  return recordValue(snapshot?.publishedView);
+}
+
+function profilePeriodLabel(snapshot: Record<string, unknown> | null | undefined) {
+  const period = recordValue(snapshot?.period);
+  const view = profilePublishedView(snapshot);
+  return stringValue(view.periodLabel) || stringValue(period.label) || "";
+}
+
+function periodTypeLabel(value: unknown) {
+  return value === "monthly" ? "月度综合档案" : "周档案";
+}
+
 function normalizeAiAnswerText(value: unknown) {
   let current: unknown = value;
   if (typeof current === "string") {
@@ -170,6 +193,38 @@ function normalizeAiAnswerText(value: unknown) {
 }
 
 function profileDraftToPlainText(snapshot: Record<string, unknown>, studentName: string) {
+  const publishedView = profilePublishedView(snapshot);
+  const overview = recordValue(publishedView.overview);
+  const focusSubjects = recordList(publishedView.focusSubjects);
+  const correctionLoop = recordList(publishedView.correctionLoop);
+  const stableGrowth = recordList(publishedView.stableGrowth);
+  const tutoringFocus = recordList(publishedView.tutoringFocus);
+  const parentNextSteps = recordList(publishedView.parentNextSteps);
+  if (Object.keys(publishedView).length) {
+    const lines = [
+      `${studentName} ${periodTypeLabel(publishedView.periodType)}反馈草稿`,
+      profilePeriodLabel(snapshot),
+      "",
+      "一、整体概览",
+      evidenceText(overview) || `${studentName}本周期记录还在积累，先观察完成和订正情况。`,
+      "",
+      "二、稳定表现",
+      ...(stableGrowth.length ? stableGrowth.map((item) => `- ${evidenceText(item)}`) : ["- 本周期先积累更多完成和订正记录。"]),
+      "",
+      "三、重点跟进",
+      ...(focusSubjects.length ? focusSubjects.map((item) => `- ${stringValue(item.subject, "学习")}：${stringValue(item.whyFocus) || evidenceText(item)}`) : ["- 暂无明确重点科目，继续观察。"]),
+      "",
+      "四、错题与订正闭环",
+      ...(correctionLoop.length ? correctionLoop.map((item) => `- ${evidenceText(item)}`) : ["- 本周期暂无可发布的订正闭环记录。"]),
+      "",
+      "五、老师下一步",
+      ...(tutoringFocus.length ? tutoringFocus.map((item) => `- ${evidenceText(item)}`) : ["- 下次课先复盘本周期记录中的关键问题。"]),
+      "",
+      "六、家长配合建议",
+      ...(parentNextSteps.length ? parentNextSteps.map((item) => `- ${evidenceText(item)}`) : ["- 每周看一次订正记录，只问错在哪里、下次怎么避免。"])
+    ];
+    return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
   const narrative = recordValue(snapshot.narrative);
   const sourceCounts = recordValue(snapshot.sourceCounts);
   const strengths = stringList(snapshot.strengths);
@@ -793,10 +848,10 @@ function App() {
     }
   }
 
-  async function createStudentProfileDraft(studentId?: string) {
+  async function createStudentProfileDraft(studentId?: string, periodType: ProfilePeriodType = "weekly") {
     const student = students.find((item) => item.id === studentId) || currentStudent;
     try {
-      const response = await draftStudentProfile(student.id);
+      const response = await draftStudentProfile(student.id, periodType);
       setStudents((items) => items.map((item) => (item.id === student.id ? response.student : item)));
       const draft = {
         studentId: student.id,
@@ -805,7 +860,7 @@ function App() {
         text: profileDraftToPlainText(response.snapshot, student.displayName)
       };
       setProfileDraft(draft);
-      setSync({ busy: false, ok: true, message: `${student.displayName} 档案草稿已生成，请先复核再发布` });
+      setSync({ busy: false, ok: true, message: `${student.displayName} ${periodTypeLabel(periodType)}草稿已生成，请先复核再发布` });
       return draft;
     } catch (error) {
       setSync({ busy: false, ok: false, message: `档案草稿生成失败：${error instanceof Error ? error.message : String(error)}` });
@@ -1043,7 +1098,7 @@ function TeacherWorkspace({
   onMarkReviewed: (submissionId: string, input?: Record<string, unknown>) => void;
   onOpenModule: (module: string) => void;
   onOpenTextbook: (assetId: string) => void;
-  onProfileDraft: (studentId?: string) => Promise<ProfileDraft | null>;
+  onProfileDraft: (studentId?: string, periodType?: ProfilePeriodType) => Promise<ProfileDraft | null>;
   onProfilePublish: (input: { studentId: string; text: string }) => Promise<void>;
   onRecognize: (submissionId: string) => void;
   onRefreshOps: () => void;
@@ -1088,6 +1143,7 @@ function TeacherWorkspace({
   const [taskEvidenceFiles, setTaskEvidenceFiles] = useState<File[]>([]);
   const [taskEvidenceTitle, setTaskEvidenceTitle] = useState("");
   const [profileDraftText, setProfileDraftText] = useState("");
+  const [profilePeriodType, setProfilePeriodType] = useState<ProfilePeriodType>("weekly");
   const [studentRegistration, setStudentRegistration] = useState<StudentRegistrationInput>({
     displayName: "",
     grade: "三年级",
@@ -1300,7 +1356,32 @@ function TeacherWorkspace({
     <section className={moduleClass("电视动态屏", "tv-display-shell full")}>
       <TvParentDisplay ai={ai} assignments={assignments} audit={audit} corrections={corrections} logs={logs} reports={reports} reviewSubmissions={reviewSubmissions} students={students} tasks={tasks} />
     </section>
-    <section className={moduleClass("学生档案", "panel full")}><PanelTitle badge="AI生成" icon={FileText} title="学生档案草稿与发布" /><p className="muted-line">教师端先生成档案草稿，确认内容、修改措辞或删减敏感内容后，再发布到学生端。未点击发布前，家长和学生不会看到这份草稿。</p><div className="template-controls"><label>归档学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label><button className="primary-button" onClick={() => selectedStudent && onProfileDraft(selectedStudent.id)}><FileText size={17} />生成档案草稿</button><button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新归档数据</button></div>{profileDraft?.studentId === selectedStudentId ? <div className="profile-draft-editor"><div className="review-card-head"><div><h3>{profileDraft.studentName} 的待发布档案草稿</h3><p>下方是给老师复核的纯文本反馈，可直接修改措辞、删减内容或补充建议，确认后再同步给学生端。</p></div><StatusPill label="待教师确认" status="pending" /></div><label className="field-label">档案反馈正文<textarea className="wide-textarea profile-draft-textarea" value={profileDraftText} onChange={(event) => setProfileDraftText(event.target.value)} /></label><div className="button-row"><button className="primary-button" onClick={() => selectedStudent && onProfilePublish({ studentId: selectedStudent.id, text: profileDraftText })}><ShieldCheck size={17} />确认发布至学生端</button><button className="secondary-button" onClick={() => setProfileDraftText(profileDraft.text)}><RotateCcw size={17} />恢复草稿原文</button></div></div> : <p className="review-empty">请先选择学生并生成档案草稿，预览确认后再发布。</p>}{selectedStudent ? <TeacherStudentArchivePanel assignments={assignments} audit={audit} corrections={corrections} logs={logs} reports={reports} student={selectedStudent} tasks={tasks} /> : null}</section>
+    <section className={moduleClass("学生档案", "panel full")}>
+      <PanelTitle badge="AI生成" icon={FileText} title="学生档案草稿与发布" />
+      <p className="muted-line">教师端先生成档案草稿，确认内容、修改措辞或删减敏感内容后，再发布到学生端。未点击发布前，家长和学生不会看到这份草稿。</p>
+      <div className="template-controls">
+        <label>归档学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label>
+        <div className="profile-period-switch" role="group" aria-label="档案周期">
+          <button className={profilePeriodType === "weekly" ? "active" : ""} onClick={() => setProfilePeriodType("weekly")} type="button">周档案</button>
+          <button className={profilePeriodType === "monthly" ? "active" : ""} onClick={() => setProfilePeriodType("monthly")} type="button">月度综合</button>
+        </div>
+        <button className="primary-button" onClick={() => selectedStudent && onProfileDraft(selectedStudent.id, profilePeriodType)}><FileText size={17} />生成{periodTypeLabel(profilePeriodType)}草稿</button>
+        <button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新归档数据</button>
+      </div>
+      {profileDraft?.studentId === selectedStudentId ? <div className="profile-draft-editor">
+        <div className="review-card-head">
+          <div><h3>{profileDraft.studentName} 的待发布{periodTypeLabel(recordValue(profileDraft.snapshot.publishedView).periodType || profilePeriodType)}草稿</h3><p>先查看结构化模块和复核提示，再编辑最终发布正文。</p></div>
+          <StatusPill label="待教师确认" status="pending" />
+        </div>
+        <ProfileDraftStructuredReview snapshot={profileDraft.snapshot} />
+        <label className="field-label">档案反馈正文<textarea className="wide-textarea profile-draft-textarea" value={profileDraftText} onChange={(event) => setProfileDraftText(event.target.value)} /></label>
+        <div className="button-row">
+          <button className="primary-button" onClick={() => selectedStudent && onProfilePublish({ studentId: selectedStudent.id, text: profileDraftText })}><ShieldCheck size={17} />确认发布至学生端</button>
+          <button className="secondary-button" onClick={() => setProfileDraftText(profileDraft.text)}><RotateCcw size={17} />恢复草稿原文</button>
+        </div>
+      </div> : <p className="review-empty">请先选择学生并生成档案草稿，预览确认后再发布。</p>}
+      {selectedStudent ? <TeacherStudentArchivePanel assignments={assignments} audit={audit} corrections={corrections} logs={logs} reports={reports} student={selectedStudent} tasks={tasks} /> : null}
+    </section>
     <section className={moduleClass("系统状态", "panel full")}><PanelTitle icon={Settings2} title="服务状态" /><div className="feature-list">{(ai?.providers || []).map((item) => <div className="feature-row" key={item.id}><div><strong>{item.label}</strong><span>{item.model} · {item.capabilities.join(" / ")}</span></div><StatusPill label={item.status === "ready" ? "可用" : "不可用"} status={item.status} /></div>)}{(ai?.features || []).filter((item) => item.id !== "avatar-dialog").map((item) => <div className="feature-row" key={item.id}><div><strong>{item.label}</strong><span>{item.appSurface}</span></div><StatusPill label={item.status === "ready" ? "可用" : "不可用"} status={item.status} /></div>)}</div></section>
     <section className={moduleClass("系统状态", "panel full")}><PanelTitle icon={Activity} title="归档与审计" /><AuditPanel audit={audit} /></section>
   </div>;
@@ -2428,6 +2509,91 @@ function statusText(status?: string) {
   return "待复核";
 }
 
+function ProfileDraftStructuredReview({ snapshot }: { snapshot: Record<string, unknown> }) {
+  const publishedView = profilePublishedView(snapshot);
+  const teacherReview = recordValue(snapshot.teacherReview);
+  const overview = recordValue(publishedView.overview);
+  const focusSubjects = recordList(publishedView.focusSubjects);
+  const stableGrowth = recordList(publishedView.stableGrowth);
+  const tutoringFocus = recordList(publishedView.tutoringFocus);
+  const checklist = recordList(teacherReview.publishChecklist);
+  const pending = recordList(teacherReview.pendingConfirmations);
+  const sampleLimitNotes = stringList(teacherReview.sampleLimitNotes);
+  if (!Object.keys(publishedView).length) return null;
+  return <div className="profile-structured-review">
+    <div className="profile-structured-head">
+      <div><strong>{periodTypeLabel(publishedView.periodType)}</strong><span>{profilePeriodLabel(snapshot) || "当前周期"}</span></div>
+      <StatusPill label={pending.length ? "需确认" : "可复核发布"} status={pending.length ? "pending" : "ready"} />
+    </div>
+    <div className="profile-structured-grid">
+      <article>
+        <span>整体概览</span>
+        <p>{evidenceText(overview) || "本周期记录还在积累，先观察完成和订正情况。"}</p>
+      </article>
+      <article>
+        <span>稳定表现</span>
+        <ul>{stableGrowth.length ? stableGrowth.slice(0, 3).map((item, index) => <li key={index}>{evidenceText(item)}</li>) : <li>本周期先积累更多完成和订正记录。</li>}</ul>
+      </article>
+      <article>
+        <span>重点科目</span>
+        <ul>{focusSubjects.length ? focusSubjects.map((item, index) => <li key={index}>{stringValue(item.subject, "学习")}：{stringValue(item.whyFocus) || evidenceText(item)}</li>) : <li>暂无明确重点科目。</li>}</ul>
+      </article>
+      <article>
+        <span>老师下一步</span>
+        <ul>{tutoringFocus.length ? tutoringFocus.slice(0, 3).map((item, index) => <li key={index}>{evidenceText(item)}</li>) : <li>下次课先复盘本周期记录中的关键问题。</li>}</ul>
+      </article>
+    </div>
+    <div className="profile-review-checklist">
+      {[...checklist.map(evidenceText), ...sampleLimitNotes, ...pending.map((item) => `${stringValue(item.title, "待确认来源")}：${stringValue(item.reason, "请老师复核。")}`)]
+        .filter(Boolean)
+        .slice(0, 6)
+        .map((item, index) => <span key={index}><ShieldCheck size={14} />{item}</span>)}
+    </div>
+  </div>;
+}
+
+function GrowthArchivePublishedView({ snapshot }: { snapshot?: Record<string, unknown> | null }) {
+  const publishedView = profilePublishedView(snapshot);
+  const overview = recordValue(publishedView.overview);
+  const subjectOverview = recordList(publishedView.subjectOverview);
+  const focusSubjects = recordList(publishedView.focusSubjects);
+  const correctionLoop = recordList(publishedView.correctionLoop);
+  const stableGrowth = recordList(publishedView.stableGrowth);
+  const tutoringFocus = recordList(publishedView.tutoringFocus);
+  const parentNextSteps = recordList(publishedView.parentNextSteps);
+  const timelinePreview = recordList(publishedView.timelinePreview);
+  if (!Object.keys(publishedView).length) return null;
+  return <div className="growth-archive-view">
+    <div className="growth-archive-head">
+      <div>
+        <span>{periodTypeLabel(publishedView.periodType)}</span>
+        <strong>{profilePeriodLabel(snapshot) || "已发布成长档案"}</strong>
+      </div>
+      <StatusPill label="老师已确认" status="ready" />
+    </div>
+    <p className="growth-archive-overview">{evidenceText(overview) || "本周期记录还在积累，先观察完成和订正情况。"}</p>
+    <div className="growth-subject-grid">
+      {subjectOverview.length ? subjectOverview.map((item, index) => <div key={index}><b>{stringValue(item.subject, "学习")}</b><span>{evidenceText(item)}</span></div>) : subjects.map((subject) => <div key={subject}><b>{subject}</b><span>本周期该科记录不足，继续观察。</span></div>)}
+    </div>
+    <div className="growth-module-grid">
+      <ArchiveModule title="重点科目" items={focusSubjects.map((item) => `${stringValue(item.subject, "学习")}：${stringValue(item.whyFocus) || evidenceText(item)}`)} fallback="继续观察重点科目变化。" />
+      <ArchiveModule title="错题与订正" items={correctionLoop.map(evidenceText)} fallback="本周期暂无可发布的订正闭环记录。" />
+      <ArchiveModule title="稳定表现" items={stableGrowth.map(evidenceText)} fallback="本周期先积累更多完成和订正记录。" />
+      <ArchiveModule title="接下来练什么" items={tutoringFocus.map(evidenceText)} fallback="下次课先复盘本周期记录中的关键问题。" />
+      <ArchiveModule title="家长配合建议" items={parentNextSteps.map(evidenceText)} fallback="每周看一次订正记录，只问错在哪里、下次怎么避免。" />
+      <ArchiveModule title="近期学习事件" items={timelinePreview.map((item) => `${stringValue(item.title, "学习记录")}：${evidenceText(item)}`)} fallback="暂无可展示学习事件。" />
+    </div>
+  </div>;
+}
+
+function ArchiveModule({ fallback, items, title }: { fallback: string; items: string[]; title: string }) {
+  const visible = items.map((item) => item.trim()).filter(Boolean).slice(0, 4);
+  return <article className="growth-module">
+    <span>{title}</span>
+    <ul>{visible.length ? visible.map((item, index) => <li key={index}>{item}</li>) : <li>{fallback}</li>}</ul>
+  </article>;
+}
+
 function TeacherStudentArchivePanel({ assignments, audit, corrections, logs, reports, student, tasks }: { assignments: AssignmentCard[]; audit: AdminAudit | null; corrections: CorrectionRecord[]; logs: LearningLog[]; reports: StudentReportCard[]; student: StudentProfile; tasks: LearningTaskCard[] }) {
   const studentTasks = tasks.filter((task) => task.studentId === student.id);
   const studentAssignments = assignments.filter((assignment) => assignment.studentId === student.id || assignment.studentName === student.displayName);
@@ -2817,6 +2983,10 @@ function Mastery({ student }: { student: StudentProfile }) {
 function StudentArchive({ corrections, logs, reports, student }: { corrections: CorrectionRecord[]; logs: LearningLog[]; reports: StudentReportCard[]; student: StudentProfile }) {
   type ArchiveTabId = "feedback" | "needs" | "timeline";
   const [activeTab, setActiveTab] = useState<ArchiveTabId | null>(null);
+  const publishedProfileSnapshot = recordValue(student.publishedProfileSnapshot);
+  const publishedView = profilePublishedView(publishedProfileSnapshot);
+  const publishedOverview = evidenceText(recordValue(publishedView.overview));
+  const hasStructuredProfile = Object.keys(publishedView).length > 0;
   const weakSubjects = Object.entries(student.mastery).sort((a, b) => a[1] - b[1]).slice(0, 2);
   const latestReport = reports[0];
   const latestCorrection = corrections[0];
@@ -2841,9 +3011,9 @@ function StudentArchive({ corrections, logs, reports, student }: { corrections: 
       id: "feedback" as const,
       icon: FileText,
       label: "教师发布反馈",
-      count: reports.length + (student.publishedProfileText ? 1 : 0),
-      summary: latestReport?.summary || student.publishedProfileText || "老师复核后的周/月/期中/期末反馈会展示在这里。",
-      status: reports.length || student.publishedProfileText ? "已发布" : "待发布"
+      count: reports.length + (student.publishedProfileText || hasStructuredProfile ? 1 : 0),
+      summary: publishedOverview || latestReport?.summary || student.publishedProfileText || "老师复核后的周/月反馈会展示在这里。",
+      status: reports.length || student.publishedProfileText || hasStructuredProfile ? "已发布" : "待发布"
     },
     {
       id: "needs" as const,
@@ -2876,8 +3046,8 @@ function StudentArchive({ corrections, logs, reports, student }: { corrections: 
           <StatusPill label={`${active.count}项`} status={active.count ? "ready" : "pending"} />
         </div>
         {activeTab === "feedback" ? <div className="student-archive-detail-list">
-          {student.publishedProfileText ? <pre className="published-profile-text">{student.publishedProfileText}</pre> : null}
-          {reports.length ? reports.map((report) => <div className="archive-detail-row" key={report.id}><span className="subject subject-英语">{report.period}</span><div><strong>{report.title}</strong><p>{report.summary}</p>{report.highlights.length ? <small>亮点：{report.highlights.join("、")}</small> : null}{report.nextActions.length ? <small>建议：{report.nextActions.join("、")}</small> : null}</div></div>) : !student.publishedProfileText ? <p className="review-empty">暂无已发布阶段反馈。老师复核发布后，家长和学生可在这里查看。</p> : null}
+          {hasStructuredProfile ? <GrowthArchivePublishedView snapshot={publishedProfileSnapshot} /> : student.publishedProfileText ? <pre className="published-profile-text">{student.publishedProfileText}</pre> : null}
+          {reports.length ? reports.map((report) => <div className="archive-detail-row" key={report.id}><span className="subject subject-英语">{report.period}</span><div><strong>{report.title}</strong><p>{report.summary}</p>{report.highlights.length ? <small>亮点：{report.highlights.join("、")}</small> : null}{report.nextActions.length ? <small>建议：{report.nextActions.join("、")}</small> : null}</div></div>) : !student.publishedProfileText && !hasStructuredProfile ? <p className="review-empty">暂无已发布阶段反馈。老师复核发布后，家长和学生可在这里查看。</p> : null}
         </div> : null}
         {activeTab === "needs" ? <div className="student-archive-detail-list">
           {needs.map((item) => <div className="archive-detail-row" key={item.id}><SubjectBadge subject={item.subject} /><div><strong>{item.title}</strong><p>{item.detail}</p><StatusPill label={item.state} status={statusToProviderStatus(item.state)} /></div></div>)}
@@ -2897,7 +3067,7 @@ function StudentArchive({ corrections, logs, reports, student }: { corrections: 
         <div className="student-archive-mastery">{Object.entries(student.mastery).map(([subject, value]) => <span key={subject}><b>{subject}</b><i><em style={{ width: `${value}%` }} /></i><strong>{masteryTrendLabel(value)}</strong></span>)}</div>
       </div>
       <div className="student-archive-kpis">
-        <Metric label="已发布反馈" value={reports.length + (student.publishedProfileText ? 1 : 0)} suffix="份" tone="green" />
+        <Metric label="已发布反馈" value={reports.length + (student.publishedProfileText || hasStructuredProfile ? 1 : 0)} suffix="份" tone="green" />
         <Metric label="待巩固" value={needs.length} suffix="项" tone="amber" />
         <Metric label="学习记录" value={timeline.length} suffix="条" tone="blue" />
       </div>
