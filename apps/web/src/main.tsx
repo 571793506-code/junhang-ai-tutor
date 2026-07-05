@@ -662,6 +662,7 @@ function App() {
       textbookChapterId: input?.textbookChapterId,
       textbookChapterTitle: input?.textbookChapterTitle
     };
+    setSync({ busy: true, ok: null, message: `${kind}PDF草稿正在生成，通常需要 1-2 分钟，请保持页面打开。` });
     try {
       const response = await draftAssessment({
         ...request,
@@ -1115,7 +1116,7 @@ function App() {
           if (!currentDevice?.id) return;
           await setClassroomDeviceLock(currentDevice.id, unlocked);
           setSync({ busy: false, ok: true, message: unlocked ? "平板已解锁" : "平板已锁定" });
-        }} gradingWorkbenches={gradingWorkbenches} onUploadReview={uploadForReview} printAssets={printAssets} profileDraft={profileDraft} reports={reports} reviewSubmissions={reviewSubmissions} selectedTextbookContext={selectedTextbookContext} students={students} tasks={tasks} teacher={currentTeacher} termReportDraft={termReportDraft} textbooks={textbooks} /> : null}
+        }} gradingWorkbenches={gradingWorkbenches} onUploadReview={uploadForReview} printAssets={printAssets} profileDraft={profileDraft} reports={reports} reviewSubmissions={reviewSubmissions} selectedTextbookContext={selectedTextbookContext} students={students} sync={sync} tasks={tasks} teacher={currentTeacher} termReportDraft={termReportDraft} textbooks={textbooks} /> : null}
         {role === "student" ? <StudentWorkspace activeModule={currentModule} answer={answer} assignments={assignments} corrections={corrections} isLoggedIn={Boolean(auth.studentId)} logs={logs} onAsk={askQa} onLogin={handleStudentLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, student: module }))} onUploadReview={uploadStudentSubmission} qaBusy={qaBusy} question={question} reports={reports} setGuardianPhone={setGuardianPhone} setQuestion={setQuestion} setStudentCode={setStudentCode} setStudentName={setStudentName} student={currentStudent} tasks={tasks} /> : null}
         {role === "classroom" ? <ClassroomWorkspace activeModule={currentModule} classroomBroadcasts={classroomBroadcasts} device={currentDevice} devices={devices} dictationTasks={dictationTasks} onAsk={askClassroomQa} onLogin={handleClassroomLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, classroom: module }))} onTaskComplete={completeTaskFromTablet} readingTasks={readingTasks} setDeviceCode={setDeviceCode} students={students} tasks={tasks} /> : null}
         {role === "teacher" && !auth.teacherId ? <LoginPanel code={teacherCode} onCode={setTeacherCode} onLogin={handleTeacherLogin} onPhone={setTeacherPhone} phone={teacherPhone} title="教师端登录" /> : null}
@@ -1197,6 +1198,7 @@ function TeacherWorkspace({
   reviewSubmissions,
   selectedTextbookContext,
   students,
+  sync,
   tasks,
   teacher,
   termReportDraft,
@@ -1251,6 +1253,7 @@ function TeacherWorkspace({
   reviewSubmissions: ReviewSubmission[];
   selectedTextbookContext: { asset: TextbookAsset; chapter?: TextbookChapter } | null;
   students: StudentProfile[];
+  sync: SyncState;
   tasks: LearningTaskCard[];
   teacher: TeacherProfile;
   termReportDraft: TermReportDraftState | null;
@@ -1429,6 +1432,9 @@ function TeacherWorkspace({
     textbookChapterId: selectedTextbookContext?.chapter?.id,
     textbookChapterTitle: selectedTextbookContext?.chapter?.title
   });
+  const isAssessmentDraftBusy = sync.busy && sync.message.includes("PDF草稿");
+  const generationFeedbackVisible = sync.message.includes("PDF草稿") || sync.message.startsWith("生成失败");
+  const generationFeedbackStatus = sync.busy ? "pending" : sync.ok === false ? "blocked" : sync.ok ? "ready" : "pending";
   const copyTermReportMessage = async () => {
     const message = selectedTermReport?.wechatMessage || "您好，老师已将阶段成长报告发送给您，请查收。";
     try {
@@ -1625,11 +1631,12 @@ function TeacherWorkspace({
           <div className="generation-step-card active"><strong>2. 教师打开审查</strong><span>先看题目、题量、页数和排版，不在页面内直接发布题面。</span></div>
           <div className="generation-step-card"><strong>3. 正式导出</strong><span>确认后才生成学生卷与答案解析卷。</span></div>
           <div className="generation-action-dock">
-            <button className="primary-button" onClick={submitAssessmentDraft}><Printer size={17} />生成 PDF 草稿</button>
+            <button className="primary-button" disabled={isAssessmentDraftBusy} onClick={submitAssessmentDraft}>{isAssessmentDraftBusy ? <RefreshCw className="spin-icon" size={17} /> : <Printer size={17} />}{isAssessmentDraftBusy ? "正在生成 PDF 草稿" : "生成 PDF 草稿"}</button>
             {latestAssessmentDraft?.draftAsset ? <a className="draft-pdf-link" href={latestAssessmentDraft.draftAsset.url} target="_blank" rel="noreferrer"><FileText size={17} />打开审查 PDF</a> : <button className="secondary-button" disabled type="button"><FileText size={17} />打开审查 PDF</button>}
             <button className="primary-button" disabled={!latestAssessmentDraft} onClick={() => latestAssessmentDraft && onExportPrint(latestAssessmentDraft.assignmentId)}><CheckCircle2 size={17} />确认正式导出</button>
             <button className="secondary-button danger-button" disabled={!latestAssessmentDraft} onClick={() => latestAssessmentDraft && onAssessmentReject(latestAssessmentDraft.assignmentId)}><RefreshCw size={17} />否决并重新生成</button>
           </div>
+          {generationFeedbackVisible ? <div className={`generation-inline-status ${generationFeedbackStatus}`}><StatusDot status={generationFeedbackStatus} /><span>{sync.message}</span></div> : null}
           {latestAssessmentDraft ? <div className="generation-current-draft"><strong>{latestAssessmentDraft.targetLabel} · {latestAssessmentDraft.subject} · {latestAssessmentDraft.kind}</strong><StatusPill label={latestAssessmentDraft.reviewStatus === "accepted" ? "已确认" : latestAssessmentDraft.reviewStatus === "rejected" ? "已否决" : "待审查"} status={latestAssessmentDraft.reviewStatus === "accepted" ? "ready" : latestAssessmentDraft.reviewStatus === "rejected" ? "blocked" : "pending"} /><span>请先打开 PDF 草稿审查题目、题量和排版。</span></div> : null}
         </aside>
       </div>
@@ -2509,7 +2516,7 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
       {page ? <p className={`context-note ${page.qualityStatus === "ready" ? "" : "blocked"}`}><ShieldCheck size={15} />{pageQualityText}{page.qualityScore != null ? ` · 质量分 ${Math.round(page.qualityScore * 100)}%` : ""}{pageQualityIssues.length ? ` · ${pageQualityIssues.slice(0, 2).join("；")}` : ""}</p> : null}
       <div className="grading-image-stage">
         {page?.imageUrl ? <img src={page.imageUrl} alt={`${active?.studentName || ""} 上传页面 ${page.pageNumber}`} /> : <div className="annotation-empty">暂无图片预览</div>}
-        {markers.map((marker) => <button className={`annotation-marker ${marker.status}`} key={marker.id} style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }} title={`第${marker.questionNo}题 ${statusText(marker.status)}`} onClick={() => {
+        {markers.map((marker, index) => <button className={`annotation-marker ${marker.status}`} key={`${marker.id}-${index}`} style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }} title={`第${marker.questionNo}题 ${statusText(marker.status)}`} onClick={() => {
           const target = active?.questions.find((item) => item.questionNo === marker.questionNo);
           if (target) setActiveQuestionId(target.id);
         }}>{marker.label}</button>)}
@@ -2517,7 +2524,7 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
     </main>
     <aside className="grading-inspector">
       <div className="grading-question-strip">
-        {(active?.questions || []).map((item, index) => <button className={`${item.id === question?.id ? "active" : ""} ${item.status}`} key={item.id} onClick={() => {
+        {(active?.questions || []).map((item, index) => <button className={`${item.id === question?.id ? "active" : ""} ${item.status}`} key={`${item.id}-${index}`} onClick={() => {
           setActiveQuestionId(item.id);
           setActivePage(Number(item.bbox?.page || 1));
         }}>{index + 1}</button>)}

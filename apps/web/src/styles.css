@@ -2318,6 +2318,48 @@ button:disabled {
   width: 100%;
 }
 
+.generation-inline-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.generation-inline-status.ready {
+  border-color: #a8dfca;
+  color: #17694e;
+  background: #f3fbf7;
+}
+
+.generation-inline-status.blocked {
+  border-color: #f0c0ae;
+  color: #9f3d2d;
+  background: #fff7f4;
+}
+
+.generation-inline-status.pending {
+  border-color: var(--accent-line);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.spin-icon {
+  animation: spinIcon 1s linear infinite;
+}
+
+@keyframes spinIcon {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .generation-current-draft strong,
 .generation-record-card b {
   color: var(--text);
