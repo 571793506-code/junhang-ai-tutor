@@ -175,6 +175,18 @@ module.exports = {
   markSubmissionReviewed(submissionId, input) {
     return request(`/api/review/submissions/${submissionId}/mark-reviewed`, { method: "POST", data: input || {} });
   },
+  listGradingWorkbenches() {
+    return request("/api/grading/workbench");
+  },
+  getGradingWorkbench(submissionId) {
+    return request(`/api/grading/workbench/${submissionId}`);
+  },
+  updateGradingWorkbenchQuestion(submissionId, questionId, input) {
+    return request(`/api/grading/workbench/${submissionId}/questions/${questionId}`, { method: "PATCH", data: input || {} });
+  },
+  archiveGradingWorkbench(submissionId, input) {
+    return request(`/api/grading/workbench/${submissionId}/archive`, { method: "POST", data: input || {} });
+  },
   draftStudentProfile(studentId) {
     return request(`/api/students/${studentId}/profile/draft`, { method: "POST", data: {} });
   },

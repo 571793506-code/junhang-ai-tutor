@@ -23,4 +23,20 @@
     <button class="button" loading="{{loading}}" bindtap="submit">上传并批改</button>
     <text wx:if="{{message}}" class="subtitle">{{message}}</text>
   </view>
+
+  <view class="card teacher-card">
+    <view class="row between">
+      <text class="section-title">批改工作台</text>
+      <button class="small-button" loading="{{loading}}" bindtap="loadWorkbenches">刷新</button>
+    </view>
+    <text class="muted">只展示服务端复核状态。逐题识别、置信度和归档判断仍由 API 与教师确认流程处理。</text>
+    <text wx:if="{{workbenchMessage}}" class="subtitle">{{workbenchMessage}}</text>
+    <block wx:for="{{workbenches}}" wx:key="submissionId">
+      <view class="workbench-row">
+        <text class="workbench-title">{{item.displayTitle}}</text>
+        <text class="workbench-meta">{{item.statusText}} · {{item.pendingText}}</text>
+        <text class="workbench-meta">{{item.subject}} · {{item.kind || '批改'}} · {{item.qualityText}}</text>
+      </view>
+    </block>
+  </view>
 </view>

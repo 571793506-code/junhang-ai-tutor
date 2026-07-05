@@ -85,6 +85,25 @@ if (!fs.existsSync(root)) {
     }
   }
 
+  const apiUtilPath = path.join(root, "utils/api.js");
+  if (fs.existsSync(apiUtilPath)) {
+    const source = fs.readFileSync(apiUtilPath, "utf8");
+    const requiredApiNeedles = [
+      "/api/grading/workbench",
+      "listGradingWorkbenches",
+      "archiveGradingWorkbench"
+    ];
+    for (const needle of requiredApiNeedles) {
+      if (!source.includes(needle)) {
+        failures.push({
+          type: "grading-contract",
+          file: relative(apiUtilPath),
+          message: `missing grading workbench API wrapper: ${needle}`
+        });
+      }
+    }
+  }
+
   for (const file of files) {
     const source = fs.readFileSync(file, "utf8");
     for (const needle of providerNeedles) {

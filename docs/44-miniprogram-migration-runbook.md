@@ -56,6 +56,10 @@
 - 如果 `miniapp-1` 与 `apps/miniprogram` 路由不同，先用人工 diff 判断差异来源，不直接全量覆盖。
 - 每次同步后至少运行 `cmd.exe /c .\jh.cmd check:miniapp1`、`cmd.exe /c .\jh.cmd check:miniprogram-js` 和 `cmd.exe /c .\jh.cmd check:encoding`。
 
+已知待收口差异：
+
+- `miniapp-1/utils/api.js` 当前包含课堂、词汇等 live 调试 wrapper，`apps/miniprogram/utils/api.js` 当前包含学生档案 wrapper。后续需要按 API 契约合并两边能力，不直接覆盖任一侧。
+
 ## 第一轮迁移范围
 
 ### 统一入口

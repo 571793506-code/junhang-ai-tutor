@@ -16,7 +16,9 @@ Page({
     studentNames: [],
     students: [],
     subjectIndex: 0,
-    subjects: ["语文", "数学", "英语"]
+    subjects: ["语文", "数学", "英语"],
+    workbenches: [],
+    workbenchMessage: ""
   },
   async onShow() {
     const teacher = await guard.requireRole("teacher", this);
@@ -34,6 +36,25 @@ Page({
         });
       })
       .catch(() => wx.showToast({ title: "学生加载失败", icon: "none" }));
+    this.loadWorkbenches();
+  },
+  async loadWorkbenches() {
+    try {
+      const response = await api.listGradingWorkbenches();
+      const workbenches = (response.workbenches || []).map((item) => ({
+        ...item,
+        displayTitle: item.title || `${item.subject || "批改"} · ${item.studentName || "学生"}`,
+        qualityText: item.quality && item.quality.status ? item.quality.status : "待检查",
+        statusText: item.needsTeacherReview ? "需要教师确认" : "可归档复核",
+        pendingText: `${item.pendingQuestionCount || 0}题待确认`
+      }));
+      this.setData({
+        workbenches,
+        workbenchMessage: workbenches.length ? "" : "暂无待复核批改记录。"
+      });
+    } catch (error) {
+      this.setData({ workbenchMessage: error.message || "批改工作台加载失败。" });
+    }
   },
   setStudent(event) {
     this.setData({ studentIndex: Number(event.detail.value) });
@@ -94,6 +115,7 @@ Page({
         }
       });
       this.setData({ files: [], note: "", pageNumber: "", questionRange: "", message: "批改记录已提交，后续可继续复核。" });
+      this.loadWorkbenches();
     } catch (error) {
       this.setData({ message: error.message || "上传批改失败。" });
     } finally {
