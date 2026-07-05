@@ -211,6 +211,9 @@ module.exports = {
   archiveGradingWorkbench(submissionId, input) {
     return request(`/api/grading/workbench/${submissionId}/archive`, { method: "POST", data: input || {} });
   },
+  getStudentProfile(studentId) {
+    return request(`/api/students/${studentId}/profile`);
+  },
   draftStudentProfile(studentId) {
     return request(`/api/students/${studentId}/profile/draft`, { method: "POST", data: {} });
   },

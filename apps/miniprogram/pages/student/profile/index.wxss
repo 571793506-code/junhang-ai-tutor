@@ -15,3 +15,12 @@
   border-radius: 999rpx;
   background: linear-gradient(90deg, #2f9d7e, #77c7ac);
 }
+
+.published-profile {
+  display: block;
+  margin-top: 12rpx;
+  color: #344054;
+  font-size: 27rpx;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}

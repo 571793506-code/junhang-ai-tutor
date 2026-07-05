@@ -6,6 +6,12 @@
   </view>
 
   <view class="card">
+    <text class="section-title">阶段反馈</text>
+    <text wx:if="{{publishedProfileText}}" class="published-profile">{{publishedProfileText}}</text>
+    <text wx:if="{{!publishedProfileText && !loading}}" class="muted">{{profileMessage || '老师还未发布阶段反馈。'}}</text>
+  </view>
+
+  <view class="card">
     <text class="section-title">知识掌握</text>
     <view wx:for="{{subjects}}" wx:key="name" class="mastery-row">
       <text class="item-title">{{item.name}}</text>
@@ -28,12 +34,13 @@
   </view>
 
   <view class="card">
-    <text class="section-title">阶段反馈</text>
+    <text class="section-title">历史反馈</text>
     <view class="list">
       <view wx:for="{{reports}}" wx:key="id" class="list-item">
         <text class="item-title">{{item.period}} · {{item.title}}</text>
         <text class="item-meta">{{item.summary}}</text>
       </view>
     </view>
+    <text wx:if="{{!reports.length && !loading}}" class="muted">暂无历史阶段反馈。</text>
   </view>
 </view>

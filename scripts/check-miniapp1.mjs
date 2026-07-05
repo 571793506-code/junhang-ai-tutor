@@ -94,6 +94,7 @@ if (!fs.existsSync(root)) {
       "/api/classroom/devices/",
       "/api/grading/workbench",
       "/api/students/${studentId}/profile/draft",
+      "getStudentProfile",
       "listGradingWorkbenches",
       "updateGradingWorkbenchQuestion",
       "archiveGradingWorkbench",
@@ -105,6 +106,29 @@ if (!fs.existsSync(root)) {
           type: "api-contract",
           file: relative(apiUtilPath),
           message: `missing miniprogram API wrapper: ${needle}`
+        });
+      }
+    }
+  }
+
+  const studentProfileJsPath = path.join(root, "pages/student/profile/index.js");
+  const studentProfileWxmlPath = path.join(root, "pages/student/profile/index.wxml");
+  if (fs.existsSync(studentProfileJsPath) && fs.existsSync(studentProfileWxmlPath)) {
+    const jsSource = fs.readFileSync(studentProfileJsPath, "utf8");
+    const wxmlSource = fs.readFileSync(studentProfileWxmlPath, "utf8");
+    const requiredStudentProfileNeedles = [
+      { source: jsSource, needle: "getStudentProfile", message: "student profile page must use the dedicated profile API instead of bootstrap-only data" },
+      { source: jsSource, needle: "publishedProfileText", message: "student profile page must handle teacher-published profile text" },
+      { source: jsSource, needle: "unresolvedMistakes", message: "student profile page must use unresolved mistakes from profile API" },
+      { source: wxmlSource, needle: "publishedProfileText", message: "student profile page must show teacher-published feedback when available" },
+      { source: wxmlSource, needle: "未发布", message: "student profile page must show unpublished feedback empty state" }
+    ];
+    for (const item of requiredStudentProfileNeedles) {
+      if (!item.source.includes(item.needle)) {
+        failures.push({
+          type: "student-profile",
+          file: item.source === jsSource ? relative(studentProfileJsPath) : relative(studentProfileWxmlPath),
+          message: item.message
         });
       }
     }
