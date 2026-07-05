@@ -12,6 +12,17 @@
 - 学生/家长端只展示 `AI生成` 或可用状态；教师端可展示审核状态和运维摘要；课堂平板和公共屏只展示课堂必要信息。
 - 涉及中文文案、生成内容或导出文件的迁移，必须继续执行编码守卫。
 
+## 小程序 Skills 使用入口
+
+后续小程序开发和 UI 调整先读项目内模块规则，不直接安装社区 skill：
+
+- 小程序页面、路由、API 封装、开发者工具和迁移：`skills/miniprogram/SKILLS.md`。
+- 小程序 UI、信息层级、组件库评估和视觉状态：`skills/miniprogram-ui/SKILLS.md`。
+- 教材资料、Markdown 转换、内容索引和资料上下文：`skills/teaching-materials/SKILLS.md`。
+- 小测、练习、试卷、任务和讲解生成：`skills/generation/SKILLS.md`。
+
+外部参考来源只作为经验输入：`wechat-miniprogram/ai-mode-skills` 用于生成、校验、评测流程；TencentCloudBase `ui-design` 和 Anthropic `frontend-design` 用于视觉设计思路；TDesign Miniprogram Skill 和 `tdesign-miniprogram` 用于组件落地评估；MarkItDown/Docling 用于资料处理候选。所有外部规则进入项目时必须遵守本仓库 API、服务层、教师复核和多端可见性边界。
+
 ## 当前迁移状态
 
 本轮开始进入小程序导入准备，不再沿用旧文档中的“只做方案、不修改小程序页面”停止线。当前目标是把 Web/API 原型沉淀为可导入微信开发者工具的第一版小程序结构。
