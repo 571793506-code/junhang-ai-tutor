@@ -9,7 +9,7 @@
 | 场景 | 当前入口 | 主模型 | 辅助模型 | 产物 |
 | --- | --- | --- | --- | --- |
 | 今日任务生成 | `POST /api/teacher/tasks` | DeepSeek V4 | Codex 主脑审查 | `LearningTask`、`ModelRun` |
-| 小测/练习/试卷生成 | `POST /api/assessments/draft` | DeepSeek assessment v4，超时/不可用时 GPT5.5 接管，MiniMax M3 备份 | Codex 主脑修复 + MiniMax M3 质量审查 + GPT5.5 高级质量审查 | `Assignment`、`AssignmentItem`、`ModelRun`、`generationPipeline` |
+| 小测/练习/试卷生成 | `POST /api/assessments/draft` | DeepSeek assessment v4，超时/不可用时 GPT5.5 接管，MiniMax M3 备份 | 服务层结构修复 + 本地规则审查；MiniMax/GPT 深度质量审查仅显式开启 | `Assignment`、`AssignmentItem`、`ModelRun`、`generationPipeline` |
 | A4 草稿审查 | `POST /api/assessments/:assignmentId/draft-export`、`draft-review` | Codex 主脑审查 + 确定性 HTML/PDF 渲染 | 教师确认 | `GeneratedAsset` 内容审查草稿 |
 | A4 正式导出 | `POST /api/assessments/:assignmentId/print-export` | 确定性 HTML/PDF 渲染 | 无 | `GeneratedAsset` 题目版、解析版 |
 | 图片批改 | `POST /api/submissions/grade` | DeepSeek V4 | MiniMax M3 / OCR-VLM 识别 | `Submission`、`GradingResult`、错题记录 |
@@ -28,11 +28,11 @@
   "modelReview": {
     "provider": "minimax",
     "model": "MiniMax-M3",
-    "capabilities": ["long-context-review", "vision-ocr", "second-pass-check"]
+    "capabilities": ["long-context-review", "vision-ocr", "explicit-second-pass-check"]
   },
   "premiumReview": {
     "provider": "gpt55",
-    "capabilities": ["assessment-fallback-generation", "premium-quality-gate", "archive-gate"]
+    "capabilities": ["assessment-fallback-generation", "explicit-premium-quality-gate", "archive-gate"]
   },
   "speechGeneration": {
     "provider": "minimax",
@@ -192,9 +192,10 @@ flowchart LR
   D --> F
   E --> F
   F --> G["服务层结构修复与规则校验"]
-  G --> H["MiniMax M3 生成质量审查"]
-  H --> I["GPT5.5 高级质量审查"]
-  I --> J["保存 Assignment / AssignmentItem / ModelRun / generationPipeline"]
+  G --> H["本地规则审查 + 教师复核门禁"]
+  H -. "显式 runModelReview=true" .-> I["MiniMax/GPT 深度质量审查"]
+  H --> J["保存 Assignment / AssignmentItem / ModelRun / generationPipeline"]
+  I --> J
   J --> K["生成 PDF 草稿供教师审查"]
   K --> L{"教师是否确认"}
   L -->|否| C

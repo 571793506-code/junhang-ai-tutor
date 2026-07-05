@@ -91,8 +91,9 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 生成小测、练习、试卷草稿。
   - 关键字段：`kind`, `grade`, `subject`, `difficulty`, `requirement`。
   - 默认规则：小测/练习两页 A4，试卷四页 A4。
-  - 服务层模型链路：DeepSeek assessment v4 优先生成；超时或不可用时由 GPT5.5 高级生成接管；MiniMax M3 作为备份生成；随后由服务层修复结构，再经过 MiniMax M3 生成质量审查和 GPT5.5 高级质量审查。
-  - 返回和落库 `generationPipeline`，记录当前阶段、模型尝试、修复状态、审查状态、打印闸门和导出资产。Web、小程序、课堂平板只读取该结构，不自行重建生成链路。
+  - 服务层模型链路：DeepSeek assessment v4 优先生成；超时或不可用时由 GPT5.5 高级生成接管；MiniMax M3 作为备份生成；随后由服务层修复结构并做本地结构审查。
+  - 默认不在草稿主链路同步执行 MiniMax M3 和 GPT5.5 质量审查，避免生成接口被多模型审查拖慢；只有显式传入 `runModelReview=true` 或服务端配置开启时，才执行深度模型审查。
+  - 返回和落库 `generationPipeline`，记录当前阶段、模型尝试、修复状态、模型审查是否执行、打印闸门和导出资产。Web、小程序、课堂平板只读取该结构，不自行重建生成链路。
 - `POST /api/assessments/:assignmentId/draft-export`
   - 将已生成内容导出为“内容审查 PDF 草稿”，只供教师打开 PDF 审查，不在 Web/小程序内展示完整题面。
   - 返回 `asset.url`、`reviewStatus=pending_teacher_review` 和更新后的 `generationPipeline`。
@@ -197,7 +198,7 @@ AI 类接口不会因为数据库暂时不可用而失败，会返回：
   - 生成默认写入 `Assignment`，生成和后续批改共享同一个 `assignmentId`。
   - 前端传入 `items`、`layoutTemplate`、`printProfile`、`targetScope`、`targetGrade`、`studentId` 时会保存到 `metadata`，作为 A4 排版、年级/学生归档和后续批改的数据结构。
   - 正式打印前必须经过 `draft-export` 生成 PDF 草稿，以及 `draft-review` 教师确认，避免未复核内容直接进入打印。
-  - `metadata.modelReviews` 只保存 MiniMax M3 和 GPT5.5 审查结论、风险、建议和 `modelRunId`；完整模型运行记录只通过 `ModelRun` 查询，避免把内部运行对象直接暴露给多端前端。
+  - `metadata.modelReviews` 只在显式深度模型审查执行时保存 MiniMax M3 和 GPT5.5 审查结论、风险、建议和 `modelRunId`；默认草稿生成只保存服务层本地审查结果，完整模型运行记录只通过 `ModelRun` 查询，避免把内部运行对象直接暴露给多端前端。
 - `POST /api/submissions/grade`
   - 如果没有传 `assignmentId`，API 会自动创建一个用于图片提交和批改的 `Assignment`，并写入 `Submission` 与 `GradingResult`。
   - 教师端和学生端都可以走图片上传批改；选择关联生成记录时优先复用该记录的答案键。

@@ -2951,7 +2951,7 @@ function normalizeAssessmentDraft(result = {}, input = {}) {
   };
 }
 
-function buildAssessmentGenerationPipeline({ result = {}, draft = {}, input = {}, printProfile = null, layoutTemplate = null, modelRun = null, modelReviews = {} }) {
+function buildAssessmentGenerationPipeline({ result = {}, draft = {}, input = {}, printProfile = null, layoutTemplate = null, modelRun = null, modelReviews = {}, modelReviewRequired = false }) {
   const audit = draft.audit || {};
   const attempts = Array.isArray(result.modelRun?.metadata?.attempts) ? result.modelRun.metadata.attempts : [];
   const draftReady = Boolean(draft.items?.length);
@@ -2961,6 +2961,9 @@ function buildAssessmentGenerationPipeline({ result = {}, draft = {}, input = {}
     ? reviewEntries.every((review) => review.exportReady === true)
     : false;
   const modelReviewIssues = reviewEntries.flatMap((review) => review.issues || []);
+  const modelReviewStatus = modelReviewRequired
+    ? modelReviewPassed ? "passed" : "needs_teacher_review"
+    : "skipped";
   const modelStatus = result.modelRun?.status || (result.available ? "SUCCESS" : "ERROR");
   const modelAvailable = Boolean(result.available);
   const usedDynamicFallback = Boolean(draft.usedDynamicFallback);
@@ -3003,17 +3006,17 @@ function buildAssessmentGenerationPipeline({ result = {}, draft = {}, input = {}
       teacherMessage: audit.teacherMessage || ""
     },
     modelReview: {
-      required: true,
-      status: modelReviewPassed ? "passed" : "needs_teacher_review",
-      passed: modelReviewPassed,
+      required: modelReviewRequired,
+      status: modelReviewStatus,
+      passed: modelReviewRequired ? modelReviewPassed : null,
       issues: modelReviewIssues,
       reviews: modelReviews
     },
     gates: {
       draftPdfRequired: true,
       draftPdfExported: false,
-      modelReviewRequired: true,
-      modelReviewPassed,
+      modelReviewRequired,
+      modelReviewPassed: modelReviewRequired ? modelReviewPassed : null,
       teacherReviewRequired: true,
       teacherReviewStatus: "not_exported",
       finalExportAllowed: false,
@@ -3032,6 +3035,13 @@ function buildAssessmentGenerationPipeline({ result = {}, draft = {}, input = {}
         : "模型未成功返回结构化草稿，服务层已生成动态兜底草稿，必须经教师 PDF 草稿复核。"
       : "未形成可用生成草稿，需要重新生成。"
   };
+}
+
+function shouldRunAssessmentModelReview(config = {}, input = {}, options = {}) {
+  if (options.runModelReview != null) return options.runModelReview === true;
+  if (input.runModelReview != null) return input.runModelReview === true;
+  const configured = config.ASSESSMENT_DRAFT_MODEL_REVIEW_ENABLED ?? config.assessmentDraftModelReviewEnabled;
+  return String(configured || "false").toLowerCase() === "true";
 }
 
 export async function answerStudentQuestionService(config, input = {}, options = {}) {
@@ -3194,11 +3204,13 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     generationContext,
     contentContext
   };
-  const result = await draftAssessment(config, modelInput);
+  const assessmentDraftRunner = options.assessmentDraftRunner || draftAssessment;
+  const result = await assessmentDraftRunner(config, modelInput);
   const modelRun = await persistRun(result.modelRun, options);
   const printProfile = input.printProfile || buildPrintProfile(modelInput);
   const layoutTemplate = input.layoutTemplate || buildLayoutTemplate(modelInput);
   const draft = normalizeAssessmentDraft(result, modelInput);
+  const modelReviewRequired = shouldRunAssessmentModelReview(config, input, options);
   const reviewPayload = {
     reviewTask: "assessment-draft-quality-audit",
     title: draft.title,
@@ -3232,17 +3244,24 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
       }
     }))
   };
-  const miniMaxDraftReview = await reviewWithMiniMax(config, reviewPayload);
-  const miniMaxDraftReviewRun = await persistRun(miniMaxDraftReview.modelRun, options);
-  const gptDraftReview = await reviewWithGpt55(config, {
-    ...reviewPayload,
-    secondModelAudit: parseAssessmentQualityReview(miniMaxDraftReview, "MiniMax M3 生成审查")
-  });
-  const gptDraftReviewRun = await persistRun(gptDraftReview.modelRun, options);
-  const modelReviews = {
-    minimax: compactAssessmentQualityReview(miniMaxDraftReview, "MiniMax M3 生成审查", miniMaxDraftReviewRun?.id || null),
-    premium: compactAssessmentQualityReview(gptDraftReview, "GPT5.5 生成高级审查", gptDraftReviewRun?.id || null)
-  };
+  const modelReviews = {};
+  const reviewModelRunIds = {};
+  if (modelReviewRequired) {
+    const reviewers = options.assessmentModelReviewers || {};
+    const miniMaxReviewer = reviewers.minimax || reviewWithMiniMax;
+    const premiumReviewer = reviewers.premium || reviewWithGpt55;
+    const miniMaxDraftReview = await miniMaxReviewer(config, reviewPayload);
+    const miniMaxDraftReviewRun = await persistRun(miniMaxDraftReview.modelRun, options);
+    const gptDraftReview = await premiumReviewer(config, {
+      ...reviewPayload,
+      secondModelAudit: parseAssessmentQualityReview(miniMaxDraftReview, "MiniMax M3 生成审查")
+    });
+    const gptDraftReviewRun = await persistRun(gptDraftReview.modelRun, options);
+    modelReviews.minimax = compactAssessmentQualityReview(miniMaxDraftReview, "MiniMax M3 生成审查", miniMaxDraftReviewRun?.id || null);
+    modelReviews.premium = compactAssessmentQualityReview(gptDraftReview, "GPT5.5 生成高级审查", gptDraftReviewRun?.id || null);
+    reviewModelRunIds.minimax = miniMaxDraftReviewRun?.id || null;
+    reviewModelRunIds.premium = gptDraftReviewRun?.id || null;
+  }
   const generationPipeline = buildAssessmentGenerationPipeline({
     result,
     draft,
@@ -3250,7 +3269,8 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     printProfile,
     layoutTemplate,
     modelRun,
-    modelReviews
+    modelReviews,
+    modelReviewRequired
   });
   const assignment =
     options.persist === false || input.createAssignment === false
@@ -3293,10 +3313,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
               contentContext,
               providerId: result.providerId,
               modelRunId: modelRun?.id || null,
-              reviewModelRunIds: {
-                minimax: miniMaxDraftReviewRun?.id || null,
-                premium: gptDraftReviewRun?.id || null
-              }
+              reviewModelRunIds
             }
           },
           options
@@ -3318,10 +3335,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     contentContext,
     persisted: {
       modelRunId: modelRun?.id || null,
-      draftReviewModelRunIds: {
-        minimax: miniMaxDraftReviewRun?.id || null,
-        premium: gptDraftReviewRun?.id || null
-      },
+      draftReviewModelRunIds: reviewModelRunIds,
       assignmentId: assignment?.id || null
     }
   };
