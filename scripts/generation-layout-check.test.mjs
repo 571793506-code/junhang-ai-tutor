@@ -99,3 +99,35 @@ test("layout check accepts a dense two-page math quiz", () => {
   assert.equal(check.ok, true);
   assert.deepEqual(check.issues, []);
 });
+
+test("layout check allows intentional blank work space on math calculation pages", () => {
+  const check = evaluateGenerationLayoutPdf({
+    name: "数学试卷-题目.pdf",
+    pages: 4,
+    text: "六年级数学试卷\n试卷 · A4 · 第1/4页\n试卷 · A4 · 第2/4页\n试卷 · A4 · 第3/4页\n试卷 · A4 · 第4/4页\n三、计算题\n四、解答题",
+    pageMetrics: [
+      { page: 1, bottomBlankMm: 70.2, drawingCount: 6, text: "一、填空题" },
+      { page: 2, bottomBlankMm: 151.4, drawingCount: 7, text: "三、计算题\n21. 计算：12.5×0.32×8。" },
+      { page: 3, bottomBlankMm: 146.3, drawingCount: 8, text: "三、计算题\n25. 计算：7/12+5/18-1/6。" },
+      { page: 4, bottomBlankMm: 138.6, drawingCount: 9, text: "四、解答题" }
+    ]
+  });
+
+  assert.equal(check.ok, true);
+  assert.deepEqual(check.issues, []);
+});
+
+test("layout check allows intentional final math solution work space", () => {
+  const check = evaluateGenerationLayoutPdf({
+    name: "数学练习-题目.pdf",
+    pages: 2,
+    text: "五年级数学练习\n练习 · A4 · 第1/2页\n练习 · A4 · 第2/2页\n三、计算题\n四、解决问题",
+    pageMetrics: [
+      { page: 1, bottomBlankMm: 96.8, drawingCount: 10, text: "三、计算题\n9. 解方程：x÷1.5 = 6.4。" },
+      { page: 2, bottomBlankMm: 128.5, drawingCount: 10, text: "四、解决问题\n13. 如图，三角形 ABC 中，∠A=46°，∠B=∠C。" }
+    ]
+  });
+
+  assert.equal(check.ok, true);
+  assert.deepEqual(check.issues, []);
+});

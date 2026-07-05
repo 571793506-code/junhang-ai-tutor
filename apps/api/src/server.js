@@ -1552,15 +1552,17 @@ function sectionTitleForItem(item) {
   }[printableItemType(item)] || "练习题";
 }
 
-function answerSpaceMm(item, subject = "") {
+function answerSpaceMm(item, subject = "", kind = "") {
   const metadata = safeJson(item?.metadata, {});
   const type = printableItemType(item);
   const subjectText = readableText(subject, "");
+  const kindText = readableText(kind, "");
+  const isExam = kindText.includes("试卷");
   const options = Array.isArray(metadata.options) ? metadata.options : [];
   const configured = Number(metadata.answerSpaceMm);
   const answerFormat = String(metadata.answerFormat || "");
   if (type === "writing" && answerFormat === "english-four-line") return configured > 0 ? Math.max(18, Math.min(configured, 54)) : 32;
-  if (type === "writing" && answerFormat === "chinese-square-grid") return configured > 0 ? Math.max(72, Math.min(configured, 148)) : 132;
+  if (type === "writing" && answerFormat === "chinese-square-grid") return configured > 0 ? Math.max(72, Math.min(configured, isExam ? 96 : 148)) : isExam ? 96 : 132;
   if (answerFormat === "english-four-line" && type === "fill") return configured > 0 ? Math.max(10, Math.min(configured, 16)) : 10;
   if (answerFormat === "english-four-line" && (type === "solution" || type === "reading")) return configured > 0 ? Math.max(20, Math.min(configured, 38)) : 24;
   if (type === "choice" || type === "judgment" || type === "writing" || type === "listening") return 0;
@@ -1570,8 +1572,8 @@ function answerSpaceMm(item, subject = "") {
   }
   if (type === "reading" && options.length) return 0;
   if (configured > 0) {
-    if (subjectText.includes("数学") && type === "calculation") return Math.max(16, Math.min(configured, 30));
-    if (subjectText.includes("数学") && (type === "solution" || type === "operation")) return Math.max(24, Math.min(configured, 44));
+    if (subjectText.includes("数学") && type === "calculation") return Math.max(10, Math.min(configured, 16));
+    if (subjectText.includes("数学") && (type === "solution" || type === "operation")) return Math.max(18, Math.min(configured, 28));
     return Math.max(4, Math.min(configured, subjectText.includes("数学") ? 36 : 18));
   }
   return {
@@ -1717,8 +1719,7 @@ function renderAnswerSpace(item, itemType, spaceMm, subject = "") {
   if (metadata.answerFormat === "english-four-line") return renderEnglishFourLineSpace(spaceMm, itemType);
   if (metadata.answerFormat === "chinese-square-grid") return renderChineseSquareGrid(spaceMm);
   if (metadata.answerFormat === "ruled" || metadata.answerFormat === "reading-lines") {
-    const isChineseReading = subjectText.includes("语文") && (itemType === "reading" || metadata.answerFormat === "reading-lines");
-    const lines = isChineseReading ? Math.max(1, Math.min(Math.ceil(spaceMm / 5), 4)) : 1;
+    const lines = 1;
     return `<div class="ruled-lines compact">${Array.from({ length: lines }).map(() => "<span></span>").join("")}</div>`;
   }
   if (itemType === "calculation") {
@@ -1734,16 +1735,16 @@ function renderAnswerSpace(item, itemType, spaceMm, subject = "") {
   if (itemType === "reading") {
     if (spaceMm <= 0) return "";
     return subjectText.includes("语文")
-      ? `<div class="ruled-lines compact"><span></span>${spaceMm >= 8 ? "<span></span>" : ""}</div>`
+      ? `<div class="ruled-lines compact"><span></span></div>`
       : `<div class="short-response-space" style="min-height:${spaceMm}mm"></div>`;
   }
   return spaceMm > 0 ? `<div class="answer-space" style="min-height:${spaceMm}mm"></div>` : "";
 }
 
-function renderStudentItem({ item, number, showSection, subject, suppressWritingSpace = false }) {
+function renderStudentItem({ item, number, showSection, subject, kind = "", suppressWritingSpace = false }) {
   const metadata = safeJson(item?.metadata, {});
   const itemType = printableItemType(item);
-  const spaceMm = answerSpaceMm(item, subject);
+  const spaceMm = answerSpaceMm(item, subject, kind);
   const options = Array.isArray(metadata.options) ? metadata.options : [];
   const compactOptions = options.length <= 4 && options.every((option) => String(option || "").length <= 18);
   const subjectText = readableText(subject, "");
@@ -1774,7 +1775,7 @@ function renderStudentItem({ item, number, showSection, subject, suppressWriting
     </div>`;
 }
 
-function splitSequentialPages(items = [], pageCount = 2, subject = "") {
+function splitSequentialPages(items = [], pageCount = 2, subject = "", kind = "") {
   const safePageCount = Math.max(1, pageCount);
   const pages = Array.from({ length: safePageCount }).map((_, pageIndex) => ({ pageIndex, items: [], heightPx: 0 }));
   const weighted = items.map((item, index) => {
@@ -1787,7 +1788,7 @@ function splitSequentialPages(items = [], pageCount = 2, subject = "") {
     const passageHeightPx = metadata.showPassage && passageText
       ? Math.min(360, Math.max(88, Math.ceil(passageText.length / 120) * 18 + 34))
       : 0;
-    const spaceMm = answerSpaceMm(item, subject);
+    const spaceMm = answerSpaceMm(item, subject, kind);
     const answerSpaceHeightPx = answerFormat === "english-four-line"
       ? Math.ceil((type === "fill" ? 16 : spaceMm) * 3.2)
       : spaceMm > 0 ? Math.ceil(spaceMm * 3.2) : 0;
@@ -1806,25 +1807,42 @@ function splitSequentialPages(items = [], pageCount = 2, subject = "") {
     return { item, number: index + 1, estimatedHeightPx };
   });
   const subjectText = readableText(subject, "");
+  const kindText = readableText(kind, "");
+  const planningPageCount = safePageCount;
+  const allocatableWeighted = weighted;
+  const sectionWeightFor = (entry, previousEntry = null) => {
+    if (!entry) return 0;
+    const previousSection = previousEntry ? sectionTitleForItem(previousEntry.item) : "";
+    return !previousSection || previousSection !== sectionTitleForItem(entry.item) ? 38 : 0;
+  };
+  const totalEstimatedHeightPx = allocatableWeighted.reduce((sum, entry, index) => {
+    return sum + entry.estimatedHeightPx + sectionWeightFor(entry, allocatableWeighted[index - 1]);
+  }, 0);
+  const idealPageBudgetPx = Math.ceil(totalEstimatedHeightPx / planningPageCount);
   const pageBudgetFor = (index) => {
-    if (subjectText.includes("数学")) return index === 0 ? 1010 : 980;
-    if (subjectText.includes("英语")) return index === 0 ? 760 : 980;
-    if (subjectText.includes("语文")) return index === 0 ? 1200 : 1060;
-    return index === 0 ? 760 : 850;
+    const minBudgetPx = safePageCount >= 4
+      ? subjectText.includes("语文") ? 800 : subjectText.includes("英语") ? 620 : subjectText.includes("数学") ? 470 : 580
+      : subjectText.includes("英语") ? (kindText.includes("小测") ? 860 : 800) : subjectText.includes("数学") ? 650 : subjectText.includes("语文") ? 800 : 720;
+    const physicalBudgetPx =
+      subjectText.includes("语文") ? (index === 0 ? 820 : 850) :
+      subjectText.includes("英语") ? (index === 0 ? (safePageCount >= 4 ? 820 : kindText.includes("小测") ? 900 : 820) : 860) :
+      subjectText.includes("数学") ? (safePageCount >= 4 ? (index === 0 ? 650 : 700) : (index === 0 ? 760 : 820)) :
+      (index === 0 ? 760 : 820);
+    return Math.min(physicalBudgetPx, Math.max(minBudgetPx, Math.ceil(idealPageBudgetPx * 1.08)));
   };
   let pageIndex = 0;
-  for (const entry of weighted) {
+  for (const entry of allocatableWeighted) {
     const page = pages[pageIndex];
     const pageBudgetPx = pageBudgetFor(pageIndex);
     const nextSection = Boolean(page.items.length && sectionTitleForItem(page.items[page.items.length - 1].item) !== sectionTitleForItem(entry.item));
     const sectionTitlePx = nextSection || !page.items.length ? 38 : 0;
-    if (pageIndex < safePageCount - 1 && page.items.length && page.heightPx + entry.estimatedHeightPx + sectionTitlePx > pageBudgetPx) {
+    if (pageIndex < planningPageCount - 1 && page.items.length && page.heightPx + entry.estimatedHeightPx + sectionTitlePx > pageBudgetPx) {
       pageIndex += 1;
     }
     pages[pageIndex].items.push(entry);
     pages[pageIndex].heightPx += entry.estimatedHeightPx + sectionTitlePx;
   }
-  for (let index = 1; index < pages.length; index += 1) {
+  for (let index = 1; index < planningPageCount; index += 1) {
     const pageBudgetPx = pageBudgetFor(index);
     while (pages[index].items.length < 2 && pages[index - 1].items.length > 3) {
       const moved = pages[index - 1].items.pop();
@@ -1837,7 +1855,7 @@ function splitSequentialPages(items = [], pageCount = 2, subject = "") {
       pages[index].items.unshift(moved);
       pages[index].heightPx += moved.estimatedHeightPx;
     }
-    while (pages[index].heightPx < pageBudgetPx * 0.38 && pages[index - 1].items.length > 5) {
+    while (pages[index].heightPx < pageBudgetPx * 0.5 && pages[index - 1].items.length > 5) {
       const moved = pages[index - 1].items.pop();
       if (!moved) break;
       const firstCurrent = pages[index].items[0]?.item;
@@ -1874,7 +1892,7 @@ function printableAssignmentHtml(assignment, options = {}) {
   const kind = readableKind(metadata.kind, "练习");
   const subject = readableText(profile.subject || metadata.subject || assignment.subject?.name, "英语");
   const columns = 1;
-  const pageItems = splitSequentialPages(items, pageCount, subject);
+  const pageItems = splitSequentialPages(items, pageCount, subject, kind);
   const badgeText = options.badgeText || "AI生成 · 教师复核后打印";
   const footText = options.footText || "AI生成内容需教师复核后使用";
   const titleSuffix = options.titleSuffix || "";
@@ -1960,10 +1978,6 @@ ${pageItems.map(({ pageIndex, items: currentItems }) => {
       (subject.includes("英语") && (
         currentItems.some(({ item }) => printableItemType(item) === "reading") ||
         (pageItems[pageIndex]?.heightPx || 0) > 830
-      )) ||
-      (subject.includes("语文") && (
-        currentItems.some(({ item }) => printableItemType(item) === "reading") ||
-        (pageItems[pageIndex]?.heightPx || 0) > 880
       ))
     );
   return `<section class="page">
@@ -1976,7 +1990,7 @@ ${pageItems.map(({ pageIndex, items: currentItems }) => {
   <div class="items">${currentItems.length ? currentItems.map(({ item, number }, index, list) => {
     const currentSection = sectionTitleForItem(item);
     const previousSection = index > 0 ? sectionTitleForItem(list[index - 1]?.item) : previousPageLastSection;
-    return renderStudentItem({ item, number, showSection: !previousSection || previousSection !== currentSection, subject, suppressWritingSpace });
+    return renderStudentItem({ item, number, showSection: !previousSection || previousSection !== currentSection, subject, kind, suppressWritingSpace });
   }).join("") : '<div class="blank-page-inner">本页留白，便于双面打印。</div>'}</div>
   ${footText ? "" : ""}
 </section>`;
@@ -2026,7 +2040,7 @@ function buildQuestionLayoutManifest(assignment, options = {}) {
   const pageCount = Number(profile.pages || options.pageCount || 2);
   const kind = readableKind(metadata.kind, "练习");
   const subject = readableText(profile.subject || metadata.subject || assignment.subject?.name, "英语");
-  const pageItems = splitSequentialPages(items, pageCount, subject);
+  const pageItems = splitSequentialPages(items, pageCount, subject, kind);
   const questions = [];
   for (const page of pageItems) {
     const entries = page.items || [];
@@ -2070,7 +2084,7 @@ function buildQuestionLayoutManifest(assignment, options = {}) {
         bbox,
         answerSpace: {
           format: itemMetadata.answerFormat || null,
-          estimatedMm: answerSpaceMm(item, subject)
+          estimatedMm: answerSpaceMm(item, subject, kind)
         }
       });
       cursor += height;

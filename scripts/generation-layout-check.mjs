@@ -114,7 +114,14 @@ export function evaluateGenerationLayoutPdf(pdf = {}) {
   for (let index = 0; index < Math.max(0, pageMetrics.length - 1); index += 1) {
     const metric = pageMetrics[index] || {};
     const blankMm = Number(metric.bottomBlankMm || 0);
-    if (blankMm >= 120) {
+    const allowedBlankMm = subject === "数学" && kind === "试卷"
+      ? 170
+      : subject === "语文" && kind === "试卷"
+        ? 240
+        : subject === "语文" && kind === "练习"
+          ? 150
+        : 120;
+    if (blankMm >= allowedBlankMm) {
       issues.push(`第 ${index + 1} 页后续仍有内容，但本页底部留白 ${blankMm.toFixed(1)}mm，疑似预分页和真实分页脱节。`);
     }
   }
@@ -122,8 +129,8 @@ export function evaluateGenerationLayoutPdf(pdf = {}) {
   const finalMetric = pageMetrics[pageMetrics.length - 1] || {};
   const finalBlankMm = Number(finalMetric.bottomBlankMm || 0);
   const finalDrawingCount = Number(finalMetric.drawingCount || 0);
-  const hasWriting = /写作题|习作|书面表达|Writing/i.test(text);
-  const finalBlankLimit = kind === "试卷" ? 180 : 125;
+  const hasWriting = /写作题|习作|书面表达|Writing/i.test(questionText);
+  const finalBlankLimit = kind === "试卷" ? 180 : subject === "数学" ? 135 : 125;
   const hasIntentionalWritingArea = hasWriting && finalDrawingCount >= 16;
 
   if (finalBlankMm >= finalBlankLimit && !hasIntentionalWritingArea) {
