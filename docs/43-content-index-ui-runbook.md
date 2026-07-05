@@ -182,6 +182,8 @@ cmd /c npm.cmd run check:encoding
 验证入口按范围选择：
 
 - `check:generation:blueprint`：生成模板、兜底内容、题型蓝图、分值和基础审查规则的轻量验证。
+- `check:generation:quality:quiz`：中预算真实模型小测质量样本，覆盖数学、语文、英语各 1 个小测；要求 `modelAvailable=true` 且 `usedDynamicFallback=false`，只评估结构化草稿内容质量，不导出 PDF。
+- `check:generation:quality:formal`：正式预算真实模型质量样本，覆盖小升初数学试卷、英语个性化练习和语文阅读表达练习；要求真实模型生成和服务层审查通过，不导出 PDF。
 - `check:content-upload-ui`：教师端上传面板、文件输入、导入按钮、`.edupdf` 前端过滤、生成上下文摘要和 Web API multipart 上传封装。
 - `check:content-context`：资料上下文链路守卫，包含资料转 Markdown、教师上传、`.edupdf` 拒绝、路径拒绝、教师登录、内容索引重建、编码守卫、组卷草稿、上下文注入、草稿导出、复核拦截、教师确认和正式资产导出。该命令允许低预算触发动态兜底，只证明链路能收口，不评估题目原创性、贴合教师要求、个性化程度、解析质量或 PDF 视觉质量。
 - `check:teaching-content` / `check:teaching-content:full`：会先执行 `api:start-if-needed`，再顺序执行上传 UI 合约和内容上下文 E2E，只适合大改、发布前或需要完整链路证明时使用。
