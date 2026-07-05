@@ -47,6 +47,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 | 图片提交批改 | `POST /api/submissions/grade` | 学生端、教师端批量上传复用同一接口 | 不确定 OCR 或批改结果进入教师复核，不向学生发布未确认结论 | `check --workspace apps/api` |
 | 批改工作台 | `GET /api/grading/workbench`、`GET /api/grading/workbench/:submissionId`、`PATCH /api/grading/workbench/:submissionId/questions/:questionId` | 教师 Web/小程序读取同一套页面、逐题、标注、置信度和复核状态，并可逐题修正 | 只给教师端使用；学生/家长端不展示未确认逐题批改；逐题修正后仍需教师确认归档 | `check --workspace apps/api`、`typecheck --workspace apps/web` |
 | 批改复核归档 | `POST /api/review/submissions/:submissionId/mark-reviewed`、`POST /api/grading/workbench/:submissionId/archive` | 教师 Web/小程序确认分数、备注后归档 | 低置信、需教师复核或仅有 provisionalScore 的结果，必须提交教师确认分数；否则不入档、不创建错题记录 | `check --workspace apps/api`、`typecheck --workspace apps/web`、`check:miniprogram-js` |
+| 学生长期成长档案 | `POST /api/students/:studentId/profile/draft`、`POST /api/students/:studentId/profile/publish`、`POST /api/students/:studentId/profile/aggregate`、`GET /api/students/:studentId/profile` | 教师端生成周档案或月度综合档案草稿；学生/家长端只读取教师发布后的结构化摘要；Web 仅作联调原型，小程序复用同一契约 | 教师可见 `teacherReview` 和 `profileEvidencePack`；学生/家长不可见证据包、复核提示、供应商、模型、prompt、debug 或未复核来源 | `check --workspace apps/api`、`typecheck --workspace apps/web`、`check:encoding` |
 | 资料索引摘要 | `GET /api/content/index` | 教师 Web/小程序查看资料上下文状态 | 只展示摘要、资料数、科目、知识点，不返回完整 Markdown chunk | `check:content-context`、`check:teaching-content` |
 | 资料上传转 Markdown | `POST /api/content/markdown-ingestion` | 教师端上传普通教学资料 | 仅教师端可用；拒绝 `.edupdf`；上传路径限制在工作区内 | `check:content-upload-ui`、`check:teaching-content` |
 | 资料索引重建 | `POST /api/content/index/rebuild` | 教师端触发重建，组卷服务读取结果 | 仅教师端可用；返回索引摘要，不泄露内部上下文 | `check:content-context`、`check:teaching-content` |
@@ -74,6 +75,70 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 - `GET /api/teachers/:teacherId/students`
   - 教师端查看自己绑定的学生。
+
+## 学生档案与长期成长档案
+
+- `POST /api/students/:studentId/profile/draft`
+  - 教师端生成待复核档案草稿。
+  - 请求字段：`periodType`，可选值为 `weekly` 或 `monthly`；默认 `weekly`。
+  - 周档案对应 `profileType=weekly_growth`，月度综合档案对应 `profileType=monthly_comprehensive_growth`。
+  - 返回教师可见结构：`period`, `publishedView`, `teacherReview`, `profileEvidencePack`, `sourceCounts`, `timeline`, `narrative`。
+  - `profileEvidencePack` 由任务、已复核批改、错题、阶段报告、课堂行为、AI 问答和语音互动组成；低置信、未复核、`provisionalScore` 或 `archiveEligible=false` 来源进入 `blockedEvidence`，不能进入学生/家长端发布视图。
+
+- `POST /api/students/:studentId/profile/publish`
+  - 教师确认并发布档案。
+  - 请求字段：`text` 为教师最终确认正文，`snapshot` 可传入结构化草稿。
+  - API 会把教师正文写入 `publishedText`，并保留结构化 `publishedView` 供学生端展示。
+  - 发布仍必须经过教师确认；前端不得自动把 draft 直接发布给学生或家长。
+
+- `POST /api/students/:studentId/profile/aggregate`
+  - 兼容型聚合接口，默认按 `periodType=monthly` 生成月度综合档案。
+  - 学生或教师会话都可调用，但响应按当前角色过滤。
+
+- `GET /api/students/:studentId/profile`
+  - 读取已保存档案。
+  - 教师角色可见 `teacherReview` 和 `profileEvidencePack`，用于复核来源、样本不足说明和发布清单。
+  - 学生角色只返回已过滤快照：保留 `profileType`, `period`, `publishedView`, `weeklyScore`, `mastery`, `strengths`, `risks`, `tone`, `timeline`, `narrative` 等可见字段；移除 `teacherReview`, `profileEvidencePack`, `provider`, `model`, `prompt`, `debug`, `raw` 等内部字段。
+
+结构化快照核心形态：
+
+```json
+{
+  "profileType": "weekly_growth",
+  "period": { "type": "weekly", "label": "2026-06-29 至 2026-07-05", "start": "2026-06-29", "end": "2026-07-05" },
+  "publishedView": {
+    "periodType": "weekly",
+    "periodLabel": "2026-06-29 至 2026-07-05",
+    "overview": { "text": "本周成长摘要", "evidenceRefs": ["task_1"], "confidence": "supported" },
+    "subjectOverview": [],
+    "focusSubjects": [],
+    "correctionLoop": [],
+    "stableGrowth": [],
+    "tutoringFocus": [],
+    "parentNextSteps": [],
+    "timelinePreview": []
+  },
+  "teacherReview": {
+    "evidenceItems": [],
+    "sampleLimitNotes": [],
+    "pendingConfirmations": [],
+    "internalRisks": [],
+    "publishChecklist": []
+  },
+  "profileEvidencePack": {
+    "period": {},
+    "taskEvidence": [],
+    "gradingEvidence": [],
+    "mistakeEvidence": [],
+    "qaEvidence": [],
+    "classroomEvidence": [],
+    "blockedEvidence": [],
+    "sourceQuality": {}
+  }
+}
+```
+
+期中、期末或更正式的阶段总结不作为当前页面 Tab 扩展；后续按教师确认后的 PDF 交付给家长查看，仍复用同一证据包和教师复核边界。
 
 ## AI 问答与任务
 
