@@ -1,4 +1,14 @@
 const SUBJECTS = ["语文", "数学", "英语"];
+const TERM_REPORT_TEMPLATES = {
+  midterm: {
+    id: "term-midterm-growth-report",
+    focusLabel: "接下来两到四周优先处理"
+  },
+  final: {
+    id: "term-final-growth-report",
+    focusLabel: "假期或下阶段可以这样配合"
+  }
+};
 
 export function normalizeTermReportType(value) {
   return value === "midterm" ? "midterm" : "final";
@@ -18,30 +28,46 @@ export function termReportTypeLabel(value) {
 
 export function buildTermReportDraft(student, options = {}) {
   const reportType = normalizeTermReportType(options.reportType);
+  const template = TERM_REPORT_TEMPLATES[reportType];
   const now = options.now instanceof Date ? options.now : new Date();
   const periodLabel = String(options.periodLabel || defaultPeriodLabel(reportType, now)).trim();
   const subjects = SUBJECTS.map((subject) => subjectSection(student, subject));
   const focus = subjects.find((item) => item.concerns.length) || subjects[0];
   const title = `${student.displayName} ${periodLabel}${termReportTypeLabel(reportType)}`;
+  const habits = learningHabits(student);
+  const progress = progressList(student);
+  const actions = nextActions(subjects);
+  const suggestions = parentSuggestions(subjects);
+  const sections = {
+    overview: {
+      text: `${student.displayName}本阶段学习记录已完成汇总，建议重点关注${focus.subject}的持续巩固和订正闭环。`
+    },
+    subjects,
+    subjectOverview: subjects,
+    focusSubjects: subjects.filter((item) => item.concerns.length).slice(0, 2),
+    stableGrowth: progress.length ? progress : habits.slice(0, 1),
+    correctionLoop: correctionLoop(student),
+    learningHabits: habits,
+    progress,
+    nextActions: actions,
+    parentSuggestions: suggestions,
+    tutoringFocus: [
+      `${template.focusLabel}：${actions[0] || "继续保持错题订正和基础巩固。"}`
+    ],
+    parentNextStep: suggestions
+  };
+  if (!sections.focusSubjects.length) sections.focusSubjects = subjects.slice(0, 1);
+  if (!sections.stableGrowth.length) sections.stableGrowth = ["本阶段保持稳定学习节奏，后续继续积累教师确认记录。"];
 
   return {
     reportType,
+    template,
     status: "draft",
     visibility: "teacher_pdf_only",
     periodLabel,
     title,
     generatedAt: now.toISOString(),
-    sections: {
-      overview: {
-        text: `${student.displayName}本阶段学习记录已完成汇总，建议重点关注${focus.subject}的持续巩固和订正闭环。`
-      },
-      subjects,
-      correctionLoop: correctionLoop(student),
-      learningHabits: learningHabits(student),
-      progress: progressList(student),
-      nextActions: nextActions(subjects),
-      parentSuggestions: parentSuggestions(subjects)
-    },
+    sections,
     wechatMessage: `您好，这是${student.displayName}同学${periodLabel}${termReportTypeLabel(reportType)}，请查收。`
   };
 }
@@ -87,7 +113,11 @@ export function renderTermReportHtml(student, report) {
   const termReport = safeObject(metadata.termReport);
   const draft = safeObject(termReport.draft || termReport);
   const sections = safeObject(draft.sections);
-  const subjects = Array.isArray(sections.subjects) ? sections.subjects : [];
+  const subjects = Array.isArray(sections.subjectOverview) ? sections.subjectOverview : Array.isArray(sections.subjects) ? sections.subjects : [];
+  const focusSubjects = Array.isArray(sections.focusSubjects) ? sections.focusSubjects : subjects.filter((item) => item.concerns?.length);
+  const stableGrowth = Array.isArray(sections.stableGrowth) ? sections.stableGrowth : [...(sections.learningHabits || []), ...(sections.progress || [])];
+  const tutoringFocus = Array.isArray(sections.tutoringFocus) ? sections.tutoringFocus : sections.nextActions;
+  const parentNextStep = Array.isArray(sections.parentNextStep) ? sections.parentNextStep : sections.parentSuggestions;
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -125,16 +155,18 @@ li { margin: 2px 0; }
 <section>
   <h2>一、综合成长摘要</h2>
   <div class="card">${paragraphs(termReport.teacherEditedText || report.content || sections.overview?.text)}</div>
-  <h2>二、学科表现</h2>
+  <h2>二、三科总览</h2>
   ${subjects.map((item) => `<div class="section card"><h3>${escapeHtml(item.subject)}</h3><p>${escapeHtml(item.summary || "")}</p>${list("优势", item.highlights)}${list("关注点", item.concerns)}</div>`).join("")}
-  <h2>三、错题与订正闭环</h2>
+  <h2>三、重点科目展开</h2>
+  ${focusSubjects.map((item) => `<div class="section card"><h3>${escapeHtml(item.subject)}</h3>${list("需要关注", item.concerns)}${list("可以保持", item.highlights)}</div>`).join("")}
+  <h2>四、错题与订正闭环</h2>
   ${listBlock(sections.correctionLoop)}
-  <h2>四、学习习惯与阶段进步</h2>
-  ${listBlock([...(sections.learningHabits || []), ...(sections.progress || [])])}
-  <h2>五、下阶段建议</h2>
-  ${listBlock(sections.nextActions)}
-  <h2>六、家长配合建议</h2>
-  ${listBlock(sections.parentSuggestions)}
+  <h2>五、稳定表现</h2>
+  ${listBlock(stableGrowth)}
+  <h2>六、下阶段辅导重点</h2>
+  ${listBlock(tutoringFocus)}
+  <h2>七、家长下一步</h2>
+  ${listBlock(parentNextStep)}
   <div class="foot">本报告由教师确认后生成，供家长通过微信私聊查收。</div>
 </section>
 </body>

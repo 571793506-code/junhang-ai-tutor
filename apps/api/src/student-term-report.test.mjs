@@ -77,6 +77,34 @@ test("buildTermReportDraft creates teacher PDF only draft", () => {
   assert.ok(draft.wechatMessage.includes("成长报告"));
 });
 
+test("buildTermReportDraft applies midterm and final content templates", () => {
+  const midterm = buildTermReportDraft(student, {
+    reportType: "midterm",
+    periodLabel: "2026春季期中",
+    now: new Date("2026-07-05T12:00:00.000Z")
+  });
+  const final = buildTermReportDraft(student, {
+    reportType: "final",
+    periodLabel: "2026春季期末",
+    now: new Date("2026-07-05T12:00:00.000Z")
+  });
+
+  assert.equal(midterm.template.id, "term-midterm-growth-report");
+  assert.equal(final.template.id, "term-final-growth-report");
+  assert.equal(midterm.template.focusLabel, "接下来两到四周优先处理");
+  assert.equal(final.template.focusLabel, "假期或下阶段可以这样配合");
+  assert.deepEqual(midterm.sections.subjectOverview.map((item) => item.subject), ["语文", "数学", "英语"]);
+  assert.ok(midterm.sections.focusSubjects.length >= 1);
+  assert.ok(midterm.sections.stableGrowth.length >= 1);
+  assert.ok(final.sections.tutoringFocus.some((item) => item.includes("下阶段") || item.includes("假期")));
+  assert.ok(final.sections.parentNextStep.length >= 1);
+
+  const serialized = JSON.stringify({ midterm, final });
+  for (const forbidden of ["排名", "预测分", "冲刺", "升学风险", "班级位置"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+});
+
 test("mapTermReportForRole hides PDF and body from student until sent", () => {
   const report = {
     id: "report_1",
@@ -166,4 +194,21 @@ test("renderTermReportHtml escapes edited text and includes no scripts", () => {
   assert.ok(html.includes("&lt;script&gt;alert(1)&lt;/script&gt;"));
   assert.ok(!html.includes("<script>alert(1)</script>"));
   assert.ok(html.includes("期中成长报告"));
+});
+
+test("renderTermReportHtml includes term report template sections", () => {
+  const draft = buildTermReportDraft(student, { reportType: "final", periodLabel: "2026春季期末" });
+  const html = renderTermReportHtml(student, {
+    id: "report_3",
+    title: "张思源 2026春季期末成长报告",
+    content: draft.sections.overview.text,
+    metadata: { termReport: draft }
+  });
+
+  for (const heading of ["三科总览", "重点科目展开", "稳定表现", "下阶段辅导重点", "家长下一步"]) {
+    assert.ok(html.includes(heading), `missing heading: ${heading}`);
+  }
+  assert.ok(html.includes("教师确认后生成"));
+  assert.equal(html.includes("排名"), false);
+  assert.equal(html.includes("预测分"), false);
 });
