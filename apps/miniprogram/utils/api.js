@@ -174,6 +174,9 @@ module.exports = {
   getContentIndex() {
     return request("/api/content/index");
   },
+  rebuildContentIndex(input) {
+    return request("/api/content/index/rebuild", { method: "POST", data: input || {} });
+  },
   listKnowledgeSources(input = {}) {
     const query = Object.keys(input)
       .filter((key) => input[key])

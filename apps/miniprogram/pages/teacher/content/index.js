@@ -86,6 +86,23 @@ Page({
       this.setData({ loading: false });
     }
   },
+  async rebuildContentIndex() {
+    this.setData({ loading: true, message: "" });
+    try {
+      const response = await api.rebuildContentIndex({
+        inputs: ["exports/markdown-ingestion"],
+        outDir: "exports/content-index"
+      });
+      await this.loadContentContext();
+      this.setData({
+        message: `内容索引已重建，当前索引资料 ${response.index?.documentCount || 0} 份。请同步到资料库并复核后再用于生成。`
+      });
+    } catch (error) {
+      this.setData({ message: error.message || "内容索引重建失败。" });
+    } finally {
+      this.setData({ loading: false });
+    }
+  },
   async createSource() {
     const draft = this.data.sourceDraft;
     if (!draft.title.trim()) {

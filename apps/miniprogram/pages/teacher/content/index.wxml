@@ -21,7 +21,10 @@
       <button class="small-button" loading="{{loading}}" bindtap="loadContentContext">刷新</button>
     </view>
     <view class="index-note"><text>{{index && index.reason ? index.reason : (index && index.indexPath ? index.indexPath : 'exports/content-index/index.json')}}</text></view>
-    <button class="primary-button" loading="{{loading}}" bindtap="syncIndex">同步到资料库</button>
+    <view class="button-grid">
+      <button class="primary-button" loading="{{loading}}" bindtap="rebuildContentIndex">重建内容索引</button>
+      <button class="primary-button secondary" loading="{{loading}}" bindtap="syncIndex">同步到资料库</button>
+    </view>
   </view>
 
   <view class="content-panel">

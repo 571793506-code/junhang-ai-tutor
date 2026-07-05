@@ -141,6 +141,17 @@
   color: #fff;
 }
 
+.primary-button.secondary {
+  background: #e8f1ff;
+  color: #1d4f91;
+}
+
+.button-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14rpx;
+}
+
 .small-button {
   min-width: 118rpx;
   margin: 0;

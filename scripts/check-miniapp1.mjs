@@ -92,6 +92,7 @@ if (!fs.existsSync(root)) {
     const requiredApiNeedles = [
       "/api/ai/vocabulary",
       "/api/classroom/devices/",
+      "/api/content/index/rebuild",
       "/api/grading/workbench",
       "/api/students/${studentId}/profile/draft",
       "getStudentProfile",
@@ -106,6 +107,28 @@ if (!fs.existsSync(root)) {
           type: "api-contract",
           file: relative(apiUtilPath),
           message: `missing miniprogram API wrapper: ${needle}`
+        });
+      }
+    }
+  }
+
+  const contentPageJsPath = path.join(root, "pages/teacher/content/index.js");
+  const contentPageWxmlPath = path.join(root, "pages/teacher/content/index.wxml");
+  if (fs.existsSync(contentPageJsPath) && fs.existsSync(contentPageWxmlPath)) {
+    const jsSource = fs.readFileSync(contentPageJsPath, "utf8");
+    const wxmlSource = fs.readFileSync(contentPageWxmlPath, "utf8");
+    const requiredContentNeedles = [
+      { source: jsSource, needle: "rebuildContentIndex", message: "teacher content page must call service-layer content index rebuild API" },
+      { source: jsSource, needle: "exports/markdown-ingestion", message: "teacher content page must use the standard markdown ingestion source directory" },
+      { source: jsSource, needle: "exports/content-index", message: "teacher content page must use the standard content index output directory" },
+      { source: wxmlSource, needle: "bindtap=\"rebuildContentIndex\"", message: "teacher content page must expose a content index rebuild action" }
+    ];
+    for (const item of requiredContentNeedles) {
+      if (!item.source.includes(item.needle)) {
+        failures.push({
+          type: "content-index",
+          file: item.source === jsSource ? relative(contentPageJsPath) : relative(contentPageWxmlPath),
+          message: item.message
         });
       }
     }
