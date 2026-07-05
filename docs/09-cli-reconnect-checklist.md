@@ -5,7 +5,7 @@
 - `node`：已安装。
 - `npm` / `npx`：已安装。
 - `git`：已安装。
-- `gh`：未发现。
+- `gh`：已安装，版本可通过 `gh --version` 查看。
 - `lark-cli`：已通过 `@larksuite/cli` 安装到项目开发依赖，版本 `1.0.36`。
 - `deepseek`：未发现本地 CLI，第一版优先走 HTTP API。
 - `minimax`：未发现本地 CLI，第一版优先走 OpenAI 兼容 HTTP API。
@@ -69,17 +69,26 @@ MINIMAX_TEXT_MODEL=MiniMax-M3
 
 ## GitHub
 
-当前未发现 `gh`。可以选择：
+当前状态：
 
-- 安装 GitHub CLI，然后登录。
-- 继续用 Git 命令和远程仓库 URL。
-- 安装 Codex 的 GitHub 插件。
+- GitHub CLI 已登录 `github.com`，当前账号为 `571793506-code`。
+- Git 操作协议为 SSH。
+- Git 远端为 `git@github.com:571793506-code/junhang-ai-tutor.git`。
+- 远端默认分支为 `main`。
+- `ssh -T git@github.com` 已返回认证成功。
+- `git fetch origin` 已验证可用。
 
-待确认：
+复查命令：
 
-- 仓库名称。
-- 私有或公开。
-- 是否由我创建远程仓库。
-- 用户提供的 `SHA256:...` 看起来更像 SSH key fingerprint，不是 GitHub API token。若要自动创建仓库、PR 或 issue，还需要 GitHub 登录或 Personal Access Token。
-- 已确认本机 `id_ed25519.pub` 指纹与用户提供的 fingerprint 一致。
-- 当前 `ssh -T git@github.com` 返回 publickey denied，需要把本机公钥添加到 GitHub 账号后才能通过 SSH 推送。
+```bash
+gh auth status --hostname github.com
+gh repo view 571793506-code/junhang-ai-tutor --json name,owner,url,defaultBranchRef
+ssh -T git@github.com
+git ls-remote --heads origin
+git fetch origin
+```
+
+注意：
+
+- GitHub token 不写入项目文件；`gh` 登录态由系统凭据管理器保存。
+- `GITHUB_TOKEN` 只用于非交互式自动化或 CI 场景，并且必须通过本地 `.env`、系统环境变量或密钥管理服务注入，不能提交到 Git。

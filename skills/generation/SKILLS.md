@@ -46,7 +46,6 @@
 ## 当前项目可参考位置
 
 - `packages/services/src/index.js`：`draftAssessmentService`、生成上下文、结构修复和 fallback 思想。
-- `scripts/generate-assessment-fixtures.mjs`：fixture 思想，仅作测试样例参考。
 - `docs/41-prompt-context-engineering-playbook.md`：提示词、上下文包和修复规则。
 - `docs/14-api-contract.md`：草稿、复核和正式导出 API 契约。
 

@@ -15,6 +15,14 @@
 - 面向学生、家长、教师和平板的权限、可见字段和错误信息必须按多端角色设计；不要因为网页原型方便而暴露模型名、供应商、内部路由、调试字段或未复核内容。
 - 修改网页原型后，如该能力最终需要迁移到小程序或平板端，应同步更新相关运行手册或说明，避免后续对话误判为网页专属功能。
 
+## 外部 Skills 本地化规则
+
+- 不要直接安装或照搬社区 skill 到本仓库主流程；先把外部经验改写成符合本项目 API、服务层、多端可见性和教师复核边界的项目内规则。
+- 小程序开发可参考 `wechat-miniprogram/ai-mode-skills`、CloudBase 小程序开发 skill 和微信官方生态，但落地时必须读取 `skills/miniprogram/SKILLS.md`，只复用生成、校验、评测和开发者工具流程，不复制不明安全边界或上传发布逻辑。
+- 小程序 UI 调整可参考 TencentCloudBase `ui-design`、Anthropic `frontend-design`、TDesign Miniprogram Skill 和 `tdesign-miniprogram`，但落地时必须读取 `skills/miniprogram-ui/SKILLS.md`，先确定学生端、教师端、课堂平板端的信息层级和状态，再决定组件或样式。
+- 教材资料处理可参考 MarkItDown、Docling、Marker、book-to-skill 和 education-agent-skills，但落地时必须读取 `skills/teaching-materials/SKILLS.md`；MarkItDown 作为默认普通资料转 Markdown 路线，Docling 只作为复杂 PDF、表格、图片增强候选，Marker 必须先审 license 和依赖风险。
+- 教育规则可参考 education-agent-skills 等教学设计经验，但只能吸收测评、学习反馈、课程结构和教师复核规则，不直接复制外部实现，不绕过本项目生成类和批改类 skill。
+
 ## Git 可追踪性规则
 
 - 当前工作区可能包含大量未跟踪源码、文档、生成物和临时文件。操作前先运行 `git status --short` 判断范围。
@@ -78,6 +86,37 @@ npm.cmd run check:api
 不要把模型输出直接传给学生、家长、教师或 PDF。服务层必须负责结构化、校验和修复。
 
 使用 `docs/41-prompt-context-engineering-playbook.md` 作为提示词、上下文工程、模型修复和教师复核流程的基准。
+
+## Prompt Engineering 与 Context Engineering 规则
+
+后续任何涉及 AI 问答、任务生成、小测、练习、试卷、批改、学生档案、资料上下文或模型修复的改动，都必须同时考虑 prompt engineering 和 context engineering，不能只改一句自然语言提示词。
+
+Prompt engineering 负责“怎么说”，每次模型调用至少明确：
+
+- 模型角色：小学三到六年级课后辅导、教研出题、作业批改、学情分析等。
+- 任务类型：问答、今日任务、小测、练习、试卷、批改、档案反馈或资料摘要。
+- 输出格式：需要结构化结果时必须要求严格 JSON，不混入解释性文本。
+- 教学约束：学科、年级、题型、页数、是否听力、是否附加题、是否需要图形或四线格/田字格。
+- 审核边界：AI 只产出草稿，教师确认后才能发布、打印、归档或同步给学生/家长。
+- 可见性约束：学生、家长、课堂平板和公共屏不得看到供应商、模型名、内部 prompt、调试字段或未复核内容。
+
+Context engineering 负责“给模型看什么”，服务端调用模型前应组装结构化上下文包，而不是只转发教师的一句话。生成类、批改类和档案类优先使用 `generationContext`，至少包含：
+
+- `request`：教师原始要求、意图、请求 ID、教师身份。
+- `target`：学生、班级、年级、学科和作用范围。
+- `teaching`：教材、章节、知识点、教师重点、资料索引和 `contentContext`。
+- `studentSignals`：近期错题、学习任务、批改记录、档案摘要和薄弱点。
+- `output`：A4 页数、题型结构、答案解析、教师复核要求和学生可见标签。
+- `rules`：结构修复、乱码防护、供应商隐藏、未复核拦截和导出规则。
+
+禁止模式：
+
+- 不要只把教师自由文本直接传给 DeepSeek、MiniMax 或其他模型。
+- 不要把模型原始输出直接落库、导出 PDF 或展示给学生/家长。
+- 不要在前端页面中拼接核心 prompt 或临时上下文，核心组装逻辑必须放在接口、服务层、脚本或共享工具中。
+- 不要为了 Web 原型方便绕过教师复核、结构校验、乱码检查或多端可见性规则。
+
+模型输出进入持久化、导出或展示前，必须经过 parse、normalize、validate、repair 和 review-state handling。涉及资料上下文时，必须优先复用内容索引链路，把匹配结果写入 `generationContext.teaching.contentContext`，并保留教师复核状态。
 
 模型输出进入持久化、导出或展示前，至少检查：
 

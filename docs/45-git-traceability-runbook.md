@@ -7,7 +7,7 @@
 - 不使用 `git add .` 一次性纳入全部文件。
 - 先分组，再检查，再 stage，再提交。
 - 每个提交只覆盖一个清晰主题，例如 API 服务、Web 原型、小程序迁移、内容上下文链路、编码守卫或文档规则。
-- 生成物、截图、临时文件、上传文件和本地环境文件默认不纳入，除非明确是项目资产或测试 fixture。
+- 生成物、截图、临时文件、上传文件、PDF 导出样例和本地环境文件默认不纳入。
 - 当前工作区已有大量未跟踪文件，后续对话必须先看 `git status --short`，不要把未确认文件当作自己刚生成的内容直接删除或覆盖。
 
 ## 建议分组
@@ -120,7 +120,6 @@ cmd /c npm.cmd run check:encoding
 只在确认用途后选择性纳入：
 
 - 明确作为小程序 UI 资产来源的图片。
-- 明确作为测试 fixture 的导出样例。
 - 明确作为项目说明或演示页面的静态预览。
 
 ## 当前需要人工确认的文件类型
@@ -130,7 +129,7 @@ cmd /c npm.cmd run check:encoding
 - 根目录临时截图，例如 `desktop-web.png`、`mobile-web.png`。
 - 疑似误生成文件，例如 `console.log(e.message))`、`{console.error(e.message)`。
 - 大体积模型或压缩包，例如 `chi_sim.traineddata`、`eng.traineddata`、`mmx-cli-1.0.15.tgz`，除非确认它们是项目必须离线资产。
-- `exports/` 下的运行产物，除非确认是文档引用的稳定资产。
+- `exports/` 下的运行产物，尤其是 PDF 导出样例。
 
 ## 推荐提交顺序
 
@@ -139,7 +138,7 @@ cmd /c npm.cmd run check:encoding
 3. API、服务层、数据库和共享包。
 4. Web 原型。
 5. 小程序迁移。
-6. 经确认需要保留的资产或 fixture。
+6. 经确认需要保留的静态资产。
 
 每一组提交前都应先执行：
 

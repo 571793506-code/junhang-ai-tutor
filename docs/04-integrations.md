@@ -58,9 +58,11 @@
 - PR 审查。
 - 版本发布记录。
 
-待确认：
+当前连接：
 
-- 新仓库名称。
-- 私有还是公开。
-- 是否需要我连接 GitHub 插件/CLI。
-
+- Git 远端：`git@github.com:571793506-code/junhang-ai-tutor.git`。
+- 仓库地址：`https://github.com/571793506-code/junhang-ai-tutor`。
+- 默认分支：`main`。
+- GitHub CLI：已安装并通过 `gh auth status --hostname github.com` 验证，当前账号为 `571793506-code`。
+- Git 操作协议：SSH。
+- GitHub token 不写入项目文件；`gh` 登录态由系统凭据管理器保存。只有自动化环境确实需要时，才通过环境变量注入 `GITHUB_TOKEN`。
