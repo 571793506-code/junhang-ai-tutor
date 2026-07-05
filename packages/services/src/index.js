@@ -1337,6 +1337,7 @@ function reviewAndRepairAssessmentItems(items = [], input = {}) {
     .filter((item) => item?.prompt)
     .filter((item) => wantsListening(input) || printableType(item) !== "listening")
     .filter((item) => isAllowedAssessmentItem(item, input))
+    .filter((item) => !isForbiddenEnglishShortAssessmentItem(item, input))
     .filter((item) => !isUnrequestedBonusItem(item, input));
 
   if (!wantsListening(input) && items.some((item) => printableType(item) === "listening")) {
@@ -1347,6 +1348,9 @@ function reviewAndRepairAssessmentItems(items = [], input = {}) {
   }
   if (items.some((item) => !isAllowedAssessmentItem(item, input))) {
     notes.push("已移除不符合当前类型的题目，例如语文小测/练习中的作文题。");
+  }
+  if (items.some((item) => isForbiddenEnglishShortAssessmentItem(item, input))) {
+    notes.push("已移除英语小测/练习中的试卷式题组，并按单元小测/练习结构补足。");
   }
 
   const shouldReplaceReading = shouldReplaceReadingSection(sanitized, input, blueprint);
@@ -1595,6 +1599,21 @@ function isUnrequestedBonusItem(item = {}, input = {}) {
   if (wantsBonusQuestions(input)) return false;
   const text = compactText(`${item.prompt || ""} ${item.metadata?.sectionTitle || ""}`);
   return /附加题|拓展题|挑战题|Bonus/i.test(text);
+}
+
+function isForbiddenEnglishShortAssessmentItem(item = {}, input = {}) {
+  const subject = normalizeSubject(input.subject);
+  const kind = normalizeAssessmentKind(input.kind);
+  if (subject !== "英语" || kind === "试卷") return false;
+  const text = compactText([
+    item.prompt,
+    item.metadata?.sectionTitle,
+    item.metadata?.passageTitle,
+    item.metadata?.answerFormat,
+    item.metadata?.knowledgePoint,
+    item.knowledgePoint
+  ].filter(Boolean).join(" "));
+  return /文章选词填空|完形填空|短文语法填空|词形变化/.test(text);
 }
 
 function shouldReplaceReadingSection(items = [], input = {}, blueprint = buildAssessmentBlueprint(input)) {
@@ -3415,6 +3434,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     modelAvailable: Boolean(result.available),
     draftAvailable: Boolean(draft.items?.length),
     parsedDraft: draft.parsed,
+    draftItems: draft.items,
     audit: draft.audit,
     totalScore: draft.totalScore,
     usedDynamicFallback: draft.usedDynamicFallback,

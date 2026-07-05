@@ -299,3 +299,101 @@ test("draftAssessmentService keeps exam total score at 100 when bonus is request
   assert.equal(result.totalScore, 100);
   assert.equal(result.generationPipeline.repair.totalScore, 100);
 });
+
+test("draftAssessmentService replaces exam-style English quiz items during local repair", async () => {
+  const result = await draftAssessmentService(
+    {},
+    {
+      subject: "英语",
+      kind: "小测",
+      grade: "五年级",
+      requirement: "Unit 4 单元词汇、句型和阅读，不要完形填空或文章选词填空"
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async () => ({
+        available: true,
+        providerId: "fake",
+        draftText: JSON.stringify({
+          title: "五年级英语小测",
+          sections: [
+            {
+              title: "一、词汇运用",
+              items: Array.from({ length: 8 }).map((_, index) => ({
+                itemType: "fill",
+                prompt: `根据中文写单词 ${index + 1} ______。`,
+                answer: "word",
+                analysisSteps: ["看中文。", "写英文。", "检查拼写。"],
+                knowledgePoint: "单词拼写"
+              }))
+            },
+            {
+              title: "二、句型表达",
+              items: [
+                {
+                  itemType: "solution",
+                  prompt: "文章选词填空：从方框中选择合适单词补全短文。",
+                  answer: "略",
+                  analysisSteps: ["通读短文。", "判断词性。", "填入答案。"],
+                  knowledgePoint: "试卷式词汇运用"
+                },
+                {
+                  itemType: "solution",
+                  prompt: "完形填空：Read the passage and choose the best answer.",
+                  answer: "略",
+                  analysisSteps: ["通读短文。", "结合上下文。", "选择答案。"],
+                  knowledgePoint: "试卷式完形"
+                }
+              ]
+            },
+            {
+              title: "三、单项选择题",
+              items: Array.from({ length: 4 }).map((_, index) => ({
+                itemType: "choice",
+                prompt: index === 0 ? "短文语法填空：Which word is correct?" : `Choose the best answer ${index + 1}.`,
+                options: ["A. in", "B. on", "C. at", "D. to"],
+                answer: "B",
+                analysisSteps: ["读句子。", "判断搭配。", "选择答案。"],
+                knowledgePoint: "介词"
+              }))
+            },
+            {
+              title: "四、阅读理解",
+              items: Array.from({ length: 4 }).map((_, index) => ({
+                itemType: "reading",
+                prompt: `What does Amy do on special days? ${index + 1}`,
+                options: ["A. Study and share.", "B. Sleep.", "C. Run home.", "D. Watch TV."],
+                answer: "A",
+                passageGroupId: "quiz-reading",
+                passageTitle: "A Short Passage",
+                passageText: "Amy has many special days at school. She writes the dates on her class calendar. She studies, plays, helps classmates and shares her work with friends.",
+                passageQuestionIndex: index + 1,
+                showPassage: index === 0,
+                analysisSteps: ["读短文。", "定位信息。", "选择答案。"],
+                knowledgePoint: "阅读理解"
+              }))
+            }
+          ]
+        }),
+        modelRun: {
+          provider: "fake",
+          model: "fake-assessment",
+          skill: "assessment-draft",
+          status: "SUCCESS",
+          metadata: { attempts: [] }
+        }
+      })
+    }
+  );
+
+  const repairedText = result.draftItems
+    .map((item) => `${item.prompt || ""} ${item.passageTitle || ""}`)
+    .join(" ");
+  const auditIssues = result.generationPipeline.audit.issues.join(" ");
+  const repairNotes = result.generationPipeline.repair.repairNotes.join(" ");
+
+  assert.equal(/文章选词填空|完形填空|短文语法填空/.test(repairedText), false);
+  assert.equal(result.generationPipeline.audit.passed, true);
+  assert.equal(/文章选词填空|完形填空|短文语法填空/.test(auditIssues), false);
+  assert.match(repairNotes, /英语小测\/练习中的试卷式题组/);
+});
