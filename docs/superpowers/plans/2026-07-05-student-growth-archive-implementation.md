@@ -35,7 +35,7 @@
 - Create: `apps/api/src/student-growth-profile.js`
 - Create: `apps/api/src/student-growth-profile.test.mjs`
 
-- [ ] **Step 1: Write failing test for evidence pack filtering**
+- [x] **Step 1: Write failing test for evidence pack filtering**
 
 Create `apps/api/src/student-growth-profile.test.mjs` with:
 
@@ -168,23 +168,23 @@ test("filterStudentProfileSnapshot hides teacher review from student role", () =
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test apps/api/src/student-growth-profile.test.mjs`
 
 Expected: FAIL with module/function not found.
 
-- [ ] **Step 3: Implement minimal helper**
+- [x] **Step 3: Implement minimal helper**
 
 Create `apps/api/src/student-growth-profile.js` exporting `buildProfileEvidencePack`, `buildStudentGrowthSnapshot`, and `filterStudentProfileSnapshot`. Implement only the behavior asserted above, plus compatible fields `weeklyScore`, `mastery`, `strengths`, `risks`, `tone`, `timeline`, and `narrative`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `node --test apps/api/src/student-growth-profile.test.mjs`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -376,4 +376,3 @@ Spec coverage:
 - Verification commands: Task 6.
 
 No placeholders are intentionally left. This plan avoids database migration for first release because `StudentProfile.snapshot` already stores JSON.
-
