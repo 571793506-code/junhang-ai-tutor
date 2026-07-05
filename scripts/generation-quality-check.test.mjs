@@ -48,7 +48,18 @@ test("generation quality verification rejects dynamic fallback samples", () => {
       model: {
         generationProfile: "quiz-standard",
         assessmentTotalTimeoutMs: 60000,
-        assessmentMaxTokens: 16000
+        assessmentMaxTokens: 16000,
+        primaryError: "MODEL_TIMEOUT after 60000ms",
+        attempts: [
+          {
+            role: "primary",
+            providerId: "deepseek",
+            model: "deepseek-v4-pro",
+            status: "ERROR",
+            latencyMs: 60000,
+            error: "MODEL_TIMEOUT after 60000ms"
+          }
+        ]
       },
       repair: { itemCount: 12, totalScore: 60 }
     },
@@ -67,6 +78,9 @@ test("generation quality verification rejects dynamic fallback samples", () => {
   assert.equal(check.ok, false);
   assert.ok(check.detail.issues.includes("质量样本必须来自真实模型生成，不能使用动态兜底。"));
   assert.equal(check.detail.issues.some((issue) => issue.includes("数学质量样本必须包含")), false);
+  assert.equal(check.detail.primaryError, "MODEL_TIMEOUT after 60000ms");
+  assert.equal(check.detail.attempts.length, 1);
+  assert.equal(check.detail.attempts[0].providerId, "deepseek");
 });
 
 test("english quiz quality sample rejects full exam writing patterns", () => {

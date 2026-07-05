@@ -224,3 +224,78 @@ test("draftAssessmentService preserves explicit generation budget overrides", as
   assert.equal(runnerInput.generationTimeoutMs, 9000);
   assert.equal(runnerInput.assessmentMaxTokens, 7777);
 });
+
+test("draftAssessmentService keeps exam total score at 100 when bonus is requested", async () => {
+  const result = await draftAssessmentService(
+    {},
+    {
+      subject: "数学",
+      kind: "试卷",
+      grade: "六年级",
+      requirement: "小升初难度偏高，题量适中，必须有一个附加题"
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async () => ({
+        available: true,
+        providerId: "fake",
+        draftText: JSON.stringify({
+          title: "六年级小升初数学试卷",
+          sections: [
+            {
+              title: "一、填空题",
+              items: Array.from({ length: 12 }).map((_, index) => ({
+                itemType: "fill",
+                prompt: `填空题 ${index + 1}`,
+                answer: "1",
+                analysisSteps: ["根据题意计算。"],
+                knowledgePoint: "数与代数"
+              }))
+            },
+            {
+              title: "二、选择题",
+              items: Array.from({ length: 8 }).map((_, index) => ({
+                itemType: "choice",
+                prompt: `选择题 ${index + 1}`,
+                options: ["A. 1", "B. 2", "C. 3", "D. 4"],
+                answer: "A",
+                analysisSteps: ["排除错误选项。"],
+                knowledgePoint: "综合判断"
+              }))
+            },
+            {
+              title: "三、计算题",
+              items: Array.from({ length: 8 }).map((_, index) => ({
+                itemType: "calculation",
+                prompt: `计算题 ${index + 1}`,
+                answer: "10",
+                analysisSteps: ["写出计算过程。"],
+                knowledgePoint: "计算能力"
+              }))
+            },
+            {
+              title: "四、解答题",
+              items: Array.from({ length: 6 }).map((_, index) => ({
+                itemType: "solution",
+                prompt: index === 5 ? "附加题：解决问题 6" : `解决问题 ${index + 1}`,
+                answer: "略",
+                analysisSteps: ["分析数量关系。"],
+                knowledgePoint: "解决问题"
+              }))
+            }
+          ]
+        }),
+        modelRun: {
+          provider: "fake",
+          model: "fake-assessment",
+          skill: "assessment-draft",
+          status: "SUCCESS",
+          metadata: { attempts: [] }
+        }
+      })
+    }
+  );
+
+  assert.equal(result.totalScore, 100);
+  assert.equal(result.generationPipeline.repair.totalScore, 100);
+});

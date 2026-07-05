@@ -164,6 +164,14 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
   const totalScore = Number(result.totalScore || result.generationPipeline?.repair?.totalScore || 0);
   const itemCount = Number(result.audit?.itemCount || result.generationPipeline?.repair?.itemCount || items.length || 0);
   const model = result.generationPipeline?.model || {};
+  const modelDiagnostics = {
+    primaryError: model.primaryError || null,
+    secondaryError: model.secondaryError || null,
+    fallbackProvider: model.fallbackProvider || null,
+    assessmentTotalTimeoutMs: model.assessmentTotalTimeoutMs || null,
+    assessmentMaxTokens: model.assessmentMaxTokens || null,
+    attempts: Array.isArray(model.attempts) ? model.attempts : []
+  };
 
   if (!result.modelAvailable) issues.push("质量样本必须来自可用模型。");
   if (result.usedDynamicFallback) issues.push("质量样本必须来自真实模型生成，不能使用动态兜底。");
@@ -187,6 +195,7 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
         itemCount,
         totalScore,
         itemTypes: Array.from(itemTypes),
+        ...modelDiagnostics,
         issues
       }
     };
@@ -240,6 +249,7 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
       itemCount,
       totalScore,
       itemTypes: Array.from(itemTypes),
+      ...modelDiagnostics,
       issues
     }
   };

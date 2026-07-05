@@ -1503,7 +1503,6 @@ function defaultScoreForAssessmentItem(item = {}, input = {}) {
 
 function targetAssessmentTotalScore(input = {}) {
   const kind = normalizeAssessmentKind(input.kind);
-  if (kind === "试卷" && wantsBonusQuestions(input)) return 110;
   return kind === "试卷" ? 100 : 60;
 }
 
