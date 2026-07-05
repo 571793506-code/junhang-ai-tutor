@@ -30,6 +30,8 @@
     "check:ai": "node scripts/check-ai-services.mjs",
     "check:feishu": "node scripts/check-feishu-app.mjs",
     "check:services": "node scripts/service-smoke.mjs",
+    "workspace:guard": "node scripts/workspace-guardian.mjs",
+    "check:workspace-guardian": "node --test scripts/workspace-guardian.test.mjs",
     "check:content-context": "node scripts/content-context-e2e.mjs",
     "check:content-upload-ui": "node scripts/content-upload-ui-contract.mjs",
     "check:teaching-content": "node scripts/teaching-content-check.mjs",

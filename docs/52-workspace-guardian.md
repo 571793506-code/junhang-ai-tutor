@@ -13,16 +13,23 @@
 ## 每轮固定流程
 
 1. 读取 `AGENTS.md`、`docs/51-project-pitfall-review.md` 和本文。
-2. 运行 `git status --short`，确认 staged、unstaged、untracked 三类状态。
-3. 运行 `git diff --name-status` 和 `git diff --cached --name-status`，先看文件范围，不直接读超长 diff。
-4. 按下面四类分组：
+2. 运行只读守护命令：
+
+```bat
+cmd /c npm.cmd run workspace:guard
+```
+
+该命令只读取 Git 状态、被忽略运行残留和最近提交；不执行 stage、删除、恢复或清理。
+3. 如守护命令报告不通过，再运行 `git status --short`，确认 staged、unstaged、untracked 三类状态。
+4. 运行 `git diff --name-status` 和 `git diff --cached --name-status`，先看文件范围，不直接读超长 diff。
+5. 按下面四类分组：
    - `收口提交`：规则、模块边界、踩坑清单、已验证脚本或稳定服务层能力。
    - `继续跟踪`：非数据源码、配置、脚本、文档，但还需要按模块验证后再提交。
    - `本地保存`：生成物、上传资料、截图、日志、缓存、运行导出物、大体积素材。
-   - `暂停处理`：小程序新功能、复杂 PDF 排版、自动审查堆叠、自动批改归档等当前暂停范围。
-5. 只用显式路径 stage，不使用 `git add .`。
-6. 提交前运行与本组相关的验证命令。
-7. 提交后再次运行 `git status --short`，报告剩余未收口文件属于哪一类。
+   - `谨慎处理`：小程序新功能、复杂 PDF 排版、自动审查堆叠、自动批改归档等高风险范围。
+6. 只用显式路径 stage，不使用 `git add .`。
+7. 提交前运行与本组相关的验证命令。
+8. 提交后再次运行 `cmd /c npm.cmd run workspace:guard`，报告剩余未收口文件属于哪一类。
 
 ## 当前阶段分类
 
@@ -88,6 +95,13 @@
 cmd /c npm.cmd run check:encoding
 ```
 
+守护脚本自身变更时运行：
+
+```bat
+cmd /c npm.cmd run check:workspace-guardian
+cmd /c npm.cmd run workspace:guard
+```
+
 涉及代码组提交时，根据范围追加：
 
 ```bat
@@ -112,7 +126,7 @@ cmd /c npm.cmd run check:teaching-content
 - 本次提交了什么。
 - 本次没有处理什么，以及原因。
 - 验证命令和结果。
-- 剩余 dirty 文件按 `继续跟踪`、`本地保存`、`暂停处理` 分类。
+- 剩余 dirty 文件按 `继续跟踪`、`本地保存`、`谨慎处理` 分类。
 - 是否创建了 commit。
 
 ## 禁止动作
