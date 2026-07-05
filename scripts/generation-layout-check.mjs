@@ -61,9 +61,26 @@ function hasEnglishQuizStructureSignals(text) {
   };
 }
 
+function stripTemplateGuidanceText(text) {
+  const lines = normalizeText(text)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const firstQuestionLine = lines.findIndex((line) => /^(?:[一二三四五六七八九十]+[、.．]|第?\s*\d+[.、．])/.test(line));
+  const contentLines = firstQuestionLine >= 0 ? lines.slice(firstQuestionLine) : lines;
+  return contentLines
+    .filter((line) => {
+      const mentionsForbiddenPattern = /文章选词填空|完形填空|短文语法填空|词形变化/.test(line);
+      const isGuidance = /不得|不默认|避免|不要|禁止|必须|结构|围绕/.test(line);
+      return !(mentionsForbiddenPattern && isGuidance);
+    })
+    .join("\n");
+}
+
 export function evaluateGenerationLayoutPdf(pdf = {}) {
   const name = normalizeText(pdf.name);
   const text = normalizeText(pdf.text);
+  const questionText = stripTemplateGuidanceText(text);
   const pages = Number(pdf.pages || 0);
   const kind = inferKind(name, text);
   const subject = inferSubject(name, text);
@@ -118,7 +135,7 @@ export function evaluateGenerationLayoutPdf(pdf = {}) {
   }
 
   if (subject === "英语" && (kind === "小测" || kind === "练习")) {
-    if (/文章选词填空|完形填空|短文语法填空|词形变化/.test(text)) {
+    if (/文章选词填空|完形填空|短文语法填空|词形变化/.test(questionText)) {
       issues.push("英语小测/练习不得出现试卷式文章选词填空、完形填空或短文语法填空。");
     }
 

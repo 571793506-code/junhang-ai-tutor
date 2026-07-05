@@ -61,6 +61,30 @@ test("layout check rejects English quiz when it uses exam-style cloze patterns",
   assert.ok(check.issues.includes("英语小测缺少中英文互译、写单词、造句题型信号。"));
 });
 
+test("layout check ignores template guidance text when scanning English short assessment patterns", () => {
+  const check = evaluateGenerationLayoutPdf({
+    name: "英语练习-题目.pdf",
+    pages: 2,
+    text: [
+      "五年级英语练习排版稿",
+      "英语 · 练习围绕学生需求或教师指定薄弱点生成，包含词汇巩固、句型表达、易错选择和短阅读；不默认使用试卷式文章选词填空、完形填空、短文语法填空或写作。",
+      "一、词汇巩固",
+      "1. 根据中文写单词：日历 ______。",
+      "二、句型表达",
+      "2. 用 special day 造句。",
+      "三、阅读巩固",
+      "What does Amy do on special days?"
+    ].join("\n"),
+    pageMetrics: [
+      { page: 1, bottomBlankMm: 92.1, drawingCount: 12 },
+      { page: 2, bottomBlankMm: 91.3, drawingCount: 12 }
+    ]
+  });
+
+  assert.equal(check.ok, true);
+  assert.deepEqual(check.issues, []);
+});
+
 test("layout check accepts a dense two-page math quiz", () => {
   const check = evaluateGenerationLayoutPdf({
     name: "数学小测-题目.pdf",
