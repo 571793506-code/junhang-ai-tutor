@@ -397,3 +397,38 @@ test("draftAssessmentService replaces exam-style English quiz items during local
   assert.equal(/文章选词填空|完形填空|短文语法填空/.test(auditIssues), false);
   assert.match(repairNotes, /英语小测\/练习中的试卷式题组/);
 });
+
+test("draftAssessmentService does not pad Chinese exam reading passages with repeated guidance", async () => {
+  const result = await draftAssessmentService(
+    {},
+    {
+      subject: "语文",
+      kind: "试卷",
+      grade: "六年级",
+      requirement: "生成一份含现代文阅读、文言文阅读和写作的试卷"
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async () => ({
+        available: false,
+        providerId: "fake-unavailable",
+        draftText: "",
+        modelRun: {
+          provider: "fake",
+          model: "fake-assessment",
+          skill: "assessment-draft",
+          status: "UNAVAILABLE",
+          metadata: { attempts: [] }
+        }
+      })
+    }
+  );
+
+  const modernReading = result.draftItems.find((item) => item.metadata?.passageGroupId === "chinese-modern-reading");
+  const passageText = modernReading?.metadata?.passageText || "";
+  const guidanceCount = (passageText.match(/老师在讲评时提醒大家/g) || []).length;
+
+  assert.equal(result.usedDynamicFallback, true);
+  assert.ok(passageText.length > 0);
+  assert.ok(guidanceCount <= 1);
+});
