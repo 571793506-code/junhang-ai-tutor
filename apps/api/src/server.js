@@ -48,6 +48,13 @@ import {
   filterStudentProfileSnapshot,
   mergeStudentProfileAiDraft
 } from "./student-growth-profile.js";
+import {
+  buildTermReportDraft,
+  mapTermReportForRole,
+  normalizeTermReportType,
+  renderTermReportHtml,
+  termReportTypeToDb
+} from "./student-term-report.js";
 import { publicGeneratedUrl, publicUploadUrl, storageGeneratedRoot, storageUploadRoot, submissionImageUpload, teachingMaterialUpload, uploadedFileMeta } from "./uploads.js";
 
 const config = loadRuntimeConfig();
@@ -1304,8 +1311,10 @@ function mapVocabularyAuditEvent(record) {
   };
 }
 
-function mapReport(report) {
+function mapReport(report, role = "student") {
   const metadata = safeJson(report.metadata, {});
+  const termReport = mapTermReportForRole(report, role);
+  if (metadata.termReport) return termReport;
   return {
     id: report.id,
     studentId: report.studentId || "",
@@ -1445,7 +1454,7 @@ function buildStudentProfileSnapshot(student) {
       qaSessions: qaSessions.length,
       voiceInteractions: voiceInteractions.length
     },
-    recentReports: reports.slice(0, 5).map(mapReport),
+    recentReports: reports.slice(0, 5).map((report) => mapReport(report, "teacher")).filter(Boolean),
     unresolvedMistakes: unresolvedMistakes.slice(0, 10).map(mapCorrection),
     timeline
   };
@@ -2962,7 +2971,7 @@ app.get("/api/bootstrap", requireDatabase, requireSession(config, ["student", "t
     readingTasks: readingTasks.filter((item) => visibleDeviceIds.has(item.deviceId)).map(mapReading),
     corrections: req.session.role === "classroom" ? [] : corrections.filter((item) => visibleStudentIds.has(item.studentId)).map(mapCorrection),
     logs: logs.filter((item) => item.studentId && visibleStudentIds.has(item.studentId)).map(mapLog),
-    reports: req.session.role === "classroom" ? [] : reports.filter((item) => visibleStudentIds.has(item.studentId)).map(mapReport)
+    reports: req.session.role === "classroom" ? [] : reports.filter((item) => visibleStudentIds.has(item.studentId)).map((report) => mapReport(report, req.session.role)).filter(Boolean)
   };
 
   const normalizedPayload = normalizeDisplayPayload(bootstrapPayload);
@@ -4179,6 +4188,27 @@ function normalizeProfilePeriodType(value, fallback = "weekly") {
   return value === "monthly" || value === "weekly" ? value : fallback;
 }
 
+function termReportPeriodKey(reportType, periodLabel) {
+  const label = String(periodLabel || "").trim() || new Date().toISOString().slice(0, 10);
+  return `${normalizeTermReportType(reportType)}:${label}`;
+}
+
+function mergeTermReportMetadata(currentMetadata, patch) {
+  const metadata = safeJson(currentMetadata, {});
+  return {
+    ...metadata,
+    termReport: {
+      ...(metadata.termReport || {}),
+      ...patch,
+      updatedAt: new Date().toISOString()
+    }
+  };
+}
+
+async function loadTermReportStudent(studentId) {
+  return loadStudentProfileSources(studentId);
+}
+
 app.post("/api/students/:studentId/profile/draft", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
   if (!(await assertTeacherStudentScope(req, res, req.params.studentId))) return;
 
@@ -4349,8 +4379,168 @@ app.get("/api/students/:studentId/profile", requireDatabase, requireSession(conf
     ok: true,
     student: mapStudent(student),
     snapshot: filterStudentProfileSnapshot(student.profiles?.[0]?.snapshot || null, req.session.role),
-    reports: student.reports.map(mapReport),
+    reports: student.reports.map((report) => mapReport(report, req.session.role)).filter(Boolean),
     unresolvedMistakes: student.mistakes.filter((item) => !item.masteryResolved).map(mapCorrection)
+  });
+}));
+
+app.post("/api/students/:studentId/term-report/draft", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  if (!(await assertTeacherStudentScope(req, res, req.params.studentId))) return;
+
+  const body = getBody(req);
+  const student = await loadTermReportStudent(req.params.studentId);
+  if (!student) {
+    return res.status(404).json({ ok: false, error: "STUDENT_NOT_FOUND", message: "未找到学生档案。" });
+  }
+
+  const reportType = normalizeTermReportType(body.reportType);
+  const draft = buildTermReportDraft(student, { reportType, periodLabel: body.periodLabel });
+  const report = await prisma.studentReport.create({
+    data: {
+      studentId: student.id,
+      type: termReportTypeToDb(reportType),
+      periodKey: termReportPeriodKey(reportType, draft.periodLabel),
+      title: draft.title,
+      content: draft.sections.overview.text,
+      metadata: { termReport: { ...draft, draft } }
+    },
+    include: { student: true }
+  });
+  await auditEvent(req, {
+    studentId: student.id,
+    feature: "student-profile",
+    action: "draft-term-report",
+    metadata: { reportId: report.id, reportType }
+  });
+
+  res.json({ ok: true, report: mapTermReportForRole(report, "teacher") });
+}));
+
+app.post("/api/students/:studentId/term-report/:reportId/pdf", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  if (!(await assertTeacherStudentScope(req, res, req.params.studentId))) return;
+
+  const body = getBody(req);
+  const student = await loadTermReportStudent(req.params.studentId);
+  if (!student) {
+    return res.status(404).json({ ok: false, error: "STUDENT_NOT_FOUND", message: "未找到学生档案。" });
+  }
+  const report = await prisma.studentReport.findFirst({
+    where: { id: req.params.reportId, studentId: student.id },
+    include: { student: true }
+  });
+  if (!report) {
+    return res.status(404).json({ ok: false, error: "REPORT_NOT_FOUND", message: "未找到阶段报告。" });
+  }
+
+  const teacherText = typeof body.teacherText === "string" && body.teacherText.trim() ? body.teacherText.trim() : report.content;
+  const html = renderTermReportHtml(student, {
+    ...report,
+    content: teacherText,
+    metadata: mergeTermReportMetadata(report.metadata, { teacherEditedText: teacherText })
+  });
+  fs.mkdirSync(storageGeneratedRoot(), { recursive: true });
+  const htmlFileName = `${report.id}-term-report.html`;
+  const pdfFileName = `${report.id}-term-report.pdf`;
+  const htmlPath = path.join(storageGeneratedRoot(), htmlFileName);
+  const pdfPath = path.join(storageGeneratedRoot(), pdfFileName);
+  fs.writeFileSync(htmlPath, normalizeGeneratedHtml(html), "utf8");
+  const pdfResult = await renderPdfFromHtml(htmlPath, pdfPath).catch((error) => ({
+    ok: false,
+    reason: error instanceof Error ? error.message : String(error)
+  }));
+  const outputFileName = pdfResult.ok ? pdfFileName : htmlFileName;
+  const metadata = safeJson(report.metadata, {});
+  const asset = await prisma.generatedAsset.create({
+    data: {
+      kind: `student-term-report-${pdfResult.ok ? "pdf" : "html"}`,
+      title: `${report.title} - PDF报告`,
+      path: path.join(storageGeneratedRoot(), outputFileName),
+      url: publicGeneratedUrl(outputFileName, req),
+      metadata: {
+        studentId: student.id,
+        reportId: report.id,
+        reportType: metadata.termReport?.reportType || null,
+        htmlUrl: publicGeneratedUrl(htmlFileName, req),
+        pdfGenerated: pdfResult.ok,
+        pdfReason: pdfResult.ok ? null : pdfResult.reason,
+        visibility: "teacher_pdf_only"
+      }
+    }
+  });
+  const updated = await prisma.studentReport.update({
+    where: { id: report.id },
+    data: {
+      content: teacherText,
+      metadata: mergeTermReportMetadata(report.metadata, {
+        status: "pdf_ready",
+        teacherEditedText: teacherText,
+        pdfAssetId: asset.id,
+        pdfUrl: asset.url,
+        pdfTitle: asset.title
+      })
+    },
+    include: { student: true }
+  });
+  await auditEvent(req, {
+    studentId: student.id,
+    feature: "student-profile",
+    action: "term-report-pdf",
+    metadata: { reportId: report.id, assetId: asset.id, pdfGenerated: pdfResult.ok }
+  });
+
+  res.json({ ok: true, report: mapTermReportForRole(updated, "teacher"), asset });
+}));
+
+app.post("/api/students/:studentId/term-report/:reportId/mark-sent", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  if (!(await assertTeacherStudentScope(req, res, req.params.studentId))) return;
+
+  const report = await prisma.studentReport.findFirst({
+    where: { id: req.params.reportId, studentId: req.params.studentId },
+    include: { student: true }
+  });
+  if (!report) {
+    return res.status(404).json({ ok: false, error: "REPORT_NOT_FOUND", message: "未找到阶段报告。" });
+  }
+
+  const metadata = safeJson(report.metadata, {});
+  if (!metadata.termReport?.pdfUrl) {
+    return res.status(409).json({ ok: false, error: "PDF_REQUIRED", message: "请先生成 PDF，再标记已人工发送。" });
+  }
+  const updated = await prisma.studentReport.update({
+    where: { id: report.id },
+    data: {
+      metadata: mergeTermReportMetadata(report.metadata, {
+        status: "sent_manually",
+        sentManuallyAt: new Date().toISOString(),
+        sentByTeacherId: req.session.teacherId
+      })
+    },
+    include: { student: true }
+  });
+  await auditEvent(req, {
+    studentId: report.studentId,
+    feature: "student-profile",
+    action: "term-report-sent-manually",
+    metadata: { reportId: report.id }
+  });
+
+  res.json({ ok: true, report: mapTermReportForRole(updated, "teacher") });
+}));
+
+app.get("/api/students/:studentId/term-reports", requireDatabase, requireSession(config, ["student", "teacher"]), asyncRoute(async (req, res) => {
+  const scopeError = assertStudentOwnsRequest(req, req.params.studentId);
+  if (scopeError) return res.status(403).json(scopeError);
+  if (!(await assertTeacherStudentScope(req, res, req.params.studentId))) return;
+
+  const reports = await prisma.studentReport.findMany({
+    where: { studentId: req.params.studentId, type: { in: ["MIDTERM", "FINAL"] } },
+    orderBy: { createdAt: "desc" },
+    include: { student: true }
+  });
+
+  res.json({
+    ok: true,
+    reports: reports.map((report) => mapTermReportForRole(report, req.session.role)).filter(Boolean)
   });
 }));
 

@@ -113,6 +113,47 @@ test("mapTermReportForRole hides PDF and body from student until sent", () => {
   assert.equal(teacherView.wechatMessage, "您好，请查收。");
 });
 
+test("mapTermReportForRole keeps teacher delivery fields and limits student status fields", () => {
+  const report = {
+    id: "report_2",
+    studentId: "stu_1",
+    student: { displayName: "张思源" },
+    type: "MIDTERM",
+    periodKey: "midterm:2026春季期中",
+    title: "张思源 2026春季期中成长报告",
+    content: "教师确认正文",
+    createdAt: new Date("2026-07-05T12:00:00.000Z"),
+    metadata: {
+      termReport: {
+        reportType: "midterm",
+        status: "sent_manually",
+        periodLabel: "2026春季期中",
+        pdfUrl: "/generated/report-midterm.pdf",
+        pdfTitle: "张思源 2026春季期中成长报告 - PDF报告",
+        pdfAssetId: "asset_1",
+        sentManuallyAt: "2026-07-05T12:30:00.000Z",
+        teacherEditedText: "教师确认正文",
+        wechatMessage: "您好，请查收期中报告。"
+      }
+    }
+  };
+
+  const teacherView = mapTermReportForRole(report, "teacher");
+  assert.equal(teacherView.statusRaw, "sent_manually");
+  assert.equal(teacherView.pdfUrl, "/generated/report-midterm.pdf");
+  assert.equal(teacherView.pdfTitle, "张思源 2026春季期中成长报告 - PDF报告");
+  assert.equal(teacherView.pdfAssetId, "asset_1");
+  assert.equal(teacherView.wechatMessage, "您好，请查收期中报告。");
+
+  const studentView = mapTermReportForRole(report, "student");
+  assert.equal(studentView.status, "已发送");
+  assert.equal(studentView.summary, "老师已发送阶段报告给家长");
+  assert.equal(studentView.sentManuallyAt, "2026-07-05T12:30:00.000Z");
+  assert.equal(Object.hasOwn(studentView, "pdfUrl"), false);
+  assert.equal(Object.hasOwn(studentView, "wechatMessage"), false);
+  assert.equal(Object.hasOwn(studentView, "teacherEditedText"), false);
+});
+
 test("renderTermReportHtml escapes edited text and includes no scripts", () => {
   const draft = buildTermReportDraft(student, { reportType: "midterm", periodLabel: "2026春季期中" });
   const html = renderTermReportHtml(student, {
