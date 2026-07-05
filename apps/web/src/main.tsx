@@ -2033,9 +2033,66 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
     setReviewNote("");
   }, [active?.submissionId]);
   if (!workbenches.length) {
-    return <div>
-      <p className="review-empty">暂无批改工作台记录。上传照片后，系统会创建批改批次并进入这里。</p>
-      {reviewSubmissions.length ? <ReviewQueue onMarkReviewed={onMarkReviewed} onRecognize={onRecognize} submissions={reviewSubmissions} /> : null}
+    const batches = groupReviewSubmissions(reviewSubmissions).slice(0, 6);
+    const pendingSubmissions = reviewSubmissions.filter((item) => item.needsReview || item.status !== "已复核").length;
+    return <div className="grading-workbench grading-workbench-empty">
+      <section className="grading-command-center">
+        <div>
+          <strong>批改复核工作台</strong>
+          <span>暂无可操作的结构化批改批次。上传照片或刷新工作台后，系统会按“选择批次 → 查看图片 → 逐题确认 → 归档”进入复核流程。</span>
+        </div>
+        <div className="grading-command-metrics">
+          <Metric label="待复核" value={pendingSubmissions} suffix="份" tone="amber" />
+          <Metric label="待确认题" value={0} suffix="题" tone="blue" />
+          <Metric label="低置信" value={0} suffix="份" tone="amber" />
+          <Metric label="可归档" value={0} suffix="份" tone="green" />
+        </div>
+      </section>
+      <aside className="grading-review-queue">
+        <div className="grading-queue-head">
+          <div><strong>复核队列</strong><span>等待生成结构化批改批次</span></div>
+          <button className="secondary-button" disabled type="button"><Search size={15} />筛选</button>
+        </div>
+        <div className="grading-batch-list">
+          {batches.length ? batches.map((batch) => <button disabled key={batch.id}>
+            <div className="grading-batch-title"><strong>{batch.studentName} · {batch.kind}</strong><StatusDot status="pending" /></div>
+            <span>{batch.subject} · {batch.imageTotal}页 · 等待工作台生成</span>
+            <small>{new Date(batch.submittedAt).toLocaleString("zh-CN")}</small>
+          </button>) : <p className="review-empty">暂无批改批次。上传照片后会显示在这里。</p>}
+        </div>
+      </aside>
+      <main className="grading-stage-shell">
+        <div className="grading-stage-head">
+          <div>
+            <h3>图片复核区</h3>
+            <p>选择左侧批次后，这里显示上传图片、页码、题目标记和图片质量提示。</p>
+          </div>
+          <StatusPill label="等待批次" status="pending" />
+        </div>
+        <div className="grading-score-strip">
+          <span>正确 0</span>
+          <span>需处理 0</span>
+          <span>待确认分数</span>
+        </div>
+        <div className="grading-image-stage empty-stage">
+          <div className="annotation-empty">暂无图片预览。请先上传作业照片或刷新工作台。</div>
+        </div>
+      </main>
+      <aside className="grading-inspector">
+        <div className="grading-question-strip"><p className="review-empty">暂无逐题结果</p></div>
+        <div className="question-detail-panel workbench-detail">
+          <div className="question-detail-head"><div><strong>当前题复核</strong><span>等待选择批次</span></div><StatusPill label="待生成" status="pending" /></div>
+          <p className="grading-confidence">结构化识别完成后，将显示学生作答、参考答案、AI 判断和归档建议。</p>
+        </div>
+        <div className="review-confirm-form">
+          <label className="field-label">教师确认分数<input disabled placeholder="选择批次后填写" /></label>
+          <label className="field-label">复核备注<textarea disabled placeholder="选择批次后填写复核备注。" /></label>
+        </div>
+        <div className="grading-action-dock">
+          <button className="secondary-button" disabled><RefreshCw size={16} />重新识别</button>
+          <button className="primary-button" disabled><CheckCircle2 size={16} />确认归档</button>
+        </div>
+      </aside>
     </div>;
   }
   const page = active?.pages.find((item) => item.pageNumber === activePage) || active?.pages[0];
@@ -2061,27 +2118,65 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
     : page?.qualityStatus === "poor"
       ? "图片质量较差"
       : "图片需复核";
+  const pendingQuestionTotal = workbenches.reduce((sum, item) => sum + item.pendingQuestionCount, 0);
+  const lowConfidenceTotal = workbenches.filter((item) => item.needsTeacherReview || item.quality?.lowConfidence || item.archiveEligible === false).length;
+  const archiveReadyTotal = workbenches.filter((item) => !item.needsTeacherReview && item.archiveEligible !== false).length;
+  const activeQuestionIndex = active?.questions.findIndex((item) => item.id === question?.id) ?? -1;
+  const questionStatusCounts = (active?.questions || []).reduce((counts, item) => {
+    if (item.status === "correct") counts.correct += 1;
+    else if (item.status === "wrong") counts.wrong += 1;
+    else counts.pending += 1;
+    return counts;
+  }, { correct: 0, wrong: 0, pending: 0 });
+  const selectPage = (pageNumber: number) => {
+    setActivePage(pageNumber);
+    const firstQuestion = active?.questions.find((item) => Number(item.bbox?.page || 1) === pageNumber) || active?.questions[0];
+    if (firstQuestion) setActiveQuestionId(firstQuestion.id);
+  };
   return <div className="grading-workbench">
-    <aside className="grading-batch-list">
-      <div className="grading-workbench-summary">
-        <strong>待复核批次</strong>
-        <span>{workbenches.length} 条记录 · {workbenches.reduce((sum, item) => sum + item.pendingQuestionCount, 0)} 题待确认</span>
+    <section className="grading-command-center">
+      <div>
+        <strong>批改复核工作台</strong>
+        <span>按“选择批次 → 查看图片 → 逐题确认 → 归档”处理，不对学生和家长展示。</span>
       </div>
-      {workbenches.map((item) => <button className={item.submissionId === active?.submissionId ? "active" : ""} key={item.submissionId} onClick={() => setActiveId(item.submissionId)}>
-        <strong>{item.studentName} · {item.kind}</strong>
-        <span>{item.subject} · {item.questionCount || 0}题 · {item.ocrStatusLabel}</span>
-        <small>{item.score != null ? `${item.score}分` : item.provisionalScore != null ? `初判${item.provisionalScore}分` : "待评分"}</small>
-      </button>)}
+      <div className="grading-command-metrics">
+        <Metric label="待复核" value={workbenches.length} suffix="份" tone="amber" />
+        <Metric label="待确认题" value={pendingQuestionTotal} suffix="题" tone="blue" />
+        <Metric label="低置信" value={lowConfidenceTotal} suffix="份" tone="amber" />
+        <Metric label="可归档" value={archiveReadyTotal} suffix="份" tone="green" />
+      </div>
+    </section>
+    <aside className="grading-review-queue">
+      <div className="grading-queue-head">
+        <div><strong>复核队列</strong><span>优先处理低置信和待确认批次</span></div>
+        <button className="secondary-button" type="button"><Search size={15} />筛选</button>
+      </div>
+      <div className="grading-batch-list">
+        {workbenches.map((item) => {
+          const isActive = item.submissionId === active?.submissionId;
+          const itemRisk = item.needsTeacherReview || item.quality?.lowConfidence || item.archiveEligible === false;
+          return <button className={isActive ? "active" : ""} key={item.submissionId} onClick={() => setActiveId(item.submissionId)}>
+            <div className="grading-batch-title"><strong>{item.studentName} · {item.kind}</strong><StatusDot status={itemRisk ? "pending" : "ready"} /></div>
+            <span>{item.subject} · {item.questionCount || 0}题 · {item.ocrStatusLabel}</span>
+            <small>{item.pendingQuestionCount ? `${item.pendingQuestionCount}题待确认` : "逐题结果已生成"}</small>
+          </button>;
+        })}
+      </div>
     </aside>
-    <main className="grading-image-workspace">
-      <div className="review-card-head">
+    <main className="grading-stage-shell">
+      <div className="grading-stage-head">
         <div>
           <h3>{active?.title}</h3>
           <p>{active?.studentName} · {active?.subject} · {active?.kind} · {active ? new Date(active.submittedAt).toLocaleString("zh-CN") : ""}</p>
         </div>
         <StatusPill label={active?.needsTeacherReview ? "待教师确认" : "可归档"} status={active?.needsTeacherReview ? "pending" : "ready"} />
       </div>
-      <div className="review-image-tabs">{active?.pages.map((item) => <button className={item.pageNumber === page?.pageNumber ? "active" : ""} key={item.id} onClick={() => setActivePage(item.pageNumber)}>第 {item.pageNumber} 页</button>)}</div>
+      <div className="grading-score-strip">
+        <span>正确 {questionStatusCounts.correct}</span>
+        <span>需处理 {questionStatusCounts.wrong + questionStatusCounts.pending}</span>
+        <span>{active?.score != null ? `${active.score}分` : active?.provisionalScore != null ? `AI初判 ${active.provisionalScore}分` : "待确认分数"}</span>
+      </div>
+      <div className="review-image-tabs">{active?.pages.map((item) => <button className={item.pageNumber === page?.pageNumber ? "active" : ""} key={item.id} onClick={() => selectPage(item.pageNumber)}>第 {item.pageNumber} 页</button>)}</div>
       {page ? <p className={`context-note ${page.qualityStatus === "ready" ? "" : "blocked"}`}><ShieldCheck size={15} />{pageQualityText}{page.qualityScore != null ? ` · 质量分 ${Math.round(page.qualityScore * 100)}%` : ""}{pageQualityIssues.length ? ` · ${pageQualityIssues.slice(0, 2).join("；")}` : ""}</p> : null}
       <div className="grading-image-stage">
         {page?.imageUrl ? <img src={page.imageUrl} alt={`${active?.studentName || ""} 上传页面 ${page.pageNumber}`} /> : <div className="annotation-empty">暂无图片预览</div>}
@@ -2091,19 +2186,20 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
         }}>{marker.label}</button>)}
       </div>
     </main>
-    <aside className="grading-question-panel">
-      <div className="grading-question-list">
-        {(active?.questions || []).map((item) => <button className={item.id === question?.id ? "active" : ""} key={item.id} onClick={() => {
+    <aside className="grading-inspector">
+      <div className="grading-question-strip">
+        {(active?.questions || []).map((item, index) => <button className={`${item.id === question?.id ? "active" : ""} ${item.status}`} key={item.id} onClick={() => {
           setActiveQuestionId(item.id);
           setActivePage(Number(item.bbox?.page || 1));
-        }}>
-          <span>第 {item.questionNo} 题</span>
-          <StatusPill label={statusText(item.status)} status={item.status === "correct" ? "ready" : item.status === "wrong" ? "blocked" : "pending"} />
-        </button>)}
+        }}>{index + 1}</button>)}
         {!active?.questions.length ? <p className="review-empty">暂无逐题识别结果，请重新识别并重批。</p> : null}
       </div>
       {question ? <div className="question-detail-panel workbench-detail">
-        <div className="question-detail-head"><strong>第 {question.questionNo} 题详情</strong><span>{question.confidence != null ? `置信度 ${Math.round(question.confidence * 100)}%` : "置信度待补"}</span></div>
+        <div className="question-detail-head">
+          <div><strong>第 {question.questionNo} 题</strong><span>{activeQuestionIndex >= 0 ? `当前第 ${activeQuestionIndex + 1}/${active?.questions.length || 0} 题` : "当前题"}</span></div>
+          <StatusPill label={statusText(question.status)} status={question.status === "correct" ? "ready" : question.status === "wrong" ? "blocked" : "pending"} />
+        </div>
+        <p className="grading-confidence">{question.confidence != null ? `识别置信度 ${Math.round(question.confidence * 100)}%` : "识别置信度待补，建议教师确认。"}</p>
         <DetailLine label="学生作答" value={question.studentAnswer || "未识别到明确作答"} />
         <DetailLine label="参考答案" value={question.correctAnswer || "待教师确认参考答案"} />
         <DetailLine label="过程/解析" value={(question.studentProcess || []).join("；") || question.explanation || "暂无过程解析"} />
@@ -2115,7 +2211,7 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
         <label className="field-label">复核备注<textarea value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} placeholder="记录扣分原因、图片识别问题或后续跟进建议。" /></label>
         {needsScore ? <p className="context-note blocked"><ShieldCheck size={15} />当前记录必须由教师确认分数后才允许进入学生档案。</p> : null}
       </div>
-      <div className="review-actions">
+      <div className="grading-action-dock">
         <button className="secondary-button" disabled={!active} onClick={() => active && onRecognize(active.submissionId)}><RefreshCw size={16} />重新识别</button>
         <button className="primary-button" disabled={!active || (needsScore && !scoreValid)} onClick={() => active && onMarkReviewed(active.submissionId, { ...(scoreValid ? { score: scoreNumber } : {}), ...(reviewNote.trim() ? { reviewNote: reviewNote.trim() } : {}) })}><CheckCircle2 size={16} />确认归档</button>
       </div>
