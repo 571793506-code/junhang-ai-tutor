@@ -22,6 +22,10 @@ export declare function draftAssessmentService(
   options?: Record<string, unknown>
 ): Promise<Record<string, unknown>>;
 
+export declare function buildAssessmentBlueprintCheck(
+  input?: Record<string, unknown>
+): Record<string, unknown>;
+
 export declare function gradeSubmissionService(
   config: Record<string, string | undefined>,
   input?: Record<string, unknown>,

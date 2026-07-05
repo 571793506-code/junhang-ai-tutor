@@ -303,6 +303,32 @@ function buildLayoutTemplate(input = {}) {
   return `${subject}${kind}A4打印模板-${profile.pages}页-${profile.columns}栏-${profile.answerStyle}`;
 }
 
+export function buildAssessmentBlueprintCheck(input = {}) {
+  const modelInput = {
+    ...input,
+    requestId: input.requestId || "generation-blueprint-check"
+  };
+  const blueprint = buildAssessmentBlueprint(modelInput);
+  const printProfile = buildPrintProfile(modelInput);
+  const layoutTemplate = buildLayoutTemplate(modelInput);
+  const fallbackItems = buildFallbackAssessmentItems(modelInput);
+  const review = reviewAndRepairAssessmentItems(fallbackItems, modelInput);
+  const audit = auditAssessmentDraft(review.items, modelInput, review.notes);
+  return {
+    subject: normalizeSubject(modelInput.subject),
+    kind: normalizeAssessmentKind(modelInput.kind),
+    grade: modelInput.grade || modelInput.targetGrade || null,
+    blueprint,
+    printProfile,
+    layoutTemplate,
+    itemCount: review.items.length,
+    totalScore: review.totalScore,
+    itemTypes: Array.from(new Set(review.items.map((item) => printableType(item)))),
+    sectionCounts: audit.sectionCounts,
+    audit
+  };
+}
+
 async function persistRun(modelRun, options = {}) {
   if (!modelRun || options.persist === false) return null;
   return recordModelRun(modelRun, options);

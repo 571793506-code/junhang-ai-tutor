@@ -165,7 +165,21 @@ Context engineering 负责“给模型看什么”，服务端调用模型前应
 .\jh.cmd check:services
 ```
 
-涉及资料转 Markdown、内容索引、编码守卫、组卷草稿、草稿审查 PDF、教师确认或正式题目/解析导出时，优先运行可复用端到端命令：
+涉及生成、资料上下文、教师复核或导出时，按改动范围分层验证，不要把完整 E2E 作为每个小改动的默认命令：
+
+```powershell
+cmd /c npm.cmd run check:generation:blueprint
+cmd /c npm.cmd run check:content-upload-ui
+cmd /c npm.cmd run check:content-context
+cmd /c npm.cmd run check:teaching-content:full
+```
+
+- 只改生成模板、题型蓝图、兜底内容或审查规则时，优先运行 `check:generation:blueprint`；它不启动 API、不调用模型、不导出 PDF。
+- 只改资料上传 UI 或 API multipart 封装时，运行 `check:content-upload-ui`。
+- 改资料索引、`generationContext.teaching.contentContext` 注入、教师复核或导出边界时，运行 `check:content-context`。
+- 大改、发布前或需要覆盖教师登录、资料索引、生成草稿、草稿导出、复核拦截、教师确认和正式 PDF 导出时，才运行 `check:teaching-content:full`。
+
+旧的兼容入口仍可用：
 
 ```powershell
 cmd /c npm.cmd run check:content-context
@@ -173,7 +187,7 @@ cmd /c npm.cmd run check:content-upload-ui
 cmd /c npm.cmd run check:teaching-content
 ```
 
-该命令会覆盖教师登录、资料索引重建、乱码守卫、`generationContext.teaching.contentContext` 注入、草稿审查导出、未复核拦截、教师确认以及正式学生卷/解析卷导出。
+`check:teaching-content` / `check:teaching-content:full` 会覆盖教师登录、资料索引重建、乱码守卫、`generationContext.teaching.contentContext` 注入、草稿审查导出、未复核拦截、教师确认以及正式学生卷/解析卷导出；该链路较重，必须依赖脚本进度输出和超时，不应用来替代小范围验证。
 
 网页端代码变更后运行：
 

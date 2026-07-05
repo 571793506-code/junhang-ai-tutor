@@ -37,6 +37,14 @@ cmd /c npm.cmd run content:markdown -- docs\41-prompt-context-engineering-playbo
 cmd /c npm.cmd run content:index -- exports\markdown-ingestion-test --out exports\content-index
 ```
 
+生成类规则或兜底模板的最小验证命令：
+
+```bash
+cmd /c npm.cmd run check:generation:blueprint
+```
+
+该命令只检查三科小测、练习、试卷的服务层蓝图、兜底题型、总分、题量和基础审查规则；不启动 API、不调用模型、不导出 PDF。修改生成模板、题型结构、默认页数、分值或审查规则时，应优先运行它，而不是直接跑完整 E2E。
+
 ## 3. API
 
 查看内容索引：
@@ -171,11 +179,16 @@ cmd /c npm.cmd run typecheck --workspace apps/web
 cmd /c npm.cmd run check:encoding
 ```
 
-`check:teaching-content` 会先执行 `api:start-if-needed`，再顺序执行 `check:content-upload-ui` 和 `check:content-context`，适合在改动教师端资料上传、Markdown ingestion、内容索引、组卷上下文或导出链路后作为首选验证入口。
+验证入口按范围选择：
 
-`check:content-upload-ui` 会验证教师端上传面板、文件输入、导入按钮、`.edupdf` 前端过滤、生成上下文摘要和 Web API multipart 上传封装。
+- `check:generation:blueprint`：生成模板、兜底内容、题型蓝图、分值和基础审查规则的轻量验证。
+- `check:content-upload-ui`：教师端上传面板、文件输入、导入按钮、`.edupdf` 前端过滤、生成上下文摘要和 Web API multipart 上传封装。
+- `check:content-context`：资料上下文端到端验证，包含资料转 Markdown、教师上传、`.edupdf` 拒绝、路径拒绝、教师登录、内容索引重建、编码守卫、组卷草稿、上下文注入、草稿导出、复核拦截、教师确认和正式资产导出。
+- `check:teaching-content` / `check:teaching-content:full`：会先执行 `api:start-if-needed`，再顺序执行上传 UI 合约和内容上下文 E2E，只适合大改、发布前或需要完整链路证明时使用。
 
-`check:content-context` 会执行端到端验证：资料转 Markdown、教师上传资料转 Markdown、`.edupdf` 上传拒绝、工作区外路径拒绝、教师登录、内容索引重建、编码守卫检测、组卷草稿生成、`generationContext.teaching.contentContext` 注入、草稿审查导出、未复核拦截、教师确认、正式题目与解析资产导出。
+`check:teaching-content` 已加入步骤级进度输出和超时；如果运行时停在某一步，应优先看 stderr 中的 `start/done/fail` 阶段，而不是判断为“终端卡死”。每个子步骤会在最终 JSON 汇总中记录成功状态、耗时、stdout 和 stderr。
+
+`check:content-context` 内部 API 请求和导出请求已设置超时，并输出 `content-context-e2e` 阶段进度；生成草稿和 PDF 导出仍是重步骤，不应作为小范围模板修改的默认验证。
 
 E2E 会清理并使用专用目录 `exports/markdown-ingestion-e2e`，避免把反复测试生成的 Markdown 混入教师真实资料目录 `exports/markdown-ingestion`。脚本还会清理旧版 E2E 留在默认 Markdown 目录和 API 上传目录中的 `content-context-upload-fixture` / `protected-textbook.edupdf` 测试产物，不清理其他教师资料。
 
@@ -190,7 +203,7 @@ E2E 运行过程中会临时重建 `exports/content-index/index.json` 以验证�
 3. 受保护教材防护已完成：前端过滤 `.edupdf`，后端返回 `PROTECTED_TEXTBOOK_NOT_ALLOWED`。
 4. 路径边界防护已完成：上传 `outDir`、索引 `inputs/outDir` 均限制在项目工作区内。
 5. 生成链路接入已完成：内容索引会进入 `generationContext.teaching.contentContext`，并参与教师复核和学生卷/解析卷导出。
-6. 可复用验证命令已完成：`check:content-upload-ui`、`check:content-context`、`check:teaching-content` 均已记录在项目说明中。
+6. 可复用验证命令已完成：`check:generation:blueprint`、`check:content-upload-ui`、`check:content-context`、`check:teaching-content` / `check:teaching-content:full` 均已记录在项目说明中。
 7. E2E 清理和恢复已完成：测试 Markdown 隔离到 `exports/markdown-ingestion-e2e`，旧测试残留会清理，`exports/content-index/index.json` 会在 E2E 结束后恢复。
 
 当前未纳入完成项的是 Chrome extension 真实文件选择自动化；原因是 Codex Chrome Extension native host 当前无法通信。项目内已用 UI 合约检查和 API 真实上传 E2E 覆盖上传链路。

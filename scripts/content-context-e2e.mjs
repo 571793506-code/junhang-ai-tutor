@@ -22,6 +22,10 @@ const env = { ...process.env, ...loadEnv(path.resolve(".env")) };
 const apiBaseUrl = (env.API_BASE_URL || `http://127.0.0.1:${env.API_PORT || 8787}`).replace(/\/$/, "");
 const teacherPhone = env.SMOKE_TEACHER_PHONE || "13800000001";
 const teacherCode = env.SMOKE_TEACHER_CODE || "T8JH21";
+const defaultRequestTimeoutMs = Number(env.CONTENT_CONTEXT_E2E_REQUEST_TIMEOUT_MS || 60000);
+const generationRequestTimeoutMs = Number(env.CONTENT_CONTEXT_E2E_GENERATION_TIMEOUT_MS || 180000);
+const exportRequestTimeoutMs = Number(env.CONTENT_CONTEXT_E2E_EXPORT_TIMEOUT_MS || 120000);
+const nodeScriptTimeoutMs = Number(env.CONTENT_CONTEXT_E2E_NODE_SCRIPT_TIMEOUT_MS || 60000);
 const corruptNeedles = ["\u951f", "\ufffd", "\u935a", "\u947b", "\u93c1", "\u7487"];
 const zh = {
   math: "\u6570\u5b66",
@@ -48,9 +52,14 @@ function hasCorrupt(value) {
   return corruptNeedles.some((needle) => text.includes(needle)) || /\?{3,}/.test(text);
 }
 
+function progress(message) {
+  process.stderr.write(`[content-context-e2e] ${message}\n`);
+}
+
 function pass(name, ok, detail = {}) {
   const check = { name, ok: Boolean(ok), detail };
   checks.push(check);
+  progress(`${check.ok ? "pass" : "fail"} ${name}`);
   return check;
 }
 
@@ -118,19 +127,71 @@ function restoreContentIndex(snapshot) {
   }
 }
 
-async function runNodeScript(script, args) {
-  const result = await execFileAsync(process.execPath, [script, ...args], {
-    cwd: process.cwd(),
-    env: { ...process.env },
-    windowsHide: true,
-    maxBuffer: 1024 * 1024 * 16
-  });
-  return JSON.parse(result.stdout || "{}");
+async function runNodeScript(script, args, options = {}) {
+  const timeout = Number(options.timeoutMs || nodeScriptTimeoutMs);
+  const startedAt = Date.now();
+  progress(`start node ${script}`);
+  try {
+    const result = await execFileAsync(process.execPath, [script, ...args], {
+      cwd: process.cwd(),
+      env: { ...process.env },
+      windowsHide: true,
+      timeout,
+      maxBuffer: 1024 * 1024 * 16
+    });
+    progress(`done node ${script}: ${Date.now() - startedAt}ms`);
+    return JSON.parse(result.stdout || "{}");
+  } catch (error) {
+    progress(`fail node ${script}: ${error instanceof Error ? error.message : String(error)}`);
+    throw error;
+  }
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = defaultRequestTimeoutMs, label = "fetch") {
+  const controller = new AbortController();
+  const timeout = Number(timeoutMs || defaultRequestTimeoutMs);
+  const startedAt = Date.now();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  progress(`start ${label}`);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    progress(`done ${label}: ${Date.now() - startedAt}ms`);
+    return response;
+  } catch (error) {
+    progress(`fail ${label}: ${error instanceof Error ? error.message : String(error)}`);
+    if (error?.name === "AbortError") {
+      throw new Error(`${label} timed out after ${timeout}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function formRequest(route, options = {}) {
+  try {
+    const response = await fetchWithTimeout(`${apiBaseUrl}${route}`, {
+      method: options.method || "POST",
+      headers: {
+        ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+        ...(options.headers || {})
+      },
+      body: options.body
+    }, options.timeoutMs || defaultRequestTimeoutMs, options.label || route);
+    const body = await response.json().catch(() => ({}));
+    return { status: response.status, ok: response.ok && body.ok !== false, body };
+  } catch (error) {
+    return {
+      status: 0,
+      ok: false,
+      body: { error: "NETWORK_ERROR", message: error instanceof Error ? error.message : String(error) }
+    };
+  }
 }
 
 async function request(route, options = {}) {
   try {
-    const response = await fetch(`${apiBaseUrl}${route}`, {
+    const response = await fetchWithTimeout(`${apiBaseUrl}${route}`, {
       method: options.method || "GET",
       headers: {
         "Content-Type": "application/json",
@@ -138,7 +199,7 @@ async function request(route, options = {}) {
         ...(options.headers || {})
       },
       body: options.body == null ? undefined : JSON.stringify(options.body)
-    });
+    }, options.timeoutMs || defaultRequestTimeoutMs, options.label || route);
     const text = await response.text();
     let body = {};
     try {
@@ -162,16 +223,28 @@ async function request(route, options = {}) {
 async function fetchAsset(url) {
   if (!url) return { ok: false, status: 0, text: "" };
   const absoluteUrl = url.startsWith("http") ? url : `${apiBaseUrl}${url}`;
-  const response = await fetch(absoluteUrl);
-  const contentType = response.headers.get("content-type") || "";
-  const text = contentType.includes("text") || contentType.includes("json") || contentType.includes("html")
-    ? await response.text()
-    : "";
-  if (!text) await response.arrayBuffer();
-  return { ok: response.ok, status: response.status, text, contentType };
+  try {
+    const response = await fetchWithTimeout(absoluteUrl, {}, exportRequestTimeoutMs, `fetch asset ${url}`);
+    const contentType = response.headers.get("content-type") || "";
+    const text = contentType.includes("text") || contentType.includes("json") || contentType.includes("html")
+      ? await response.text()
+      : "";
+    if (!text) await response.arrayBuffer();
+    return { ok: response.ok, status: response.status, text, contentType };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      text: "",
+      contentType: "",
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
 }
 
-const health = await request("/health");
+progress(`api base ${apiBaseUrl}`);
+
+const health = await request("/health", { label: "api health", timeoutMs: 30000 });
 pass("api health", health.ok && health.body.database?.ok, {
   status: health.status,
   database: health.body.database?.reason || null
@@ -192,7 +265,7 @@ pass("markdown ingestion", markdown.ok && markdown.fileCount >= 1, {
   outDir: markdown.outDir || null
 });
 
-const anonymousIndex = await request("/api/content/index");
+const anonymousIndex = await request("/api/content/index", { label: "anonymous content index" });
 pass("content index requires teacher session", anonymousIndex.status === 401, {
   status: anonymousIndex.status,
   error: anonymousIndex.body.error || null
@@ -200,6 +273,7 @@ pass("content index requires teacher session", anonymousIndex.status === 401, {
 
 const teacherLogin = await request("/api/teacher-login", {
   method: "POST",
+  label: "teacher login",
   body: { phone: teacherPhone, accessCode: teacherCode }
 });
 const teacherToken = teacherLogin.body.sessionToken;
@@ -223,18 +297,11 @@ const uploadForm = new FormData();
 uploadForm.append("files", new Blob([fs.readFileSync(fixturePath)], { type: "text/markdown" }), "content-context-upload-fixture.md");
 uploadForm.append("outDir", e2eMarkdownDir);
 const uploadResponse = teacherToken
-  ? await fetch(`${apiBaseUrl}/api/content/markdown-ingestion`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${teacherToken}` },
-      body: uploadForm
-    }).then(async (response) => {
-      const body = await response.json().catch(() => ({}));
-      return { status: response.status, ok: response.ok && body.ok !== false, body };
-    }).catch((error) => ({
-      status: 0,
-      ok: false,
-      body: { error: "NETWORK_ERROR", message: error instanceof Error ? error.message : String(error) }
-    }))
+  ? await formRequest("/api/content/markdown-ingestion", {
+      token: teacherToken,
+      body: uploadForm,
+      label: "teacher material markdown ingestion"
+    })
   : null;
 pass("teacher can upload materials for markdown ingestion", uploadResponse?.ok && uploadResponse.body.fileCount >= 1, {
   status: uploadResponse?.status || 0,
@@ -245,18 +312,11 @@ pass("teacher can upload materials for markdown ingestion", uploadResponse?.ok &
 const protectedUploadForm = new FormData();
 protectedUploadForm.append("files", new Blob([Buffer.from("protected textbook placeholder")], { type: "application/octet-stream" }), "protected-textbook.edupdf");
 const protectedUploadResponse = teacherToken
-  ? await fetch(`${apiBaseUrl}/api/content/markdown-ingestion`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${teacherToken}` },
-      body: protectedUploadForm
-    }).then(async (response) => {
-      const body = await response.json().catch(() => ({}));
-      return { status: response.status, ok: response.ok && body.ok !== false, body };
-    }).catch((error) => ({
-      status: 0,
-      ok: false,
-      body: { error: "NETWORK_ERROR", message: error instanceof Error ? error.message : String(error) }
-    }))
+  ? await formRequest("/api/content/markdown-ingestion", {
+      token: teacherToken,
+      body: protectedUploadForm,
+      label: "protected edupdf upload"
+    })
   : null;
 pass("protected edupdf upload is rejected", protectedUploadResponse?.status === 400 && protectedUploadResponse.body.error === "PROTECTED_TEXTBOOK_NOT_ALLOWED", {
   status: protectedUploadResponse?.status || 0,
@@ -267,18 +327,11 @@ const invalidOutDirForm = new FormData();
 invalidOutDirForm.append("files", new Blob([fs.readFileSync(fixturePath)], { type: "text/markdown" }), "content-context-upload-fixture.md");
 invalidOutDirForm.append("outDir", "../outside-workspace");
 const invalidOutDirUpload = teacherToken
-  ? await fetch(`${apiBaseUrl}/api/content/markdown-ingestion`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${teacherToken}` },
-      body: invalidOutDirForm
-    }).then(async (response) => {
-      const body = await response.json().catch(() => ({}));
-      return { status: response.status, ok: response.ok && body.ok !== false, body };
-    }).catch((error) => ({
-      status: 0,
-      ok: false,
-      body: { error: "NETWORK_ERROR", message: error instanceof Error ? error.message : String(error) }
-    }))
+  ? await formRequest("/api/content/markdown-ingestion", {
+      token: teacherToken,
+      body: invalidOutDirForm,
+      label: "invalid markdown ingestion outDir"
+    })
   : null;
 pass("upload output path outside workspace is rejected", invalidOutDirUpload?.status === 400 && invalidOutDirUpload.body.error === "INVALID_OUTPUT_PATH", {
   status: invalidOutDirUpload?.status || 0,
@@ -289,6 +342,7 @@ const encodingCheck = teacherToken
   ? await request("/api/encoding/check", {
       method: "POST",
       token: teacherToken,
+      label: "encoding check",
       body: {
         title: "AI\u951f\u65a4\u62f7\u951f\u65a4\u62f7",
         note: "abc???def"
@@ -304,6 +358,7 @@ const invalidRebuildInput = teacherToken
   ? await request("/api/content/index/rebuild", {
       method: "POST",
       token: teacherToken,
+      label: "invalid content index rebuild",
       body: { inputs: ["../outside-workspace"], outDir: "exports/content-index" }
     })
   : null;
@@ -316,6 +371,7 @@ const rebuilt = teacherToken
   ? await request("/api/content/index/rebuild", {
       method: "POST",
       token: teacherToken,
+      label: "content index rebuild",
       body: { inputs: [e2eMarkdownDir], outDir: "exports/content-index" }
     })
   : null;
@@ -331,6 +387,8 @@ const assessment = teacherToken
   ? await request("/api/assessments/draft", {
       method: "POST",
       token: teacherToken,
+      label: "assessment draft",
+      timeoutMs: generationRequestTimeoutMs,
       body: {
         targetScope: "grade",
         targetGrade: zh.grade5,
@@ -354,7 +412,7 @@ pass("assessment draft injects clean content context", assessment?.ok && assessm
 });
 
 const draftExport = teacherToken && assessmentId
-  ? await request(`/api/assessments/${assessmentId}/draft-export`, { method: "POST", token: teacherToken, body: {} })
+  ? await request(`/api/assessments/${assessmentId}/draft-export`, { method: "POST", token: teacherToken, timeoutMs: exportRequestTimeoutMs, label: "assessment draft export", body: {} })
   : null;
 const draftAsset = draftExport?.body.asset || {};
 const draftAssetFetch = await fetchAsset(draftAsset.url);
@@ -365,7 +423,7 @@ pass("teacher can export review draft", draftExport?.ok && draftAsset.url && dra
 });
 
 const blockedPrint = teacherToken && assessmentId
-  ? await request(`/api/assessments/${assessmentId}/print-export`, { method: "POST", token: teacherToken, body: {} })
+  ? await request(`/api/assessments/${assessmentId}/print-export`, { method: "POST", token: teacherToken, timeoutMs: exportRequestTimeoutMs, label: "blocked print export", body: {} })
   : null;
 pass("final print is blocked before review", blockedPrint?.status === 409 && blockedPrint.body.error === "DRAFT_REVIEW_REQUIRED", {
   status: blockedPrint?.status || 0,
@@ -376,6 +434,7 @@ const review = teacherToken && assessmentId
   ? await request(`/api/assessments/${assessmentId}/draft-review`, {
       method: "POST",
       token: teacherToken,
+      label: "assessment draft review",
       body: { decision: "accept" }
     })
   : null;
@@ -384,7 +443,7 @@ pass("teacher can accept review draft", review?.ok && review.body.reviewStatus =
 });
 
 const printExport = teacherToken && assessmentId
-  ? await request(`/api/assessments/${assessmentId}/print-export`, { method: "POST", token: teacherToken, body: {} })
+  ? await request(`/api/assessments/${assessmentId}/print-export`, { method: "POST", token: teacherToken, timeoutMs: exportRequestTimeoutMs, label: "final print export", body: {} })
   : null;
 const printAssets = printExport?.body.assets || [];
 const fetchedAssets = await Promise.all(printAssets.map((asset) => fetchAsset(asset.url)));

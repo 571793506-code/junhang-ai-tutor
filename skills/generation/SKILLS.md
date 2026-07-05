@@ -85,8 +85,10 @@
 
 ## 验证
 
-- 修改生成服务或导出链路时运行 `cmd /c npm.cmd run check:content-context`。
-- 同时涉及资料上传和生成时运行 `cmd /c npm.cmd run check:teaching-content`。
+- 修改生成模板、三科题型蓝图、兜底题池、默认页数、总分或基础审查规则时，优先运行 `cmd /c npm.cmd run check:generation:blueprint`。
+- 修改生成服务并涉及资料上下文、教师复核或导出边界时，运行 `cmd /c npm.cmd run check:content-context`。
+- 同时涉及资料上传、生成草稿、草稿导出、教师确认和正式学生卷/解析卷导出时，才运行 `cmd /c npm.cmd run check:teaching-content:full`。
 - 修改服务层结构时运行 `cmd /c npm.cmd run check --workspace apps/api`。
 - 修改中文提示词、题型规则或文案时运行 `cmd /c npm.cmd run check:encoding`。
 - 当前已知 `check:services` 可能因生成草稿耗时超时，不能把它作为生成完全健康的唯一结论。
+- 完整 E2E 只作为大改或发布前门禁；日常修生成规则时不要用完整 E2E 代替分层验证。
