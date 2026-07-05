@@ -271,7 +271,28 @@ function profileDraftToPlainText(snapshot: Record<string, unknown>, studentName:
 
 const subjects: SubjectLabel[] = ["语文", "数学", "英语"] as SubjectLabel[];
 const gradeOptions = ["三年级", "四年级", "五年级", "六年级"];
-const quizChapterOptions = ["按当前教材章节", "Unit 2 Last weekend", "第三单元 分数乘法", "第五单元 说明文阅读"];
+const quizChapterOptionsByGradeAndSubject: Record<string, Record<SubjectLabel, string[]>> = {
+  三年级: {
+    语文: ["按当前教材章节", "第一单元 童年生活", "第二单元 寓言故事", "第三单元 传统文化", "阅读理解专题", "习作表达专题"],
+    数学: ["按当前教材章节", "第一单元 位置与方向", "第二单元 除数是一位数的除法", "第三单元 复式统计表", "第四单元 两位数乘两位数", "综合应用专题"],
+    英语: ["按当前教材章节", "Unit 1 Welcome back to school", "Unit 2 My family", "Unit 3 At the zoo", "词汇句型专题", "阅读理解专题"]
+  },
+  四年级: {
+    语文: ["按当前教材章节", "第一单元 自然景物", "第二单元 观察与发现", "第三单元 现代诗", "阅读理解专题", "习作表达专题"],
+    数学: ["按当前教材章节", "第一单元 四则运算", "第二单元 观察物体", "第三单元 运算定律", "第四单元 小数的意义和性质", "综合应用专题"],
+    英语: ["按当前教材章节", "Unit 1 My school", "Unit 2 What time is it?", "Unit 3 Weather", "词汇句型专题", "阅读理解专题"]
+  },
+  五年级: {
+    语文: ["按当前教材章节", "第一单元 万物有灵", "第二单元 古典名著", "第三单元 综合性学习", "阅读理解专题", "习作表达专题"],
+    数学: ["按当前教材章节", "第一单元 小数乘法", "第二单元 位置", "第三单元 小数除法", "第四单元 可能性", "综合应用专题"],
+    英语: ["按当前教材章节", "Unit 1 My day", "Unit 2 My favourite season", "Unit 3 My school calendar", "词汇句型专题", "阅读理解专题"]
+  },
+  六年级: {
+    语文: ["按当前教材章节", "第一单元 民风民俗", "第二单元 外国文学名著", "第三单元 习作单元", "阅读理解专题", "习作表达专题"],
+    数学: ["按当前教材章节", "第一单元 分数乘法", "第二单元 位置与方向", "第三单元 分数除法", "第四单元 比", "综合应用专题"],
+    英语: ["按当前教材章节", "Unit 1 How can I get there?", "Unit 2 Ways to go to school", "Unit 3 My weekend plan", "词汇句型专题", "阅读理解专题"]
+  }
+};
 const practiceTrainingTargetOptions = ["错因纠正 + 同类变式", "基础巩固", "同类变式", "综合提升"];
 const questionCountOptionsByMode: Record<GenerationMode, string[]> = {
   quiz: ["8 题左右", "12 题左右", "16 题左右", "20 题左右"],
@@ -280,6 +301,7 @@ const questionCountOptionsByMode: Record<GenerationMode, string[]> = {
 };
 const examTypeOptions = ["单元考", "月考", "阶段测评", "期中模拟", "期末模拟"];
 const examTotalScoreOptions = ["100 分", "120 分", "150 分"];
+const mathBonusQuestionOptions = ["不生成附加题", "生成 1 道附加题", "生成 2 道附加题"];
 const generationModes: Array<{
   id: GenerationMode;
   badge: string;
@@ -1243,13 +1265,14 @@ function TeacherWorkspace({
   const [assessmentSubject, setAssessmentSubject] = useState<SubjectLabel>("数学");
   const [generationMode, setGenerationMode] = useState<GenerationMode>("quiz");
   const [assessmentDifficulty, setAssessmentDifficulty] = useState("基础");
-  const [assessmentQuizChapter, setAssessmentQuizChapter] = useState(quizChapterOptions[0]);
+  const [assessmentQuizChapter, setAssessmentQuizChapter] = useState(quizChapterOptionsByGradeAndSubject["六年级"].数学[0]);
   const [assessmentTrainingTarget, setAssessmentTrainingTarget] = useState(practiceTrainingTargetOptions[0]);
   const [assessmentKnowledgeRange, setAssessmentKnowledgeRange] = useState("教材章节重点、课堂已讲知识点、当周易错概念");
   const [assessmentStructure, setAssessmentStructure] = useState("基础默写 / 概念判断 / 简短应用");
   const [assessmentQuestionCount, setAssessmentQuestionCount] = useState("12 题左右");
   const [assessmentExamType, setAssessmentExamType] = useState("阶段测评");
   const [assessmentTotalScore, setAssessmentTotalScore] = useState("100 分");
+  const [assessmentMathBonusQuestion, setAssessmentMathBonusQuestion] = useState(mathBonusQuestionOptions[0]);
   const [assessmentRequirement, setAssessmentRequirement] = useState(generationModes[0].defaultRequirement);
   const [uploadSubject, setUploadSubject] = useState<SubjectLabel>("数学");
   const [uploadKind, setUploadKind] = useState("作业");
@@ -1324,11 +1347,18 @@ function TeacherWorkspace({
   const activeQuestionCountOptions = questionCountOptionsByMode[generationMode];
   const generationTargetScope: "student" | "grade" = generationMode === "practice" ? "student" : targetScope;
   const generationTargetGrade = generationTargetScope === "student" ? selectedStudent?.grade || targetGrade : targetGrade;
+  const activeQuizChapterOptions = quizChapterOptionsByGradeAndSubject[generationTargetGrade]?.[assessmentSubject] || quizChapterOptionsByGradeAndSubject["六年级"].数学;
   const updateRegistration = (field: keyof StudentRegistrationInput, value: string) => setStudentRegistration((current) => ({ ...current, [field]: value }));
   const textbookHint = selectedTextbookContext
     ? `${selectedTextbookContext.asset.title}${selectedTextbookContext.chapter ? ` / ${selectedTextbookContext.chapter.title}` : ""}`
     : "";
-  const selectedQuizChapterLabel = assessmentQuizChapter === quizChapterOptions[0] && textbookHint ? textbookHint : assessmentQuizChapter;
+  useEffect(() => {
+    if (generationMode === "quiz" && !activeQuizChapterOptions.includes(assessmentQuizChapter)) {
+      setAssessmentQuizChapter(activeQuizChapterOptions[0]);
+    }
+  }, [activeQuizChapterOptions, assessmentQuizChapter, generationMode]);
+
+  const selectedQuizChapterLabel = assessmentQuizChapter === activeQuizChapterOptions[0] && textbookHint ? textbookHint : assessmentQuizChapter;
   const assessmentSourceRange = generationMode === "quiz"
     ? [selectedQuizChapterLabel, assessmentKnowledgeRange].filter(Boolean).join("；")
     : assessmentKnowledgeRange;
@@ -1362,6 +1392,7 @@ function TeacherWorkspace({
     `题型结构：${assessmentStructure}`,
     `题量/页数：${generationMode === "exam" ? `4 页 A4，${assessmentTotalScore}` : assessmentQuestionCount}`,
     `考试/训练目标：${generationMode === "exam" ? assessmentExamType : generationMode === "practice" ? assessmentTrainingTarget : assessmentQuizChapter}`,
+    generationMode === "exam" && assessmentSubject === "数学" ? `数学附加题：${assessmentMathBonusQuestion}` : "",
     "排版要求：学生卷不得出现答案；解析卷必须包含答案、步骤和易错提醒；数学保留过程书写区，英语写词/造句/中译英使用四线格，语文阅读和作文扩大作答区域。",
     `教师补充：${assessmentRequirement}`
   ].filter(Boolean).join("\n");
@@ -1544,10 +1575,13 @@ function TeacherWorkspace({
               ? <label>考试类型<select value={assessmentExamType} onChange={(event) => setAssessmentExamType(event.target.value)}>{examTypeOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
               : generationMode === "practice"
                 ? <label>训练目标<select value={assessmentTrainingTarget} onChange={(event) => setAssessmentTrainingTarget(event.target.value)}>{practiceTrainingTargetOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
-                : <label>章节 / 单元<select value={assessmentQuizChapter} onChange={(event) => setAssessmentQuizChapter(event.target.value)}>{quizChapterOptions.map((item) => <option key={item}>{item}</option>)}</select></label>}
+                : <label>章节 / 单元<select value={assessmentQuizChapter} onChange={(event) => setAssessmentQuizChapter(event.target.value)}>{activeQuizChapterOptions.map((item) => <option key={item}>{item}</option>)}</select></label>}
             {generationMode === "exam"
               ? <label>总分<select value={assessmentTotalScore} onChange={(event) => setAssessmentTotalScore(event.target.value)}>{examTotalScoreOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
               : <label>题量目标<select value={assessmentQuestionCount} onChange={(event) => setAssessmentQuestionCount(event.target.value)}>{activeQuestionCountOptions.map((item) => <option key={item}>{item}</option>)}</select></label>}
+            {generationMode === "exam" && assessmentSubject === "数学"
+              ? <label>附加题<select value={assessmentMathBonusQuestion} onChange={(event) => setAssessmentMathBonusQuestion(event.target.value)}>{mathBonusQuestionOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
+              : null}
             <label className="wide-field">知识点 / 考查范围<input value={textbookHint || assessmentKnowledgeRange} onChange={(event) => setAssessmentKnowledgeRange(event.target.value)} /></label>
           </div>
           <div className="generation-section-box">
