@@ -1,0 +1,36 @@
+Use case: infographic-diagram
+Asset type: Chinese vertical A4-like student growth report template preview
+Primary request: 生成一张中文竖版学生阶段成长报告模板图，服务于君航 AI 助教教师端期中/期末 PDF 生成前的模板确认。
+Template id: term-final-growth-report
+Title text: "学期综合成长总结"
+Scene/backdrop: clean education report page, light background, professional after-school tutoring tone
+Subject: one primary-school student growth report for grades 3 to 6, covering Chinese, Math, and English
+Style/medium: polished UI mockup / report template image, clean print-friendly layout, not a poster
+Composition/framing: portrait layout, first screen looks like an A4 PDF report page, clear section hierarchy and generous spacing
+Color palette: low-saturation blue, muted green, warm gray, small warm orange emphasis
+Text content to render in simplified Chinese:
+"君航 AI 助教"
+"学期综合成长总结"
+"学生：脱敏学生A"
+"年级：五年级"
+"周期：2026春季期末"
+"状态：教师确认后生成"
+"综合成长摘要｜正式正文由 PDF 渲染"
+"阶段关键结论｜学期成长"
+"成长轨迹｜本学期变化"
+"证据摘要｜任务 批改 错题 互动"
+"证据覆盖说明｜覆盖状态占位"
+"三科总览｜语文 数学 英语"
+"学科能力拆解｜能力点占位"
+"重点科目展开｜证据 能力 优先动作"
+"共性错因分析｜审题 订正 表达"
+"课堂与作业过程｜任务 反馈 复盘"
+"稳定表现｜习惯与订正"
+"下阶段辅导重点｜假期或下阶段可以这样配合"
+"跟进计划｜第一步 第二步 第三步"
+"家校协同建议｜观察 配合 沟通"
+"家长下一步｜短时复述 关注过程"
+"家长沟通摘要｜温和提醒"
+Constraints: all Chinese text must be clear, readable, simplified Chinese, no missing glyph boxes, no garbled text, no extra words, no watermark, no logo other than the text "君航 AI 助教"
+Formal rendering boundary: 图片只展示模块标题、短标签和占位短句，不生成完整报告正文。正式报告正文由 HTML/PDF 模板渲染，教师确认后再保存发送。
+Avoid: score ranking, estimated future score, class position, entrance-school pressure, battle-report style, real name, phone number, student ID, school name, chat transcript, model name, provider name, API details, prompt text, debug fields
