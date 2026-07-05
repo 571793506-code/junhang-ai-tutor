@@ -153,11 +153,46 @@ test("draftAssessmentService assigns standard quiz generation budget", async () 
   );
 
   assert.equal(runnerInput.generationProfile, "quiz-standard");
-  assert.equal(runnerInput.assessmentTotalTimeoutMs, 60000);
-  assert.equal(runnerInput.assessmentMaxTokens, 16000);
+  assert.equal(runnerInput.assessmentTotalTimeoutMs, 150000);
+  assert.equal(runnerInput.assessmentMaxTokens, 20000);
   assert.equal(runnerInput.generationContext.output.generationProfile, "quiz-standard");
   assert.equal(result.generationPipeline.model.generationProfile, "quiz-standard");
-  assert.equal(result.generationPipeline.model.assessmentMaxTokens, 16000);
+  assert.equal(result.generationPipeline.model.assessmentMaxTokens, 20000);
+});
+
+test("draftAssessmentService expands all configured generation profile budgets", async () => {
+  const runnerInputs = [];
+  const runner = async (_config, input) => {
+    runnerInputs.push(input);
+    return fakeAssessmentResult();
+  };
+
+  for (const generationProfile of ["e2e-fast", "fast-check", "practice-standard"]) {
+    await draftAssessmentService(
+      {},
+      {
+        subject: "英语",
+        kind: "练习",
+        grade: "五年级",
+        requirement: `${generationProfile} 预算检查`,
+        generationProfile
+      },
+      { persist: false, assessmentDraftRunner: runner }
+    );
+  }
+
+  assert.deepEqual(
+    runnerInputs.map((input) => ({
+      profile: input.generationProfile,
+      timeout: input.assessmentTotalTimeoutMs,
+      maxTokens: input.assessmentMaxTokens
+    })),
+    [
+      { profile: "e2e-fast", timeout: 105000, maxTokens: 16000 },
+      { profile: "fast-check", timeout: 105000, maxTokens: 16000 },
+      { profile: "practice-standard", timeout: 150000, maxTokens: 20000 }
+    ]
+  );
 });
 
 test("draftAssessmentService assigns formal budget to exams and personalized practice", async () => {
@@ -190,11 +225,11 @@ test("draftAssessmentService assigns formal budget to exams and personalized pra
   );
 
   assert.equal(runnerInputs[0].generationProfile, "formal-full");
-  assert.equal(runnerInputs[0].assessmentTotalTimeoutMs, 180000);
-  assert.equal(runnerInputs[0].assessmentMaxTokens, 20000);
+  assert.equal(runnerInputs[0].assessmentTotalTimeoutMs, 270000);
+  assert.equal(runnerInputs[0].assessmentMaxTokens, 24000);
   assert.equal(runnerInputs[1].generationProfile, "formal-full");
-  assert.equal(runnerInputs[1].assessmentTotalTimeoutMs, 120000);
-  assert.equal(runnerInputs[1].assessmentMaxTokens, 20000);
+  assert.equal(runnerInputs[1].assessmentTotalTimeoutMs, 210000);
+  assert.equal(runnerInputs[1].assessmentMaxTokens, 24000);
 });
 
 test("draftAssessmentService preserves explicit generation budget overrides", async () => {

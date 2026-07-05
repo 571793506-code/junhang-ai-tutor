@@ -133,7 +133,7 @@ export function normalizeRuntimeConfig(config = {}) {
     gpt55ApiKey: config.GPT55_API_KEY || config.gpt55ApiKey || config.OPENAI_API_KEY || config.openaiApiKey || "",
     gpt55BaseUrl: config.GPT55_BASE_URL || config.gpt55BaseUrl || config.OPENAI_BASE_URL || config.openaiBaseUrl || "https://api.openai.com/v1",
     gpt55Model: config.GPT55_MODEL || config.gpt55Model || "gpt-5.5",
-    gpt55ReviewTimeoutMs: Number(config.GPT55_REVIEW_TIMEOUT_MS || config.gpt55ReviewTimeoutMs || 180000)
+    gpt55ReviewTimeoutMs: Number(config.GPT55_REVIEW_TIMEOUT_MS || config.gpt55ReviewTimeoutMs || 240000)
   };
 }
 
@@ -760,18 +760,18 @@ export async function draftAssessment(config, input = {}) {
     config.deepseekAssessmentDraftTimeoutMs ||
     config.DEEPSEEK_ASSESSMENT_TIMEOUT_MS ||
     config.deepseekAssessmentTimeoutMs ||
-    180000
+    240000
   );
   const premiumAssessmentTimeoutMs = firstPositiveNumber(
     config.GPT55_ASSESSMENT_TIMEOUT_MS ||
     config.gpt55AssessmentTimeoutMs ||
     runtime.gpt55ReviewTimeoutMs ||
-    180000
+    240000
   );
   const minimaxAssessmentTimeoutMs = firstPositiveNumber(
     config.MINIMAX_ASSESSMENT_TIMEOUT_MS ||
     config.minimaxAssessmentTimeoutMs ||
-    90000
+    150000
   );
   const assessmentTotalTimeoutMs = firstPositiveNumber(
     input.assessmentTotalTimeoutMs,

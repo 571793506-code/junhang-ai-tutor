@@ -78,13 +78,13 @@ function resolveAssessmentGenerationBudget(input = {}, config = {}) {
         ? "quiz-standard"
         : "practice-standard");
   const profileDefaults = {
-    "e2e-fast": { assessmentTotalTimeoutMs: 15000, assessmentMaxTokens: 12000 },
-    "fast-check": { assessmentTotalTimeoutMs: 15000, assessmentMaxTokens: 12000 },
-    "quiz-standard": { assessmentTotalTimeoutMs: 60000, assessmentMaxTokens: 16000 },
-    "practice-standard": { assessmentTotalTimeoutMs: 60000, assessmentMaxTokens: 16000 },
+    "e2e-fast": { assessmentTotalTimeoutMs: 105000, assessmentMaxTokens: 16000 },
+    "fast-check": { assessmentTotalTimeoutMs: 105000, assessmentMaxTokens: 16000 },
+    "quiz-standard": { assessmentTotalTimeoutMs: 150000, assessmentMaxTokens: 20000 },
+    "practice-standard": { assessmentTotalTimeoutMs: 150000, assessmentMaxTokens: 20000 },
     "formal-full": {
-      assessmentTotalTimeoutMs: kind === "试卷" ? 180000 : 120000,
-      assessmentMaxTokens: 20000
+      assessmentTotalTimeoutMs: kind === "试卷" ? 270000 : 210000,
+      assessmentMaxTokens: 24000
     }
   };
   const defaults = profileDefaults[profile] || profileDefaults["practice-standard"];

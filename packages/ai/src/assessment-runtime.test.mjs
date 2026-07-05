@@ -121,3 +121,58 @@ test("draftAssessment forwards request-level max token budget", async () => {
     await close(server);
   }
 });
+
+test("draftAssessment uses expanded default assessment model attempt timeouts", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              title: "五年级英语小测",
+              sections: [
+                {
+                  title: "一、词汇",
+                  items: [
+                    {
+                      itemType: "fill",
+                      prompt: "根据中文写英文：学习。",
+                      answer: "study",
+                      analysisSteps: ["识别词义。"],
+                      knowledgePoint: "词汇"
+                    }
+                  ]
+                }
+              ]
+            })
+          }
+        }
+      ]
+    }));
+  });
+  const address = await listen(server);
+  try {
+    const result = await draftAssessment(
+      {
+        DEEPSEEK_API_KEY: "test-key",
+        DEEPSEEK_BASE_URL: `http://127.0.0.1:${address.port}`,
+        DEEPSEEK_ASSESSMENT_MODEL: "default-timeout-model",
+        DEEPSEEK_ASSESSMENT_FALLBACK_MODEL: "default-timeout-model"
+      },
+      {
+        subject: "英语",
+        kind: "小测",
+        grade: "五年级",
+        requirement: "默认模型上限检查"
+      }
+    );
+
+    assert.equal(result.available, true);
+    assert.equal(result.modelRun.metadata.assessmentTimeoutMs, 240000);
+    assert.equal(result.modelRun.metadata.premiumAssessmentTimeoutMs, 240000);
+    assert.equal(result.modelRun.metadata.minimaxAssessmentTimeoutMs, 150000);
+  } finally {
+    await close(server);
+  }
+});
