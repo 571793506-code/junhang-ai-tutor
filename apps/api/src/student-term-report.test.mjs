@@ -135,6 +135,18 @@ test("buildTermReportDraft includes deeper stage report content blocks", () => {
   )));
   assert.ok(draft.sections.commonCauseAnalysis.length >= 2);
   assert.ok(draft.sections.actionPlan.length >= 3);
+  assert.ok(Array.isArray(draft.sections.growthTrajectory));
+  assert.ok(draft.sections.growthTrajectory.length >= 3);
+  assert.ok(draft.sections.growthTrajectory.every((item) => item.title && item.text && item.evidence));
+  assert.ok(Array.isArray(draft.sections.evidenceCoverage));
+  assert.ok(draft.sections.evidenceCoverage.length >= 4);
+  assert.ok(Array.isArray(draft.sections.learningProcess));
+  assert.ok(draft.sections.learningProcess.length >= 3);
+  assert.ok(Array.isArray(draft.sections.homeSchoolCollaboration));
+  assert.ok(draft.sections.homeSchoolCollaboration.length >= 3);
+  assert.ok(Array.isArray(draft.sections.teacherReviewChecklist));
+  assert.ok(draft.sections.teacherReviewChecklist.length >= 4);
+  assert.ok(draft.sections.teacherReviewChecklist.some((item) => item.text.includes("人工发送")));
   assert.ok(draft.sections.parentCommunicationSummary.text.includes("家长"));
   assert.equal(JSON.stringify(draft).includes("平均表现约"), false);
 });
@@ -239,10 +251,11 @@ test("renderTermReportHtml includes term report template sections", () => {
     metadata: { termReport: draft }
   });
 
-  for (const heading of ["阶段关键结论", "证据摘要", "三科总览", "学科能力拆解", "重点科目展开", "共性错因分析", "跟进计划", "家长沟通摘要"]) {
+  for (const heading of ["阶段关键结论", "成长轨迹", "证据摘要", "证据覆盖说明", "三科总览", "学科能力拆解", "重点科目展开", "共性错因分析", "课堂与作业过程", "跟进计划", "家校协同建议", "家长沟通摘要"]) {
     assert.ok(html.includes(heading), `missing heading: ${heading}`);
   }
   assert.ok(html.includes("教师确认后生成"));
+  assert.equal(html.includes("教师复核清单"), false);
   assert.equal(html.includes("排名"), false);
   assert.equal(html.includes("预测分"), false);
 });
