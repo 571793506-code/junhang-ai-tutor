@@ -169,12 +169,14 @@ Context engineering 负责“给模型看什么”，服务端调用模型前应
 
 ```powershell
 cmd /c npm.cmd run check:generation:blueprint
+cmd /c npm.cmd run check:generation:layout
 cmd /c npm.cmd run check:content-upload-ui
 cmd /c npm.cmd run check:content-context
 cmd /c npm.cmd run check:teaching-content:full
 ```
 
 - 只改生成模板、题型蓝图、兜底内容或审查规则时，优先运行 `check:generation:blueprint`；它不启动 API、不调用模型、不导出 PDF。
+- 检查已生成学生卷 PDF 页数、页眉页码、异常留白或小测/练习套用试卷题型时，运行 `check:generation:layout`；它只读取本地 PDF，不调用模型，也不证明内容原创性。
 - 只改资料上传 UI 或 API multipart 封装时，运行 `check:content-upload-ui`。
 - 改资料索引、`generationContext.teaching.contentContext` 注入、教师复核或导出边界时，运行 `check:content-context`。
 - 大改、发布前或需要覆盖教师登录、资料索引、生成草稿、草稿导出、复核拦截、教师确认和正式 PDF 导出时，才运行 `check:teaching-content:full`。

@@ -36,6 +36,7 @@
     "check:generation:blueprint": "node scripts/generation-blueprint-check.mjs",
     "check:generation:quality:quiz": "node scripts/run-with-env.mjs node scripts/generation-quality-check.mjs",
     "check:generation:quality:formal": "node scripts/run-with-env.mjs node scripts/generation-quality-check.mjs --formal",
+    "check:generation:layout": "node scripts/generation-layout-check.mjs",
     "check:content-context": "node scripts/content-context-e2e.mjs",
     "check:content-upload-ui": "node scripts/content-upload-ui-contract.mjs",
     "check:teaching-content": "node scripts/teaching-content-check.mjs",

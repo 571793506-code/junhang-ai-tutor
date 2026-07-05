@@ -10,7 +10,7 @@
 2. 先读 `AGENTS.md`、`README.md`、本文，以及本次任务相关的 runbook。
 3. 明确本次成功标准：要改什么、不要改什么、用什么命令验证。
 4. 涉及中文文案、提示词、生成内容、HTML/PDF 源、历史备份时，默认最后运行 `.\jh.cmd check:encoding`。
-5. 涉及生成、批改、资料上下文、教师复核或导出时，先按范围选择轻量验证：生成模板/兜底/审查规则跑 `cmd /c npm.cmd run check:generation:blueprint`；资料上传 UI 跑 `cmd /c npm.cmd run check:content-upload-ui`；资料上下文和导出边界跑 `cmd /c npm.cmd run check:content-context`；大改或发布前才跑 `cmd /c npm.cmd run check:teaching-content:full`。
+5. 涉及生成、批改、资料上下文、教师复核或导出时，先按范围选择轻量验证：生成模板/兜底/审查规则跑 `cmd /c npm.cmd run check:generation:blueprint`；已生成 PDF 页数、页码、异常留白或题型套壳跑 `cmd /c npm.cmd run check:generation:layout`；资料上传 UI 跑 `cmd /c npm.cmd run check:content-upload-ui`；资料上下文和导出边界跑 `cmd /c npm.cmd run check:content-context`；大改或发布前才跑 `cmd /c npm.cmd run check:teaching-content:full`。
 6. 准备 stage 前只使用显式路径，不使用 `git add .`。
 
 ## 已知踩坑清单
@@ -40,7 +40,7 @@
 | P21 | 完整 E2E 替代小范围验证 | 只改生成模板、兜底内容或审查规则，却直接运行完整 `check:teaching-content` | 触发 API 启动、资料上传、内容索引、模型生成、PDF 导出和教师复核，耗时长且问题定位困难 | 先跑 `check:generation:blueprint`；只有资料上下文、导出边界、大改或发布前才跑 `check:content-context` 或 `check:teaching-content:full` |
 | P22 | 长时间无进度输出被误判为卡死 | 脚本使用缓存 stdout 的子进程执行方式，或 API fetch 没有统一超时 | 生成类任务看起来半小时无结果，无法判断是模型慢、PDF 慢还是请求挂起 | 检查脚本必须输出 start/done/fail 和耗时；API 请求、生成草稿、PDF 导出必须有超时预算；生成草稿预算要通过 `assessmentTotalTimeoutMs` 或 `generationTimeoutMs` 进入服务层，不能只缩短脚本 fetch timeout |
 | P23 | 把低预算兜底当成正式生成 | E2E 或联调短预算触发动态兜底后，继续把兜底内容当作试卷/个性化练习质量样本 | 题目原创性、贴合教师要求和个性化程度下降 | 低预算 E2E 已降级为 `link-guard` 链路守卫，只证明资料上下文、预算退出、教师复核和导出链路能收口；小测质量样本用中预算，试卷和个性化练习质量样本用正式预算和 20000 tokens |
-| P24 | 质量样本与 PDF/链路验收混在一起 | 想检查生成内容时直接导出 PDF 或跑完整内容 E2E | 失败原因难定位，可能把排版问题、链路问题和模型内容问题混成一个结论 | 内容质量先跑 `check:generation:quality:quiz` 或 `check:generation:quality:formal`；PDF 视觉质量后续单独建 `quality:pdf` 类检查 |
+| P24 | 质量样本与 PDF/链路验收混在一起 | 想检查生成内容时直接导出 PDF 或跑完整内容 E2E | 失败原因难定位，可能把排版问题、链路问题和模型内容问题混成一个结论 | 内容质量先跑 `check:generation:quality:quiz` 或 `check:generation:quality:formal`；PDF 版式质量单独跑 `check:generation:layout` |
 
 ## 按任务类型的验证要求
 
@@ -54,6 +54,7 @@
 
 - 优先运行 `.\jh.cmd check:api`。
 - 只涉及生成蓝图、兜底题型、默认页数、分值或基础审查规则时，先跑 `cmd /c npm.cmd run check:generation:blueprint`。
+- 只涉及已生成学生卷 PDF 页数、页码、异常留白或题型套壳时，跑 `cmd /c npm.cmd run check:generation:layout`。
 - 涉及资料上下文、复核或导出边界时，补跑 `cmd /c npm.cmd run check:content-context`。
 - 大改、发布前或需要完整链路证明时，再跑 `cmd /c npm.cmd run check:teaching-content:full`。
 - 检查返回体是否按角色过滤字段。

@@ -135,6 +135,7 @@ cmd /c npm.cmd run typecheck --workspace apps/web
 
 ```bat
 cmd /c npm.cmd run check:generation:blueprint
+cmd /c npm.cmd run check:generation:layout
 cmd /c npm.cmd run check:content-context
 cmd /c npm.cmd run check:content-upload-ui
 cmd /c npm.cmd run check:teaching-content:full
@@ -143,6 +144,7 @@ cmd /c npm.cmd run check:teaching-content:full
 选择规则：
 
 - 生成模板、兜底内容、题型蓝图、分值和基础审查规则：先跑 `check:generation:blueprint`。
+- 已生成学生卷 PDF 页数、页眉页码、异常留白或小测/练习套用试卷题型：跑 `check:generation:layout`。
 - 资料上传 UI 或 multipart 封装：跑 `check:content-upload-ui`。
 - 资料上下文注入、教师复核、草稿导出或正式导出边界：跑 `check:content-context`。
 - 完整教师登录、资料索引、生成草稿、导出、复核和正式资产闭环：只在大改、发布前或需要完整链路证明时跑 `check:teaching-content:full`。
