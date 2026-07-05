@@ -72,6 +72,9 @@ test("buildTermReportDraft creates teacher PDF only draft", () => {
   assert.equal(draft.status, "draft");
   assert.equal(draft.visibility, "teacher_pdf_only");
   assert.equal(draft.periodLabel, "2026春季期末");
+  assert.equal(draft.renderingPolicy.pdfTextSource, "html_template");
+  assert.equal(draft.renderingPolicy.imagePreviewUsage, "visual_reference_only");
+  assert.equal(draft.renderingPolicy.requiresTeacherReview, true);
   assert.ok(draft.sections.overview.text.includes("张思源"));
   assert.ok(draft.sections.subjects.length >= 3);
   assert.ok(draft.wechatMessage.includes("成长报告"));
@@ -256,6 +259,7 @@ test("renderTermReportHtml includes term report template sections", () => {
   }
   assert.ok(html.includes("教师确认后生成"));
   assert.equal(html.includes("教师复核清单"), false);
+  assert.equal(html.includes("image2"), false);
   assert.equal(html.includes("排名"), false);
   assert.equal(html.includes("预测分"), false);
 });

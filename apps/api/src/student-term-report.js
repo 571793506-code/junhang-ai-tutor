@@ -95,6 +95,11 @@ export function buildTermReportDraft(student, options = {}) {
     template,
     status: "draft",
     visibility: "teacher_pdf_only",
+    renderingPolicy: {
+      pdfTextSource: "html_template",
+      imagePreviewUsage: "visual_reference_only",
+      requiresTeacherReview: true
+    },
     periodLabel,
     title,
     generatedAt: now.toISOString(),

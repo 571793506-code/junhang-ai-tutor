@@ -12,8 +12,9 @@ const REPORT_TEMPLATES = {
     title: "期中阶段综合档案",
     period: "2026春季期中",
     overview: "本阶段重点呈现阶段掌握、共性错因和后续两到四周辅导重点。",
-    focusLabel: "接下来两到四周优先处理",
-    trajectoryLabel: "前半阶段变化"
+    focusLabel: "后续两到四周优先处理",
+    trajectoryLabel: "前半阶段变化",
+    keyConclusionLabel: "阶段掌握"
   },
   final: {
     id: "term-final-growth-report",
@@ -21,7 +22,8 @@ const REPORT_TEMPLATES = {
     period: "2026春季期末",
     overview: "本阶段重点呈现学期成长、稳定强项和假期或下阶段安排。",
     focusLabel: "假期或下阶段可以这样配合",
-    trajectoryLabel: "本学期变化"
+    trajectoryLabel: "本学期变化",
+    keyConclusionLabel: "学期成长"
   }
 };
 
@@ -65,67 +67,24 @@ Text content to render in simplified Chinese:
 "年级：五年级"
 "周期：${template.period}"
 "状态：教师确认后生成"
-"综合成长摘要"
-"${template.overview}"
-"阶段关键结论"
-"阶段掌握：本阶段记录已整理为教师可复核草稿"
-"学习过程：任务完成记录可以追踪"
-"复盘依据：教师确认批改记录用于后续补弱"
-"成长轨迹"
-"${template.trajectoryLabel}：教师确认批改记录用于观察阶段变化"
-"学习节奏：学习任务完成记录可以追踪"
-"订正迁移：用同类题确认订正是否稳定"
-"证据摘要"
-"学习任务：1 项任务记录"
-"教师确认批改：1 条确认记录"
-"错题与订正：1 条错题记录"
-"问答互动：本阶段继续观察"
-"证据覆盖说明"
-"任务覆盖：用于观察学习节奏和完成情况"
-"批改覆盖：用于观察阶段掌握"
-"错题覆盖：用于定位共性错因和订正动作"
-"互动覆盖：问答互动暂作为辅助观察"
-"三科总览"
-"语文：阅读定位和概括表达继续观察"
-"数学：两步应用题审题和单位换算需要巩固"
-"英语：词汇拼写和阅读关键词保持复习"
-"学科能力拆解"
-"语文｜能力点：阅读定位、概括表达、复述质量"
-"数学｜能力点：审题、条件整理、列式表达"
-"英语｜能力点：词汇拼写、句型使用、阅读关键词"
-"重点科目展开"
-"数学｜本周期证据：教师确认批改记录和错题记录"
-"能力观察：审题、条件整理和列式表达需要持续训练"
-"优先处理：先圈已知条件和问题，再列式"
-"老师下一步：同类题复练，确认能独立复述思路"
-"共性错因分析"
-"审题与复述：先说清题意、条件和关键步骤"
-"订正闭环：订正后能复述错因并完成同类题"
-"表达完整度：把思路、依据和步骤说完整"
-"课堂与作业过程"
-"课后任务完成：保持固定复盘节奏"
-"批改反馈吸收：能说出修改依据"
-"错题复盘过程：先复述错因，再做同类题"
-"稳定表现"
-"能按要求完成部分学习任务"
-"已形成教师确认的批改记录"
-"下阶段辅导重点"
-"${template.focusLabel}"
-"每周复盘错题订正，确认能否复述错因"
-"跟进计划"
-"第一步：先复盘本阶段关键问题"
-"第二步：保留每周一次短复盘"
-"第三步：用同类题确认订正是否稳定"
-"家校协同建议"
-"家庭观察重点：是否先说清题意、依据或关键步骤"
-"短时配合动作：每天 5 到 10 分钟口头复述"
-"沟通节奏：每周只抓 1 个小问题反馈给老师"
-"家长下一步"
-"每天 5 到 10 分钟，请孩子口头复述最容易出错的一步"
-"关注订正过程，不只关注分数"
-"家长沟通摘要"
-"家庭配合以短时间复述和查看订正过程为主，不需要替代老师讲新内容"
+"综合成长摘要｜正式正文由 PDF 渲染"
+"阶段关键结论｜${template.keyConclusionLabel}"
+"成长轨迹｜${template.trajectoryLabel}"
+"证据摘要｜任务 批改 错题 互动"
+"证据覆盖说明｜覆盖状态占位"
+"三科总览｜语文 数学 英语"
+"学科能力拆解｜能力点占位"
+"重点科目展开｜证据 能力 优先动作"
+"共性错因分析｜审题 订正 表达"
+"课堂与作业过程｜任务 反馈 复盘"
+"稳定表现｜习惯与订正"
+"下阶段辅导重点｜${template.focusLabel}"
+"跟进计划｜第一步 第二步 第三步"
+"家校协同建议｜观察 配合 沟通"
+"家长下一步｜短时复述 关注过程"
+"家长沟通摘要｜温和提醒"
 Constraints: all Chinese text must be clear, readable, simplified Chinese, no missing glyph boxes, no garbled text, no extra words, no watermark, no logo other than the text "君航 AI 助教"
+Formal rendering boundary: 图片只展示模块标题、短标签和占位短句，不生成完整报告正文。正式报告正文由 HTML/PDF 模板渲染，教师确认后再保存发送。
 Avoid: score ranking, estimated future score, class position, entrance-school pressure, battle-report style, real name, phone number, student ID, school name, chat transcript, model name, provider name, API details, prompt text, debug fields`;
 }
 

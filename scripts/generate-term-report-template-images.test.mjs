@@ -20,6 +20,11 @@ test("buildPrompt creates parent-visible midterm and final template prompts", ()
   assert.equal(finalPrompt.includes("前半阶段变化"), false);
 
   for (const prompt of [midtermPrompt, finalPrompt]) {
+    assert.ok(prompt.includes("图片只展示模块标题、短标签和占位短句"));
+    assert.ok(prompt.includes("正式报告正文由 HTML/PDF 模板渲染"));
+    assert.equal(prompt.includes("每天 5 到 10 分钟，请孩子口头复述最容易出错的一步"), false);
+    assert.equal(prompt.includes("家庭配合以短时间复述和查看订正过程为主"), false);
+    assert.ok(prompt.split("\n").filter((line) => line.trim().startsWith("\"")).length <= 32);
     for (const heading of ["阶段关键结论", "证据摘要", "三科总览", "学科能力拆解", "重点科目展开", "共性错因分析", "跟进计划", "家长沟通摘要"]) {
       assert.ok(prompt.includes(heading), `missing heading: ${heading}`);
     }
