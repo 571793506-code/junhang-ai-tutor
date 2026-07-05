@@ -43,6 +43,11 @@ import { checkDatabaseStatus, persistenceOptions, requireDatabase } from "./db-s
 import { createEncodingGuardMiddleware } from "./encoding-guard-middleware.js";
 import { loadRuntimeConfig, publicConfigSummary } from "./env.js";
 import { createSessionToken, readBearerToken, requireSession, verifySessionToken } from "./session.js";
+import {
+  buildStudentGrowthSnapshot,
+  filterStudentProfileSnapshot,
+  mergeStudentProfileAiDraft
+} from "./student-growth-profile.js";
 import { publicGeneratedUrl, publicUploadUrl, storageGeneratedRoot, storageUploadRoot, submissionImageUpload, teachingMaterialUpload, uploadedFileMeta } from "./uploads.js";
 
 const config = loadRuntimeConfig();
@@ -1476,7 +1481,7 @@ async function buildStudentProfileNarrative(student, snapshot) {
     studentName: student.displayName,
     grade: student.grade,
     className: student.className,
-    periodKey: new Date().toISOString().slice(0, 10),
+    periodKey: snapshot.period?.label || new Date().toISOString().slice(0, 10),
     snapshot
   });
   let modelRun = null;
@@ -1488,7 +1493,8 @@ async function buildStudentProfileNarrative(student, snapshot) {
   }
   const parsed = parseJsonObjectText(result.narrativeText);
   return {
-    ...(parsed || fallbackProfileNarrative(student, snapshot)),
+    structuredDraft: parsed,
+    narrative: parsed ? null : fallbackProfileNarrative(student, snapshot),
     aiGenerated: result.available,
     generatedBy: "AI生成",
     modelRunId: modelRun?.id || null,
@@ -4165,19 +4171,38 @@ async function loadStudentProfileSources(studentId) {
   });
 }
 
+function normalizeProfilePeriodType(value, fallback = "weekly") {
+  return value === "monthly" || value === "weekly" ? value : fallback;
+}
+
 app.post("/api/students/:studentId/profile/draft", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
   if (!(await assertTeacherStudentScope(req, res, req.params.studentId))) return;
 
+  const body = getBody(req);
+  const periodType = normalizeProfilePeriodType(body.periodType, "weekly");
   const student = await loadStudentProfileSources(req.params.studentId);
   if (!student) {
     return res.status(404).json({ ok: false, error: "STUDENT_NOT_FOUND", message: "未找到学生档案。" });
   }
 
-  const baseSnapshot = buildStudentProfileSnapshot(student);
-  const narrative = await buildStudentProfileNarrative(student, baseSnapshot);
+  const baseSnapshot = buildStudentGrowthSnapshot(student, { periodType });
+  const narrativeResult = await buildStudentProfileNarrative(student, baseSnapshot);
+  const mergedSnapshot = narrativeResult.structuredDraft
+    ? mergeStudentProfileAiDraft(baseSnapshot, narrativeResult.structuredDraft)
+    : {
+        ...baseSnapshot,
+        narrative: {
+          ...baseSnapshot.narrative,
+          ...narrativeResult.narrative
+        }
+      };
   const snapshot = {
-    ...baseSnapshot,
-    narrative,
+    ...mergedSnapshot,
+    generationState: {
+      aiGenerated: narrativeResult.aiGenerated,
+      generatedBy: narrativeResult.generatedBy,
+      unavailableReason: narrativeResult.unavailableReason
+    },
     draftStatus: "draft",
     draftGeneratedAt: new Date().toISOString()
   };
@@ -4196,7 +4221,7 @@ app.post("/api/students/:studentId/profile/draft", requireDatabase, requireSessi
   res.json({
     ok: true,
     student: mapStudent({ ...student, profiles: [{ snapshot }] }),
-    snapshot
+    snapshot: filterStudentProfileSnapshot(snapshot, "teacher")
   });
 }));
 
@@ -4208,12 +4233,16 @@ app.post("/api/students/:studentId/profile/publish", requireDatabase, requireSes
     return res.status(404).json({ ok: false, error: "STUDENT_NOT_FOUND", message: "未找到学生档案。" });
   }
 
-  const fallbackSnapshot = buildStudentProfileSnapshot(student);
   const incomingSnapshot = safeJson(body.snapshot, null);
+  const periodType = normalizeProfilePeriodType(incomingSnapshot?.period?.type || incomingSnapshot?.publishedView?.periodType, "monthly");
+  const fallbackSnapshot = buildStudentGrowthSnapshot(student, { periodType });
+  const structuredSnapshot = incomingSnapshot
+    ? mergeStudentProfileAiDraft(fallbackSnapshot, incomingSnapshot)
+    : fallbackSnapshot;
   const teacherEditedText = typeof body.text === "string" ? body.text.trim() : "";
-  const narrative = safeJson(incomingSnapshot?.narrative, {});
+  const narrative = safeJson(structuredSnapshot?.narrative, {});
   const snapshot = {
-    ...(incomingSnapshot || fallbackSnapshot),
+    ...structuredSnapshot,
     ...(teacherEditedText ? { publishedText: teacherEditedText } : {}),
     narrative: {
       ...narrative,
@@ -4239,7 +4268,7 @@ app.post("/api/students/:studentId/profile/publish", requireDatabase, requireSes
   res.json({
     ok: true,
     student: mapStudent({ ...student, profiles: [{ snapshot }] }),
-    snapshot
+    snapshot: filterStudentProfileSnapshot(snapshot, "teacher")
   });
 }));
 
@@ -4253,11 +4282,26 @@ app.post("/api/students/:studentId/profile/aggregate", requireDatabase, requireS
     return res.status(404).json({ ok: false, error: "STUDENT_NOT_FOUND", message: "未找到学生档案。" });
   }
 
-  const baseSnapshot = buildStudentProfileSnapshot(student);
-  const narrative = await buildStudentProfileNarrative(student, baseSnapshot);
+  const body = getBody(req);
+  const periodType = normalizeProfilePeriodType(body.periodType, "monthly");
+  const baseSnapshot = buildStudentGrowthSnapshot(student, { periodType });
+  const narrativeResult = await buildStudentProfileNarrative(student, baseSnapshot);
+  const mergedSnapshot = narrativeResult.structuredDraft
+    ? mergeStudentProfileAiDraft(baseSnapshot, narrativeResult.structuredDraft)
+    : {
+        ...baseSnapshot,
+        narrative: {
+          ...baseSnapshot.narrative,
+          ...narrativeResult.narrative
+        }
+      };
   const snapshot = {
-    ...baseSnapshot,
-    narrative
+    ...mergedSnapshot,
+    generationState: {
+      aiGenerated: narrativeResult.aiGenerated,
+      generatedBy: narrativeResult.generatedBy,
+      unavailableReason: narrativeResult.unavailableReason
+    }
   };
   await prisma.studentProfile.create({ data: { studentId: student.id, snapshot } });
   await auditEvent(req, {
@@ -4274,7 +4318,7 @@ app.post("/api/students/:studentId/profile/aggregate", requireDatabase, requireS
   res.json({
     ok: true,
     student: mapStudent({ ...student, profiles: [{ snapshot }] }),
-    snapshot
+    snapshot: filterStudentProfileSnapshot(snapshot, req.session.role)
   });
 }));
 
@@ -4300,7 +4344,7 @@ app.get("/api/students/:studentId/profile", requireDatabase, requireSession(conf
   res.json({
     ok: true,
     student: mapStudent(student),
-    snapshot: student.profiles?.[0]?.snapshot || null,
+    snapshot: filterStudentProfileSnapshot(student.profiles?.[0]?.snapshot || null, req.session.role),
     reports: student.reports.map(mapReport),
     unresolvedMistakes: student.mistakes.filter((item) => !item.masteryResolved).map(mapCorrection)
   });

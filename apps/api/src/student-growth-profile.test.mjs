@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {
   buildProfileEvidencePack,
   buildStudentGrowthSnapshot,
-  filterStudentProfileSnapshot
+  filterStudentProfileSnapshot,
+  mergeStudentProfileAiDraft
 } from "./student-growth-profile.js";
 
 const now = new Date("2026-07-05T12:00:00.000Z");
@@ -125,3 +126,51 @@ test("filterStudentProfileSnapshot hides teacher review from student role", () =
   assert.ok(filtered.publishedView);
 });
 
+test("filterStudentProfileSnapshot keeps teacher review for teacher role", () => {
+  const snapshot = buildStudentGrowthSnapshot(studentFixture(), { periodType: "weekly", now });
+  const filtered = filterStudentProfileSnapshot(snapshot, "teacher");
+
+  assert.ok(filtered.teacherReview);
+  assert.ok(filtered.profileEvidencePack);
+});
+
+test("mergeStudentProfileAiDraft only merges safe structured AI fields", () => {
+  const base = buildStudentGrowthSnapshot(studentFixture(), { periodType: "weekly", now });
+  const merged = mergeStudentProfileAiDraft(base, {
+    profileType: "weekly_growth",
+    period: base.period,
+    publishedView: {
+      overview: { text: "本周能主动复述题意。", evidenceRefs: ["task_1"], confidence: "supported", provider: "DeepSeek" },
+      focusSubjects: [
+        {
+          subject: "数学",
+          whyFocus: "两步应用题",
+          evidenceSummary: "能说清第一步，但第二步容易漏条件。",
+          abilityObservation: "审题过程需要继续稳定。",
+          nextClassAction: "先圈条件再列式。",
+          evidenceRefs: ["sub_ok"],
+          confidence: "supported",
+          modelRunId: "run_1"
+        }
+      ],
+      parentNextSteps: [{ text: "每天 5 分钟复述题意。", evidenceRefs: ["task_1"], confidence: "supported" }]
+    },
+    teacherReview: {
+      sampleLimitNotes: ["数学证据较充分。"],
+      internalRisks: ["仅教师可见"],
+      publishChecklist: [{ text: "确认公开措辞。", evidenceRefs: [], confidence: "supported" }]
+    },
+    modelRunId: "run_top",
+    providerId: "deepseek"
+  });
+  const studentView = filterStudentProfileSnapshot(merged, "student");
+
+  assert.equal(merged.publishedView.overview.text, "本周能主动复述题意。");
+  assert.equal(merged.teacherReview.internalRisks[0], "仅教师可见");
+  assert.equal(studentView.teacherReview, undefined);
+  assert.equal(studentView.profileEvidencePack, undefined);
+  assert.equal(studentView.providerId, undefined);
+  assert.equal(studentView.modelRunId, undefined);
+  assert.equal(studentView.publishedView.overview.provider, undefined);
+  assert.equal(studentView.publishedView.focusSubjects[0].modelRunId, undefined);
+});

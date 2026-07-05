@@ -170,9 +170,24 @@ export function buildStudentGrowthSnapshot(student, options = {}) {
 
 export function filterStudentProfileSnapshot(snapshot, role = "student") {
   if (!snapshot || typeof snapshot !== "object") return snapshot;
-  if (role === "teacher") return snapshot;
+  if (role === "teacher") return removeInternalFields(snapshot);
   const { teacherReview, profileEvidencePack, ...publicSnapshot } = snapshot;
-  return publicSnapshot;
+  return removeInternalFields(publicSnapshot);
+}
+
+export function mergeStudentProfileAiDraft(baseSnapshot, aiDraft) {
+  const base = safeObject(baseSnapshot);
+  const draft = safeObject(aiDraft);
+  const merged = {
+    ...base,
+    publishedView: mergePublishedView(base.publishedView, draft.publishedView),
+    teacherReview: mergeTeacherReview(base.teacherReview, draft.teacherReview),
+    narrative: mergeNarrative(base, draft)
+  };
+
+  if (draft.profileType === base.profileType) merged.profileType = draft.profileType;
+  if (isMatchingPeriod(base.period, draft.period)) merged.period = base.period;
+  return removeInternalFields(merged);
 }
 
 function buildPublishedView(pack) {
@@ -396,6 +411,59 @@ function safeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+function mergePublishedView(baseView, draftView) {
+  const base = safeObject(baseView);
+  const draft = safeObject(draftView);
+  if (!Object.keys(draft).length) return base;
+  return {
+    ...base,
+    ...Object.fromEntries(
+      Object.entries(draft).filter(([, value]) => value != null)
+    )
+  };
+}
+
+function mergeTeacherReview(baseReview, draftReview) {
+  const base = safeObject(baseReview);
+  const draft = safeObject(draftReview);
+  if (!Object.keys(draft).length) return base;
+  return {
+    ...base,
+    ...Object.fromEntries(
+      Object.entries(draft).filter(([, value]) => value != null)
+    )
+  };
+}
+
+function mergeNarrative(baseSnapshot, draft) {
+  const baseNarrative = safeObject(baseSnapshot.narrative);
+  if (!draft.publishedView && !draft.teacherReview) return baseNarrative;
+  const overview = safeObject(draft.publishedView?.overview);
+  const teacherChecklist = Array.isArray(draft.teacherReview?.publishChecklist) ? draft.teacherReview.publishChecklist : [];
+  return {
+    ...baseNarrative,
+    ...(overview.text ? { parentSummary: overview.text } : {}),
+    ...(teacherChecklist.length ? { teacherSummary: teacherChecklist.map((item) => safeObject(item).text).filter(Boolean).join("；") } : {})
+  };
+}
+
+function isMatchingPeriod(basePeriod, draftPeriod) {
+  const base = safeObject(basePeriod);
+  const draft = safeObject(draftPeriod);
+  return Boolean(base.type && draft.type === base.type && draft.start === base.start && draft.end === base.end);
+}
+
+function removeInternalFields(value) {
+  if (Array.isArray(value)) return value.map((item) => removeInternalFields(item));
+  if (!value || typeof value !== "object") return value;
+  const hiddenKeys = new Set(["provider", "providerId", "model", "modelRunId", "baseUrl", "raw", "debug", "prompt"]);
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !hiddenKeys.has(key))
+      .map(([key, item]) => [key, removeInternalFields(item)])
+  );
+}
+
 function toDate(value) {
   if (!value) return null;
   if (value instanceof Date) return value;
@@ -414,4 +482,3 @@ function formatDate(date) {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
-
