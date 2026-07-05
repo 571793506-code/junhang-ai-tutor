@@ -2,11 +2,17 @@ const SUBJECTS = ["语文", "数学", "英语"];
 const TERM_REPORT_TEMPLATES = {
   midterm: {
     id: "term-midterm-growth-report",
-    focusLabel: "接下来两到四周优先处理"
+    reportTitle: "期中阶段综合档案",
+    focusLabel: "接下来两到四周优先处理",
+    overviewFocus: "阶段掌握、共性错因和后续两到四周辅导重点",
+    tutoringPrefix: "接下来两到四周"
   },
   final: {
     id: "term-final-growth-report",
-    focusLabel: "假期或下阶段可以这样配合"
+    reportTitle: "学期综合成长总结",
+    focusLabel: "假期或下阶段可以这样配合",
+    overviewFocus: "学期成长、稳定强项和假期或下阶段安排",
+    tutoringPrefix: "假期或下阶段"
   }
 };
 
@@ -38,26 +44,29 @@ export function buildTermReportDraft(student, options = {}) {
   const progress = progressList(student);
   const actions = nextActions(subjects);
   const suggestions = parentSuggestions(subjects);
+  const focusSubjects = focusSubjectDetails(subjects);
+  const stableGrowth = stableGrowthDetails(habits, progress);
+  const parentNextSteps = suggestions.map((text) => ({ text }));
   const sections = {
     overview: {
-      text: `${student.displayName}本阶段学习记录已完成汇总，建议重点关注${focus.subject}的持续巩固和订正闭环。`
+      text: `${student.displayName}${periodLabel}学习记录已完成汇总，本报告重点呈现${template.overviewFocus}，建议优先关注${focus.subject}的持续巩固和订正闭环。`
     },
     subjects,
     subjectOverview: subjects,
-    focusSubjects: subjects.filter((item) => item.concerns.length).slice(0, 2),
-    stableGrowth: progress.length ? progress : habits.slice(0, 1),
+    focusSubjects,
+    stableGrowth,
     correctionLoop: correctionLoop(student),
     learningHabits: habits,
     progress,
     nextActions: actions,
     parentSuggestions: suggestions,
     tutoringFocus: [
-      `${template.focusLabel}：${actions[0] || "继续保持错题订正和基础巩固。"}`
+      `${template.tutoringPrefix}优先安排：${actions[0] || "继续保持错题订正和基础巩固。"}`,
+      `${template.focusLabel}：每周复盘一次错题订正，确认是否能独立复述解题思路。`
     ],
-    parentNextStep: suggestions
+    parentNextSteps,
+    parentNextStep: parentNextSteps
   };
-  if (!sections.focusSubjects.length) sections.focusSubjects = subjects.slice(0, 1);
-  if (!sections.stableGrowth.length) sections.stableGrowth = ["本阶段保持稳定学习节奏，后续继续积累教师确认记录。"];
 
   return {
     reportType,
@@ -117,7 +126,7 @@ export function renderTermReportHtml(student, report) {
   const focusSubjects = Array.isArray(sections.focusSubjects) ? sections.focusSubjects : subjects.filter((item) => item.concerns?.length);
   const stableGrowth = Array.isArray(sections.stableGrowth) ? sections.stableGrowth : [...(sections.learningHabits || []), ...(sections.progress || [])];
   const tutoringFocus = Array.isArray(sections.tutoringFocus) ? sections.tutoringFocus : sections.nextActions;
-  const parentNextStep = Array.isArray(sections.parentNextStep) ? sections.parentNextStep : sections.parentSuggestions;
+  const parentNextStep = Array.isArray(sections.parentNextSteps) ? sections.parentNextSteps : Array.isArray(sections.parentNextStep) ? sections.parentNextStep : sections.parentSuggestions;
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -156,9 +165,9 @@ li { margin: 2px 0; }
   <h2>一、综合成长摘要</h2>
   <div class="card">${paragraphs(termReport.teacherEditedText || report.content || sections.overview?.text)}</div>
   <h2>二、三科总览</h2>
-  ${subjects.map((item) => `<div class="section card"><h3>${escapeHtml(item.subject)}</h3><p>${escapeHtml(item.summary || "")}</p>${list("优势", item.highlights)}${list("关注点", item.concerns)}</div>`).join("")}
+  ${subjects.map((item) => `<div class="section card"><h3>${escapeHtml(item.subject)}</h3><p>${escapeHtml(item.observation || item.summary || "")}</p>${list("优势", item.highlights)}${list("关注点", item.concerns)}</div>`).join("")}
   <h2>三、重点科目展开</h2>
-  ${focusSubjects.map((item) => `<div class="section card"><h3>${escapeHtml(item.subject)}</h3>${list("需要关注", item.concerns)}${list("可以保持", item.highlights)}</div>`).join("")}
+  ${focusSubjects.map(focusSubjectBlock).join("")}
   <h2>四、错题与订正闭环</h2>
   ${listBlock(sections.correctionLoop)}
   <h2>五、稳定表现</h2>
@@ -194,6 +203,15 @@ function subjectSection(student, subject) {
     summary: reviewed.length
       ? `${subject}已有 ${reviewed.length} 次教师确认批改记录，平均表现约 ${avg} 分。`
       : `${subject}本阶段记录较少，建议继续观察课堂和作业表现。`,
+    observation: reviewed.length
+      ? `${subject}已有 ${reviewed.length} 次教师确认批改记录，可围绕${mistakes[0]?.knowledgePoint?.name || mistakes[0]?.prompt || "本阶段重点"}继续巩固。`
+      : `${subject}本阶段记录较少，后续以课堂表现、作业订正和教师确认记录继续观察。`,
+    evidence: reviewed.length
+      ? `${reviewed.length} 次教师确认批改记录${mistakes.length ? `，${mistakes.length} 条错题记录` : ""}`
+      : "本阶段教师确认记录较少",
+    abilityObservation: abilityObservation(subject, mistakes),
+    priorityAction: priorityAction(subject, mistakes),
+    teacherNextStep: teacherNextStep(subject, mistakes),
     highlights: tasks.some((item) => item.status === "COMPLETED" || item.status === "REVIEWED")
       ? ["能按要求完成部分学习任务。"]
       : ["继续积累学习任务记录。"],
@@ -222,6 +240,26 @@ function progressList(student) {
   return reviewed.length ? ["已形成教师确认的批改记录，可作为后续补弱依据。"] : ["阶段进步需要更多教师确认记录支撑。"];
 }
 
+function focusSubjectDetails(subjects) {
+  const focus = subjects.filter((item) => item.concerns.length).slice(0, 2);
+  const visible = focus.length ? focus : subjects.slice(0, 1);
+  return visible.map((item) => ({
+    subject: item.subject,
+    evidence: item.evidence,
+    abilityObservation: item.abilityObservation,
+    priorityAction: item.priorityAction,
+    teacherNextStep: item.teacherNextStep,
+    highlights: item.highlights,
+    concerns: item.concerns
+  }));
+}
+
+function stableGrowthDetails(habits, progress) {
+  const sources = [...progress, ...habits].filter(Boolean);
+  const visible = sources.length ? sources.slice(0, 2) : ["本阶段保持稳定学习节奏，后续继续积累教师确认记录。"];
+  return visible.map((text) => ({ text, evidence: "来自任务完成、教师确认批改或课堂互动记录。" }));
+}
+
 function nextActions(subjects) {
   const focus = subjects.find((item) => item.concerns.length) || subjects[0];
   return [
@@ -238,12 +276,43 @@ function parentSuggestions(subjects) {
   ];
 }
 
+function abilityObservation(subject, mistakes) {
+  const point = mistakes[0]?.knowledgePoint?.name || mistakes[0]?.prompt || "本阶段重点";
+  if (subject === "数学") return `围绕${point}继续观察审题、条件整理和列式表达。`;
+  if (subject === "语文") return `围绕${point}继续观察阅读定位、概括表达和复述质量。`;
+  if (subject === "英语") return `围绕${point}继续观察词汇拼读、句型使用和阅读关键词。`;
+  return `围绕${point}继续观察学习过程和订正质量。`;
+}
+
+function priorityAction(subject, mistakes) {
+  const point = mistakes[0]?.knowledgePoint?.name || mistakes[0]?.prompt || "基础知识和订正质量";
+  if (subject === "数学") return `下次课先让孩子圈出已知条件和问题，再处理${point}。`;
+  if (subject === "语文") return `下次课先回到原文找依据，再完成${point}相关表达。`;
+  if (subject === "英语") return `下次课先复习核心词句，再完成${point}相关练习。`;
+  return `下次课先复盘错因，再处理${point}。`;
+}
+
+function teacherNextStep(subject, mistakes) {
+  const point = mistakes[0]?.knowledgePoint?.name || mistakes[0]?.prompt || "本阶段重点";
+  return `${subject}围绕${point}安排同类题复练，并记录订正后是否能独立复述。`;
+}
+
 function subjectFromValue(value) {
   const text = String(value || "");
   if (text.includes("语文") || text.toLowerCase().includes("chinese")) return "语文";
   if (text.includes("数学") || text.toLowerCase().includes("math")) return "数学";
   if (text.includes("英语") || text.toLowerCase().includes("english")) return "英语";
   return "";
+}
+
+function focusSubjectBlock(item) {
+  const details = [
+    item.evidence ? `本周期证据：${item.evidence}` : "",
+    item.abilityObservation ? `能力观察：${item.abilityObservation}` : "",
+    item.priorityAction ? `优先处理：${item.priorityAction}` : "",
+    item.teacherNextStep ? `老师下一步：${item.teacherNextStep}` : ""
+  ].filter(Boolean);
+  return `<div class="section card"><h3>${escapeHtml(item.subject)}</h3>${listBlock(details)}${list("需要关注", item.concerns)}${list("可以保持", item.highlights)}</div>`;
 }
 
 function list(label, items = []) {
@@ -255,7 +324,7 @@ function list(label, items = []) {
 
 function listBlock(items = []) {
   const visible = Array.isArray(items) ? items.filter(Boolean) : [];
-  return `<div class="card"><ul>${(visible.length ? visible : ["暂无记录，继续观察。"]).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`;
+  return `<div class="card"><ul>${(visible.length ? visible : ["暂无记录，继续观察。"]).map((item) => `<li>${escapeHtml(readableItem(item))}</li>`).join("")}</ul></div>`;
 }
 
 function paragraphs(text) {
@@ -264,6 +333,12 @@ function paragraphs(text) {
     .filter(Boolean)
     .map((line) => `<p>${escapeHtml(line)}</p>`)
     .join("");
+}
+
+function readableItem(item) {
+  if (!item || typeof item !== "object") return item;
+  if (item.text && item.evidence) return `${item.text}（${item.evidence}）`;
+  return item.text || item.summary || item.observation || item.evidence || "";
 }
 
 function safeObject(value) {

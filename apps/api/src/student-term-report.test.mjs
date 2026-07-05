@@ -93,11 +93,21 @@ test("buildTermReportDraft applies midterm and final content templates", () => {
   assert.equal(final.template.id, "term-final-growth-report");
   assert.equal(midterm.template.focusLabel, "接下来两到四周优先处理");
   assert.equal(final.template.focusLabel, "假期或下阶段可以这样配合");
+  assert.equal(midterm.template.reportTitle, "期中阶段综合档案");
+  assert.equal(final.template.reportTitle, "学期综合成长总结");
+  assert.ok(midterm.sections.overview.text.includes("阶段掌握"));
+  assert.ok(final.sections.overview.text.includes("学期成长"));
   assert.deepEqual(midterm.sections.subjectOverview.map((item) => item.subject), ["语文", "数学", "英语"]);
+  assert.ok(midterm.sections.subjectOverview.every((item) => item.observation));
   assert.ok(midterm.sections.focusSubjects.length >= 1);
+  assert.ok(midterm.sections.focusSubjects.length <= 2);
+  assert.ok(midterm.sections.focusSubjects.every((item) => item.evidence && item.abilityObservation && item.priorityAction && item.teacherNextStep));
   assert.ok(midterm.sections.stableGrowth.length >= 1);
+  assert.ok(midterm.sections.stableGrowth.every((item) => item.text && item.evidence));
   assert.ok(final.sections.tutoringFocus.some((item) => item.includes("下阶段") || item.includes("假期")));
   assert.ok(final.sections.parentNextStep.length >= 1);
+  assert.ok(final.sections.parentNextStep.every((item) => item.text));
+  assert.deepEqual(final.sections.parentNextSteps, final.sections.parentNextStep);
 
   const serialized = JSON.stringify({ midterm, final });
   for (const forbidden of ["排名", "预测分", "冲刺", "升学风险", "班级位置"]) {

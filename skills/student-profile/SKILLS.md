@@ -51,6 +51,15 @@
 - `wechatMessage`：教师复制后微信私聊发送给家长的话术。
 - `sentManuallyAt`, `sentByTeacherId`：老师人工发送后的状态记录。
 
+期中/期末 `draft.sections` 使用综合成长报告结构：
+
+- `overview`：阶段综合摘要；期中强调阶段掌握、共性错因和后续两到四周重点，期末强调学期成长、稳定强项和假期或下阶段安排。
+- `subjectOverview`：语文、数学、英语三科总览，每科 1 条观察，证据不足时写继续观察。
+- `focusSubjects`：重点科目展开，最多 1 到 2 个；每项包含 `evidence`, `abilityObservation`, `priorityAction`, `teacherNextStep`。
+- `stableGrowth`：稳定表现，每项包含 `text` 和 `evidence`。
+- `tutoringFocus`：老师下阶段辅导动作。
+- `parentNextSteps`：家长在家可执行动作；`parentNextStep` 仅作为兼容字段保留。
+
 `publishedView` 中每条观察尽量保留：
 
 - `text` 或可读摘要；
