@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   buildProfileEvidencePack,
   buildStudentGrowthSnapshot,
@@ -173,4 +174,15 @@ test("mergeStudentProfileAiDraft only merges safe structured AI fields", () => {
   assert.equal(studentView.modelRunId, undefined);
   assert.equal(studentView.publishedView.overview.provider, undefined);
   assert.equal(studentView.publishedView.focusSubjects[0].modelRunId, undefined);
+});
+
+test("student profile AI prompt requires structured growth archive JSON", () => {
+  const runtime = fs.readFileSync(new URL("../../../packages/ai/src/runtime.js", import.meta.url), "utf8");
+
+  assert.match(runtime, /profileType/);
+  assert.match(runtime, /publishedView/);
+  assert.match(runtime, /teacherReview/);
+  assert.match(runtime, /evidenceRefs/);
+  assert.match(runtime, /confidence/);
+  assert.match(runtime, /不要提及任何模型或供应商/);
 });
