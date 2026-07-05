@@ -2,6 +2,7 @@
 import { createRoot } from "react-dom/client";
 import {
   Activity,
+  ArrowLeft,
   BookOpen,
   Bot,
   CalendarDays,
@@ -1373,8 +1374,7 @@ function StudentWorkspace({
     </section>
     <section className={moduleClass("英语词汇", "panel full")}><PanelTitle badge="AI生成" icon={BookOpen} title="英语词汇助理" /><StudentVocabularyAssistant student={student} /></section>
     <section className={moduleClass("拍照提交", "panel full")}><PanelTitle icon={Upload} title="拍照提交" /><p className="muted-line">学生端用于作业、练习、小测、试卷和听写照片提交。提交后进入教师端复核，不在学生端直接展示批改细节。</p><div className="template-controls"><label>科目<select value={uploadSubject} onChange={(event) => setUploadSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label><label>类型<select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option>作业</option><option>练习</option><option>小测</option><option>试卷</option><option>听写</option></select></label></div><label className="field-label">记录标题<input value={uploadTitle} placeholder="例如：周三数学作业、Unit 2 听写" onChange={(event) => setUploadTitle(event.target.value)} /></label><label className="field-label">拍照或选择图片<input multiple type="file" accept="image/*" capture="environment" onChange={(event) => setUploadFiles(Array.from(event.target.files || []))} /></label><p className="muted-line">当前已选择 {uploadFiles.length} 张，可一次提交多页内容。</p><button className="primary-button" onClick={() => onUploadReview({ studentId: student.id, subject: uploadSubject, kind: uploadKind, title: submitTitle, images: uploadFiles })}><Upload size={17} />提交给老师</button></section>
-    <section className={moduleClass("学生档案", "panel span-6")}><PanelTitle icon={FileText} title="学生档案概览" /><Mastery student={student} /><AssignmentMini assignments={assignments} /></section>
-    <section className={moduleClass("学生档案", "panel full")}><PanelTitle icon={FileText} title="学生档案记录" /><StudentArchive corrections={corrections} logs={logs} reports={reports} student={student} /></section>
+    <section className={moduleClass("学生档案", "panel full")}><PanelTitle icon={FileText} title="学生档案" /><StudentArchive corrections={corrections} logs={logs} reports={reports} student={student} /></section>
   </div>;
 }
 
@@ -2627,10 +2627,6 @@ function heatClass(value: number) {
   return "low";
 }
 
-function AssignmentMini({ assignments }: { assignments: AssignmentCard[] }) {
-  return <div className="record-list">{assignments.slice(0, 4).map((item) => <div className="record-row" key={item.id}><Printer size={17} /><div><strong>{item.title}</strong><span>{item.subject} · {item.kind} · {item.layoutTemplate}</span></div><StatusPill label={item.status} status={statusToProviderStatus(item.status)} /></div>)}</div>;
-}
-
 function buildWeakPointNeeds(student: StudentProfile, corrections: CorrectionRecord[], reports: StudentReportCard[]) {
   const items: Array<{ id: string; subject: SubjectLabel; title: string; detail: string }> = [];
   const seen = new Set<string>();
@@ -2817,8 +2813,102 @@ function Mastery({ student }: { student: StudentProfile }) {
 }
 
 function StudentArchive({ corrections, logs, reports, student }: { corrections: CorrectionRecord[]; logs: LearningLog[]; reports: StudentReportCard[]; student: StudentProfile }) {
+  type ArchiveTabId = "feedback" | "needs" | "timeline";
+  const [activeTab, setActiveTab] = useState<ArchiveTabId | null>(null);
   const weakSubjects = Object.entries(student.mastery).sort((a, b) => a[1] - b[1]).slice(0, 2);
-  return <div className="teacher-flow-grid"><article className="teacher-flow-card ready"><div className="flow-card-top"><span className="flow-index">1</span><FileText size={19} /><StatusDot status="ready" /></div><strong>教师发布反馈</strong><p>周/月/期中/期末总结需教师复核发布后展示。</p>{student.publishedProfileText ? <pre className="published-profile-text">{student.publishedProfileText}</pre> : null}<div className="record-list">{reports.length ? reports.slice(0, 4).map((report) => <div className="record-row" key={report.id}><span className="subject subject-英语">{report.period}</span><div><strong>{report.title}</strong><span>{report.summary}</span></div></div>) : !student.publishedProfileText ? <p className="review-empty">暂无已发布阶段反馈</p> : null}</div></article><article className="teacher-flow-card pending"><div className="flow-card-top"><span className="flow-index">2</span><ListChecks size={19} /><StatusDot status="pending" /></div><strong>实时待巩固内容</strong><p>来自批改、错题和任务记录，家长可实时查看。</p><div className="record-list">{corrections.length ? corrections.slice(0, 5).map((item) => <div className="record-row" key={item.id}><SubjectBadge subject={item.subject} /><div><strong>{item.point || item.knowledgePoint}</strong><span>{item.cause || item.prompt}</span></div><StatusPill label={item.state} status={statusToProviderStatus(item.state)} /></div>) : weakSubjects.map(([subject, value]) => <div className="record-row" key={subject}><SubjectBadge subject={subject as SubjectLabel} /><div><strong>{subject}近期掌握 {value}%</strong><span>建议继续补充批改和任务记录，自动生成具体薄弱点。</span></div></div>)}</div></article><article className="teacher-flow-card ready"><div className="flow-card-top"><span className="flow-index">3</span><Activity size={19} /><StatusDot status="ready" /></div><strong>实时学习时间线</strong><p>记录学生端、课堂平板和教师端写入的学习行为。</p><div className="record-list">{logs.length ? logs.slice(0, 6).map((log) => { const item = formatLearningLog(log); return <div className="record-row" key={log.id}><ClockIcon /><div><strong>{log.time} · {item.title}</strong><span>{item.detail}</span></div></div>; }) : <p className="review-empty">暂无学习日志</p>}</div></article></div>;
+  const latestReport = reports[0];
+  const latestCorrection = corrections[0];
+  const latestLog = logs[0] ? formatLearningLog(logs[0]) : null;
+  const fallbackNeeds = weakSubjects.map(([subject, value]) => ({
+    id: `weak-${subject}`,
+    subject: subject as SubjectLabel,
+    title: `${subject}近期掌握 ${value}%`,
+    detail: "建议继续补充批改和任务记录，自动生成具体薄弱点。",
+    state: "待跟进"
+  }));
+  const needs = corrections.length ? corrections.map((item) => ({
+    id: item.id,
+    subject: item.subject,
+    title: item.point || item.knowledgePoint || "待巩固知识点",
+    detail: item.cause || item.prompt || "等待老师补充具体原因。",
+    state: item.state || "待跟进"
+  })) : fallbackNeeds;
+  const timeline = logs.map((log) => ({ id: log.id, time: log.time, ...formatLearningLog(log) }));
+  const tabs = [
+    {
+      id: "feedback" as const,
+      icon: FileText,
+      label: "教师发布反馈",
+      count: reports.length + (student.publishedProfileText ? 1 : 0),
+      summary: latestReport?.summary || student.publishedProfileText || "老师复核后的周/月/期中/期末反馈会展示在这里。",
+      status: reports.length || student.publishedProfileText ? "已发布" : "待发布"
+    },
+    {
+      id: "needs" as const,
+      icon: ListChecks,
+      label: "待巩固内容",
+      count: needs.length,
+      summary: latestCorrection ? `${latestCorrection.subject}：${latestCorrection.point || latestCorrection.knowledgePoint || latestCorrection.prompt}` : "根据批改、错题和任务记录形成待巩固方向。",
+      status: corrections.length ? "需跟进" : "观察中"
+    },
+    {
+      id: "timeline" as const,
+      icon: Activity,
+      label: "学习时间线",
+      count: timeline.length,
+      summary: latestLog ? `${logs[0].time} · ${latestLog.title}` : "记录学生端、课堂平板和教师端写入的学习行为。",
+      status: timeline.length ? "有记录" : "暂无记录"
+    }
+  ];
+  const active = activeTab ? tabs.find((item) => item.id === activeTab) : null;
+  useEffect(() => {
+    if (!activeTab) return;
+    window.setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 0);
+  }, [activeTab]);
+  if (active) {
+    return <div className="student-archive-detail-page">
+      <button className="secondary-button archive-back-button" onClick={() => setActiveTab(null)} type="button"><ArrowLeft size={17} />返回学生档案</button>
+      <article className="student-archive-detail standalone">
+        <div className="student-archive-detail-head">
+          <div><p className="eyebrow">学生档案详情</p><h3>{active.label}</h3><span>{active.summary}</span></div>
+          <StatusPill label={`${active.count}项`} status={active.count ? "ready" : "pending"} />
+        </div>
+        {activeTab === "feedback" ? <div className="student-archive-detail-list">
+          {student.publishedProfileText ? <pre className="published-profile-text">{student.publishedProfileText}</pre> : null}
+          {reports.length ? reports.map((report) => <div className="archive-detail-row" key={report.id}><span className="subject subject-英语">{report.period}</span><div><strong>{report.title}</strong><p>{report.summary}</p>{report.highlights.length ? <small>亮点：{report.highlights.join("、")}</small> : null}{report.nextActions.length ? <small>建议：{report.nextActions.join("、")}</small> : null}</div></div>) : !student.publishedProfileText ? <p className="review-empty">暂无已发布阶段反馈。老师复核发布后，家长和学生可在这里查看。</p> : null}
+        </div> : null}
+        {activeTab === "needs" ? <div className="student-archive-detail-list">
+          {needs.map((item) => <div className="archive-detail-row" key={item.id}><SubjectBadge subject={item.subject} /><div><strong>{item.title}</strong><p>{item.detail}</p><StatusPill label={item.state} status={statusToProviderStatus(item.state)} /></div></div>)}
+        </div> : null}
+        {activeTab === "timeline" ? <div className="student-archive-detail-list">
+          {timeline.length ? timeline.map((item) => <div className="archive-detail-row" key={item.id}><ClockIcon /><div><strong>{item.time} · {item.title}</strong><p>{item.detail}</p></div></div>) : <p className="review-empty">暂无学习日志。学生端、课堂平板或教师端写入记录后会显示在这里。</p>}
+        </div> : null}
+      </article>
+    </div>;
+  }
+  return <div className="student-archive-hub">
+    <section className="student-archive-hero">
+      <div>
+        <p className="eyebrow">学生档案 · 家长查看</p>
+        <h3>{student.displayName} 的学习档案</h3>
+        <span>只展示老师确认或可追踪的学习过程，不公开排名和分数压力。</span>
+        <div className="student-archive-mastery">{Object.entries(student.mastery).map(([subject, value]) => <span key={subject}><b>{subject}</b><i><em style={{ width: `${value}%` }} /></i><strong>{value}%</strong></span>)}</div>
+      </div>
+      <div className="student-archive-kpis">
+        <Metric label="已发布反馈" value={reports.length + (student.publishedProfileText ? 1 : 0)} suffix="份" tone="green" />
+        <Metric label="待巩固" value={needs.length} suffix="项" tone="amber" />
+        <Metric label="学习记录" value={timeline.length} suffix="条" tone="blue" />
+      </div>
+    </section>
+    <section className="student-archive-entry-grid">
+      {tabs.map((item) => <button className="student-archive-entry" key={item.id} onClick={() => setActiveTab(item.id)} type="button">
+        <div className="student-archive-entry-head"><item.icon size={20} /><StatusPill label={item.status} status={item.id === "needs" && corrections.length ? "pending" : item.count ? "ready" : "pending"} /></div>
+        <strong>{item.label}</strong>
+        <p>{item.summary}</p>
+        <span><Eye size={16} />进入查看</span>
+      </button>)}
+    </section>
+  </div>;
 }
 
 function ClockIcon() {
