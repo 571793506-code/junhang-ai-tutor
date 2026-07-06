@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "node scripts/run-with-env.mjs npm run dev --workspace apps/web",
     "dev:api": "node scripts/run-with-env.mjs npm run dev --workspace apps/api",
+    "dev:web:lan": "scripts\\dev-web-lan.cmd",
+    "dev:api:lan": "scripts\\dev-api-lan.cmd",
     "start:api": "node scripts/run-with-env.mjs npm run start --workspace apps/api",
     "api:autostart:install": "scripts\\install-api-autostart.cmd",
     "api:autostart:start": "scripts\\start-api-autostart.cmd",

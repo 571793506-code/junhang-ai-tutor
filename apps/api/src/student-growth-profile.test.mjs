@@ -249,3 +249,16 @@ test("renderStudentGrowthProfilePrintHtml renders official Chinese template text
   assert.doesNotMatch(html, /debug-model/);
   assert.doesNotMatch(html, /internal prompt/);
 });
+
+test("student profile print workflow is wired through API and teacher UI", () => {
+  const server = fs.readFileSync(new URL("./server.js", import.meta.url), "utf8");
+  const webApi = fs.readFileSync(new URL("../../../apps/web/src/api.ts", import.meta.url), "utf8");
+  const webMain = fs.readFileSync(new URL("../../../apps/web/src/main.tsx", import.meta.url), "utf8");
+
+  assert.match(server, /renderStudentGrowthProfilePrintHtml/);
+  assert.match(server, /\/api\/students\/:studentId\/profile\/print/);
+  assert.match(server, /student-profile-print-/);
+  assert.match(webApi, /generateStudentProfilePrint/);
+  assert.match(webMain, /生成打印版/);
+  assert.match(webMain, /profilePrintAsset/);
+});

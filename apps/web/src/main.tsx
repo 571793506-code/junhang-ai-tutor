@@ -45,6 +45,7 @@ import {
   draftTeacherTask,
   exportAssessmentDraft,
   exportAssessmentPrint,
+  generateStudentProfilePrint,
   generateStudentTermReportPdf,
   getAdminAudit,
   getApiStatus,
@@ -965,6 +966,18 @@ function App() {
     }
   }
 
+  async function generateStudentProfilePrintFile(studentId: string, snapshot: Record<string, unknown>, text?: string) {
+    try {
+      const response = await generateStudentProfilePrint(studentId, { snapshot, text });
+      setPrintAssets((items) => [response.asset, ...items.filter((item) => item.id !== response.asset.id)]);
+      setSync({ busy: false, ok: true, message: response.asset.url.endsWith(".pdf") ? "成长档案打印版已生成，可下载后人工发送" : "成长档案HTML打印版已生成，PDF运行时不可用时可先下载HTML" });
+      return response.asset;
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `成长档案打印版生成失败：${error instanceof Error ? error.message : String(error)}` });
+      return null;
+    }
+  }
+
   async function createStudentTermReportDraft(studentId: string, reportType: TermReportType, periodLabel: string) {
     try {
       const response = await draftStudentTermReport(studentId, { reportType, periodLabel });
@@ -1089,7 +1102,7 @@ function App() {
       </aside>
       <main className="main">
         <header className="topbar"><div><p className="eyebrow">{roleLabel(role)}</p><h1>{role === "teacher" ? `教师端 · ${currentModule}` : role === "student" ? `学生端 · ${currentModule}` : `课堂平板 · ${currentModule}`}</h1></div><ApiSyncStatus state={syncForRole(sync, role)} /></header>
-        {role === "teacher" ? <TeacherWorkspace activeModule={currentModule} ai={ai} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentReject={rejectAssessmentDraft} onContentIndexRebuild={rebuildTeachingContentIndex} onContentUpload={uploadTeachingContent} onExportPrint={exportLatestPrint} onKnowledgeRefresh={refreshKnowledgeLibrary} onKnowledgeReview={reviewKnowledgeLibrarySource} onKnowledgeSourceCreate={addKnowledgeSource} onKnowledgeSync={syncKnowledgeLibrary} onMarkReviewed={markReviewed} onOpenModule={(module) => setActiveModule((value) => ({ ...value, teacher: module }))} onOpenTextbook={openTextbookAsset} onProfileDraft={createStudentProfileDraft} onProfilePublish={publishStudentProfileDraft} onRecognize={recognizeSubmission} onRefreshOps={refreshReviewQueue} onRefreshTextbooks={refreshTextbookLibrary} onRescanTextbooks={rescanTextbookLibrary} onResetCode={resetStudentCode} onSaveTextbookChapters={saveTextbookChapters} onSelectTextbookContext={setSelectedTextbookContext} onStudentAccess={updateStudentAccess} onStudentCreate={async (input) => {
+        {role === "teacher" ? <TeacherWorkspace activeModule={currentModule} ai={ai} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentReject={rejectAssessmentDraft} onContentIndexRebuild={rebuildTeachingContentIndex} onContentUpload={uploadTeachingContent} onExportPrint={exportLatestPrint} onKnowledgeRefresh={refreshKnowledgeLibrary} onKnowledgeReview={reviewKnowledgeLibrarySource} onKnowledgeSourceCreate={addKnowledgeSource} onKnowledgeSync={syncKnowledgeLibrary} onMarkReviewed={markReviewed} onOpenModule={(module) => setActiveModule((value) => ({ ...value, teacher: module }))} onOpenTextbook={openTextbookAsset} onProfileDraft={createStudentProfileDraft} onProfilePrint={generateStudentProfilePrintFile} onProfilePublish={publishStudentProfileDraft} onRecognize={recognizeSubmission} onRefreshOps={refreshReviewQueue} onRefreshTextbooks={refreshTextbookLibrary} onRescanTextbooks={rescanTextbookLibrary} onResetCode={resetStudentCode} onSaveTextbookChapters={saveTextbookChapters} onSelectTextbookContext={setSelectedTextbookContext} onStudentAccess={updateStudentAccess} onStudentCreate={async (input) => {
           const name = input.displayName.trim();
           if (!name || !input.guardianPhone.trim()) {
             setSync({ busy: false, ok: false, message: "请至少填写学生姓名和家长电话" });
@@ -1173,6 +1186,7 @@ function TeacherWorkspace({
   onOpenModule,
   onOpenTextbook,
   onProfileDraft,
+  onProfilePrint,
   onProfilePublish,
   onRecognize,
   onRefreshOps,
@@ -1228,6 +1242,7 @@ function TeacherWorkspace({
   onOpenModule: (module: string) => void;
   onOpenTextbook: (assetId: string) => void;
   onProfileDraft: (studentId?: string, periodType?: ProfilePeriodType) => Promise<ProfileDraft | null>;
+  onProfilePrint: (studentId: string, snapshot: Record<string, unknown>, text?: string) => Promise<PrintAssetLink | null>;
   onProfilePublish: (input: { studentId: string; text: string }) => Promise<void>;
   onRecognize: (submissionId: string) => void;
   onRefreshOps: () => void;
@@ -1286,6 +1301,7 @@ function TeacherWorkspace({
   const [taskEvidenceFiles, setTaskEvidenceFiles] = useState<File[]>([]);
   const [taskEvidenceTitle, setTaskEvidenceTitle] = useState("");
   const [profileDraftText, setProfileDraftText] = useState("");
+  const [profilePrintAsset, setProfilePrintAsset] = useState<PrintAssetLink | null>(null);
   const [profilePeriodType, setProfilePeriodType] = useState<ProfilePeriodType>("weekly");
   const [termReportType, setTermReportType] = useState<TermReportType>("midterm");
   const [termReportPeriodLabel, setTermReportPeriodLabel] = useState("2026春季期中");
@@ -1341,6 +1357,7 @@ function TeacherWorkspace({
 
   useEffect(() => {
     if (profileDraft?.studentId === selectedStudentId) setProfileDraftText(profileDraft.text);
+    else setProfilePrintAsset(null);
   }, [profileDraft, selectedStudentId]);
 
   useEffect(() => {
@@ -1686,6 +1703,12 @@ function TeacherWorkspace({
             <label className="field-label">档案反馈正文<textarea className="wide-textarea profile-draft-textarea" value={profileDraftText} onChange={(event) => setProfileDraftText(event.target.value)} /></label>
             <div className="button-row">
               <button className="primary-button" onClick={() => selectedStudent && onProfilePublish({ studentId: selectedStudent.id, text: profileDraftText })}><ShieldCheck size={17} />确认发布至学生端</button>
+              <button className="secondary-button" onClick={async () => {
+                if (!selectedStudent) return;
+                const asset = await onProfilePrint(selectedStudent.id, profileDraft.snapshot, profileDraftText);
+                if (asset) setProfilePrintAsset(asset);
+              }} type="button"><Printer size={17} />生成打印版</button>
+              {profilePrintAsset ? <a className="draft-pdf-link" href={profilePrintAsset.url} target="_blank" rel="noreferrer"><FileText size={17} />下载打印版</a> : null}
               <button className="secondary-button" onClick={() => setProfileDraftText(profileDraft.text)}><RotateCcw size={17} />恢复草稿原文</button>
             </div>
           </div> : <p className="review-empty">请先选择学生并生成周/月档案草稿，预览确认后再发布。</p>}

@@ -1,0 +1,8 @@
+Use case: ui-mockup
+Asset type: teacher-side PDF template visual reference
+Primary request: Create a clean A4 portrait Chinese student growth archive template mockup for weekly comprehensive report.
+Style/medium: polished education SaaS printable report mockup, light paper background, precise grid, soft teal accents, professional and restrained.
+Composition/framing: full A4 portrait page shown flat, with clear sections and placeholder lines, not a phone screen, not a web page.
+Text (verbatim, use only these short Chinese labels, no long body text): "周综合成长档案" "档案信息" "本周综合成长摘要" "三科总览" "本周重点方向" "错题与订正闭环" "稳定表现" "下周辅导重点" "家长下一步" "教师确认打印版".
+Layout: header title at top, small metadata strip, one summary block, three subject mini cards, one highlighted focus block, correction loop block, two bottom columns for tutoring focus and parent next step, footer note as a short label.
+Constraints: Do not generate paragraphs of Chinese body text. Use placeholder grey lines for body content. Avoid ranking, scores, predicted grades, exam battle language, supplier/model/prompt/debug text. No watermark, no logo.

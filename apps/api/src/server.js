@@ -46,7 +46,8 @@ import { createSessionToken, readBearerToken, requireSession, verifySessionToken
 import {
   buildStudentGrowthSnapshot,
   filterStudentProfileSnapshot,
-  mergeStudentProfileAiDraft
+  mergeStudentProfileAiDraft,
+  renderStudentGrowthProfilePrintHtml
 } from "./student-growth-profile.js";
 import {
   buildTermReportDraft,
@@ -60,6 +61,7 @@ import { publicGeneratedUrl, publicUploadUrl, storageGeneratedRoot, storageUploa
 const config = loadRuntimeConfig();
 const app = express();
 const port = Number(config.API_PORT || 8787);
+const host = String(config.API_HOST || "127.0.0.1");
 const execFileAsync = promisify(execFile);
 const workspaceRoot = findWorkspaceRoot();
 
@@ -77,6 +79,25 @@ app.use(express.urlencoded({ extended: true, limit: "8mb" }));
 app.use(createEncodingGuardMiddleware({ enabled: config.ENCODING_GUARD_ENABLED !== "false" }));
 app.use("/uploads", express.static(storageUploadRoot()));
 app.use("/generated", express.static(storageGeneratedRoot()));
+
+app.get("/", (req, res) => {
+  const requestHost = String(req.headers.host || `127.0.0.1:${port}`);
+  const webHost = requestHost.includes(":") ? requestHost.replace(/:\d+$/, ":5173") : `${requestHost}:5173`;
+  const webUrl = `http://${webHost}/`;
+  res.type("html").send(`<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>君航 AI 助教 API</title>
+  </head>
+  <body>
+    <h1>这里是君航 AI 助教 API 服务</h1>
+    <p>请打开 Web 地址：<a href="${webUrl}">${webUrl}</a></p>
+    <p>如果你是在 iPad 或手机上查看页面，请使用 5173 端口，不要使用 8787 端口。</p>
+  </body>
+</html>`);
+});
 
 function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
@@ -4320,6 +4341,77 @@ app.post("/api/students/:studentId/profile/publish", requireDatabase, requireSes
   });
 }));
 
+app.post("/api/students/:studentId/profile/print", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  if (!(await assertTeacherStudentScope(req, res, req.params.studentId))) return;
+  const body = getBody(req);
+  const student = await loadStudentProfileSources(req.params.studentId);
+  if (!student) {
+    return res.status(404).json({ ok: false, error: "STUDENT_NOT_FOUND", message: "未找到学生档案。" });
+  }
+
+  const incomingSnapshot = safeJson(body.snapshot, null);
+  const periodType = normalizeProfilePeriodType(incomingSnapshot?.period?.type || incomingSnapshot?.publishedView?.periodType || body.periodType, "weekly");
+  const fallbackSnapshot = buildStudentGrowthSnapshot(student, { periodType });
+  const structuredSnapshot = incomingSnapshot
+    ? mergeStudentProfileAiDraft(fallbackSnapshot, incomingSnapshot)
+    : fallbackSnapshot;
+  const teacherEditedText = typeof body.text === "string" ? body.text.trim() : "";
+  const snapshot = {
+    ...structuredSnapshot,
+    ...(teacherEditedText ? { publishedText: teacherEditedText } : {}),
+    narrative: {
+      ...safeJson(structuredSnapshot.narrative, {}),
+      ...(teacherEditedText ? { teacherEditedText } : {})
+    }
+  };
+
+  const html = renderStudentGrowthProfilePrintHtml(student, snapshot);
+  fs.mkdirSync(storageGeneratedRoot(), { recursive: true });
+  const timestamp = Date.now();
+  const htmlFileName = `${student.id}-profile-${periodType}-${timestamp}.html`;
+  const pdfFileName = `${student.id}-profile-${periodType}-${timestamp}.pdf`;
+  const htmlPath = path.join(storageGeneratedRoot(), htmlFileName);
+  const pdfPath = path.join(storageGeneratedRoot(), pdfFileName);
+  fs.writeFileSync(htmlPath, normalizeGeneratedHtml(html), "utf8");
+  const pdfResult = await renderPdfFromHtml(htmlPath, pdfPath).catch((error) => ({
+    ok: false,
+    reason: error instanceof Error ? error.message : String(error)
+  }));
+  const outputFileName = pdfResult.ok ? pdfFileName : htmlFileName;
+  const asset = await prisma.generatedAsset.create({
+    data: {
+      kind: `student-profile-print-${pdfResult.ok ? "pdf" : "html"}`,
+      title: `${student.displayName} ${snapshot.printView?.title || "综合成长档案"} - 打印版`,
+      path: path.join(storageGeneratedRoot(), outputFileName),
+      url: publicGeneratedUrl(outputFileName, req),
+      metadata: {
+        studentId: student.id,
+        profileType: snapshot.profileType || null,
+        periodType,
+        periodLabel: snapshot.period?.label || null,
+        templateType: snapshot.printView?.templateType || "comprehensive_growth_archive",
+        htmlUrl: publicGeneratedUrl(htmlFileName, req),
+        pdfGenerated: pdfResult.ok,
+        pdfReason: pdfResult.ok ? null : pdfResult.reason,
+        visibility: "teacher_profile_print"
+      }
+    }
+  });
+
+  await auditEvent(req, {
+    studentId: student.id,
+    feature: "student-profile",
+    action: "profile-print",
+    metadata: { studentId: student.id, assetId: asset.id, periodType, pdfGenerated: pdfResult.ok }
+  });
+
+  res.json({
+    ok: true,
+    snapshot: filterStudentProfileSnapshot(snapshot, "teacher"),
+    asset
+  });
+}));
+
 app.post("/api/students/:studentId/profile/aggregate", requireDatabase, requireSession(config, ["student", "teacher"]), asyncRoute(async (req, res) => {
   const scopeError = assertStudentOwnsRequest(req, req.params.studentId);
   if (scopeError) return res.status(403).json(scopeError);
@@ -5135,7 +5227,7 @@ if (process.argv.includes("--check")) {
   );
   await prisma.$disconnect();
 } else {
-  app.listen(port, "127.0.0.1", () => {
-    console.log(`Junhang API listening at http://127.0.0.1:${port}`);
+  app.listen(port, host, () => {
+    console.log(`Junhang API listening at http://${host}:${port}`);
   });
 }

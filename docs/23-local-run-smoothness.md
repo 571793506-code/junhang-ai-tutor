@@ -173,6 +173,38 @@ C:\Users\86188\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\Jun
 - 真机和平板如果不在同一台电脑上，不能使用 `127.0.0.1`，需要改成这台电脑的局域网 IP；
 - 正式上线后仍应迁移到 `https://api.域名.com` 的云端 API。
 
+## iPad / 手机局域网展示
+
+Web 端默认仍只给本机联调使用：
+
+```powershell
+cmd /c npm.cmd run dev
+cmd /c npm.cmd run dev:api
+```
+
+需要让同一 Wi-Fi 下的 iPad、手机或其他电脑访问 Web 原型时，使用局域网展示入口。开两个终端：
+
+```powershell
+cmd /c npm.cmd run dev:api:lan
+cmd /c npm.cmd run dev:web:lan
+```
+
+`dev:api:lan` 会让 API 监听 `0.0.0.0:8787`。`dev:web:lan` 会自动读取当前电脑的局域网 IP，并把前端请求地址设置为 `http://<电脑局域网IP>:8787`，同时让 Vite 监听 `0.0.0.0:5173`。
+
+脚本启动后会输出类似地址：
+
+```text
+Web URL: http://192.168.3.152:5173/
+API URL: http://192.168.3.152:8787
+```
+
+iPad 或手机需要和电脑在同一个 Wi-Fi 下，然后在浏览器打开 `Web URL`。如果无法访问，优先检查：
+
+- Windows 防火墙是否放行 Node.js 或端口 `5173`、`8787`；
+- 设备是否和电脑在同一网段；
+- 电脑 IP 是否变化，可重新运行 `dev:web:lan` 查看最新地址；
+- 不要在移动设备上访问 `127.0.0.1`，那会指向移动设备自身。
+
 ## 一键检查
 
 API 正在运行时执行：

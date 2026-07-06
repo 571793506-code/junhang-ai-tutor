@@ -48,6 +48,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 | 批改工作台 | `GET /api/grading/workbench`、`GET /api/grading/workbench/:submissionId`、`PATCH /api/grading/workbench/:submissionId/questions/:questionId` | 教师 Web/小程序读取同一套页面、逐题、标注、置信度和复核状态，并可逐题修正 | 只给教师端使用；学生/家长端不展示未确认逐题批改；逐题修正后仍需教师确认归档 | `check --workspace apps/api`、`typecheck --workspace apps/web` |
 | 批改复核归档 | `POST /api/review/submissions/:submissionId/mark-reviewed`、`POST /api/grading/workbench/:submissionId/archive` | 教师 Web/小程序确认分数、备注后归档 | 低置信、需教师复核或仅有 provisionalScore 的结果，必须提交教师确认分数；否则不入档、不创建错题记录 | `check --workspace apps/api`、`typecheck --workspace apps/web`、`check:miniprogram-js` |
 | 学生长期成长档案 | `POST /api/students/:studentId/profile/draft`、`POST /api/students/:studentId/profile/publish`、`POST /api/students/:studentId/profile/aggregate`、`GET /api/students/:studentId/profile` | 教师端生成周档案或月度综合档案草稿；学生/家长端只读取教师发布后的结构化摘要；Web 仅作联调原型，小程序复用同一契约 | 教师可见 `teacherReview` 和 `profileEvidencePack`；学生/家长不可见证据包、复核提示、供应商、模型、prompt、debug 或未复核来源 | `check --workspace apps/api`、`typecheck --workspace apps/web`、`check:encoding` |
+| 周/月档案打印版 | `POST /api/students/:studentId/profile/print` | 教师端基于周/月综合档案草稿生成打印版 HTML，并优先渲染 PDF；用于当前小程序未正式使用时人工发送给家长 | 仅教师端保存和下载；资产 `metadata.visibility=teacher_profile_print`；正式正文来自 HTML/PDF 模板，不来自 image 2 图片文字 | `node --test apps/api/src/student-growth-profile.test.mjs`、`check --workspace apps/api`、`typecheck --workspace apps/web`、`check:encoding` |
 | 期中/期末阶段报告 PDF | `POST /api/students/:studentId/term-report/draft`、`POST /api/students/:studentId/term-report/:reportId/pdf`、`POST /api/students/:studentId/term-report/:reportId/mark-sent`、`GET /api/students/:studentId/term-reports` | 教师端生成报告草稿、编辑正文、保存 PDF 或 HTML 资产，下载后通过微信私聊人工发送给家长；不接入微信自动外发 | 教师可见 PDF 链接、微信话术和草稿；学生/家长端不显示报告正文、PDF 链接或草稿，只有老师标记已人工发送后显示“老师已发送阶段报告给家长” | `node --test apps/api/src/student-term-report.test.mjs`、`check --workspace apps/api`、`typecheck --workspace apps/web`、`check:encoding` |
 | 资料索引摘要 | `GET /api/content/index` | 教师 Web/小程序查看资料上下文状态 | 只展示摘要、资料数、科目、知识点，不返回完整 Markdown chunk | `check:content-context`、`check:teaching-content` |
 | 资料上传转 Markdown | `POST /api/content/markdown-ingestion` | 教师端上传普通教学资料 | 仅教师端可用；拒绝 `.edupdf`；上传路径限制在工作区内 | `check:content-upload-ui`、`check:teaching-content` |
@@ -93,6 +94,14 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 请求字段：`text` 为教师最终确认正文，`snapshot` 可传入结构化草稿。
   - API 会把教师正文写入 `publishedText`，并保留结构化 `publishedView` 供学生端展示。
   - 发布仍必须经过教师确认；前端不得自动把 draft 直接发布给学生或家长。
+
+- `POST /api/students/:studentId/profile/print`
+  - 教师端基于周/月综合成长档案草稿生成打印版资产。
+  - 请求字段：`snapshot` 为教师当前审查的结构化草稿；`text` 为教师编辑后的公开正文；`periodType` 可作为无草稿时的兜底周期。
+  - API 使用 `renderStudentGrowthProfilePrintHtml` 生成 HTML，并优先渲染 PDF。
+  - 返回 `asset` 和教师可见 `snapshot`；`asset.kind` 为 `student-profile-print-pdf` 或 `student-profile-print-html`。
+  - `asset.metadata.visibility=teacher_profile_print`，`metadata.templateType=comprehensive_growth_archive`，`metadata.htmlUrl` 保留同内容 HTML 资产。
+  - 该接口不自动发布到学生端，也不自动发送微信；老师下载后人工发送或打印。
 
 - `POST /api/students/:studentId/profile/aggregate`
   - 兼容型聚合接口，默认按 `periodType=monthly` 生成月度综合档案。

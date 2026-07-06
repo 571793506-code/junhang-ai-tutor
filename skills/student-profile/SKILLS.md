@@ -23,8 +23,10 @@
 ## 当前项目可参考位置
 
 - `apps/api/src/student-growth-profile.js`：`profileEvidencePack`、周/月 `publishedView`、`teacherReview` 和角色过滤。
+- `apps/api/src/student-growth-profile.js`：周/月 `printView` 和 `renderStudentGrowthProfilePrintHtml`，用于综合成长档案打印版。
 - `apps/api/src/student-term-report.js`：期中/期末阶段报告草稿、教师专用 PDF HTML 渲染和角色过滤。
 - `apps/api/src/server.js`：`/api/students/:studentId/profile/draft`、`/publish`、`/aggregate` 和 `/profile`。
+- `apps/api/src/server.js`：`/api/students/:studentId/profile/print`，教师端保存周/月综合成长档案打印版 HTML/PDF。
 - `apps/api/src/server.js`：`/api/students/:studentId/term-report/draft`、`/pdf`、`/mark-sent` 和 `/term-reports`。
 - `packages/ai/src/runtime.js`：学生档案草稿 JSON 输出字段。
 - `apps/web/src/main.tsx`：教师端草稿编辑和发布交互，仅作为原型参考。
@@ -124,6 +126,8 @@ AI 输出必须是严格 JSON 草稿。可以额外生成教师可编辑的纯�
 
 image 2 模板候选图只用于教师端 UI 视觉讨论，提示词应只包含模块标题、短标签和占位短句；正式报告长正文必须由结构化草稿和 HTML/PDF 模板渲染。
 
+周/月综合成长档案 image 2 候选图保存在 `skills/student-profile/templates/growth-archive-image2/`。这些图只作为视觉层级参考，不作为正式打印正文来源；如图片中文字出现错字、缺字或模块名偏差，以 `printView` 和 HTML/PDF 模板为准。
+
 ## 禁止项
 
 - 不自动发布到学生或家长。
@@ -139,6 +143,7 @@ image 2 模板候选图只用于教师端 UI 视觉讨论，提示词应只包�
 
 - 修改档案 API 时运行 `cmd /c npm.cmd run check --workspace apps/api`。
 - 修改阶段报告 API 时运行 `node --test apps/api/src/student-term-report.test.mjs`。
+- 修改周/月档案打印版 API 时运行 `node --test apps/api/src/student-growth-profile.test.mjs`。
 - 修改 Web 档案展示时运行 `cmd /c npm.cmd run typecheck --workspace apps/web`。
 - 修改档案中文文案或提示词时运行 `cmd /c npm.cmd run check:encoding`。
 - 涉及批改归档来源时确认 `needsTeacherReview`、`archiveEligible` 和教师确认分数逻辑未被绕过。

@@ -270,6 +270,19 @@ export async function publishStudentProfile(studentId: string, snapshot: Record<
   }>(response);
 }
 
+export async function generateStudentProfilePrint(studentId: string, input: { snapshot: Record<string, unknown>; text?: string }) {
+  const response = await fetch(`${API_BASE_URL}/api/students/${studentId}/profile/print`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(input)
+  });
+  return readJson<{
+    ok: boolean;
+    snapshot: Record<string, unknown>;
+    asset: { id: string; url: string; title: string };
+  }>(response);
+}
+
 export type TermReportType = "midterm" | "final";
 
 export async function draftStudentTermReport(studentId: string, input: { reportType: TermReportType; periodLabel?: string }) {
