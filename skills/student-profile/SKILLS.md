@@ -11,7 +11,9 @@
 ## 核心原则
 
 - 学生档案草稿只给教师编辑和复核，教师确认前不对学生或家长发布。
-- 当前核心展示方向是周档案和月度综合长期成长档案；周/月内容经教师复核后发布到学生端，期中/期末只在教师端生成 PDF 并由老师微信私聊人工发送给家长。
+- 当前核心展示方向是周档案和月度综合长期成长档案；所有学生成长档案只使用综合模板，不做飞书项目里的单科模板 + 综合模板双路径。
+- 周/月内容经教师复核后可发布到学生端，也必须支持教师端打印版或 PDF 生成，便于当前小程序未正式使用时由老师人工发送给家长。
+- 期中/期末只在教师端生成 PDF 并由老师微信私聊人工发送给家长。
 - 档案必须保留来源意识：任务、批改、问答、课堂记录、老师备注要能区分。
 - 低置信 OCR、未确认分数、未复核错题和 provisional 结果不能写入最终档案。
 - 家长可见内容要温和、具体、可行动，避免内部术语和模型信息。
@@ -37,6 +39,8 @@
 - `profileType`：`weekly_growth` 或 `monthly_comprehensive_growth`。
 - `period`：周期类型、展示标签、开始日期和结束日期。
 - `publishedView`：学生/家长可见摘要，包含 `overview`、`subjectOverview`、`focusSubjects`、`correctionLoop`、`stableGrowth`、`tutoringFocus`、`parentNextSteps`、`timelinePreview`。
+- `printView`：周/月综合成长档案打印模板，`templateType` 固定为 `comprehensive_growth_archive`，包含 `archiveInfo`、`comprehensiveSummary`、`subjectOverview`、`focusDirections`、`correctionLoop`、`stableGrowth`、`tutoringPlan`、`parentNextSteps`；月度综合档案额外包含 `evidenceCoverage`、`subjectAbilityMap`、`commonCauseAnalysis`、`learningProcess`、`homeSchoolCollaboration`、`parentCommunicationSummary`。
+- `printView.renderingPolicy.pdfTextSource` 固定为 `html_template`，`imagePreviewUsage` 固定为 `visual_reference_only`；正式打印或 PDF 正文必须由 HTML/PDF 模板渲染。
 - `teacherReview`：教师复核材料，包含样本不足说明、待确认来源、内部风险和发布清单。
 - `profileEvidencePack`：证据包，包含任务、已复核批改、错题、问答、课堂互动、阶段报告、行为记录和 `blockedEvidence`。
 
@@ -123,6 +127,7 @@ image 2 模板候选图只用于教师端 UI 视觉讨论，提示词应只包�
 ## 禁止项
 
 - 不自动发布到学生或家长。
+- 不做单科独立档案模板；语文、数学、英语只能作为综合档案内部板块出现。
 - 不把低置信批改结果、未确认分数或 AI 临时判断直接入档。
 - 不迁移完整小程序档案页面作为首期目标。
 - 不把学生隐私、家长电话、登录码或内部审计日志暴露到群聊。

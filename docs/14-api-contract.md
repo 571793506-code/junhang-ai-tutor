@@ -84,6 +84,8 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 请求字段：`periodType`，可选值为 `weekly` 或 `monthly`；默认 `weekly`。
   - 周档案对应 `profileType=weekly_growth`，月度综合档案对应 `profileType=monthly_comprehensive_growth`。
   - 返回教师可见结构：`period`, `publishedView`, `teacherReview`, `profileEvidencePack`, `sourceCounts`, `timeline`, `narrative`。
+  - 周/月档案统一使用综合成长档案模板，不提供单科独立模板入口。
+  - 返回 `printView` 打印模板结构，用于教师端审查后打印、保存或后续生成 PDF。`printView.templateType=comprehensive_growth_archive`，`printView.renderingPolicy.pdfTextSource=html_template`，`printView.renderingPolicy.imagePreviewUsage=visual_reference_only`。
   - `profileEvidencePack` 由任务、已复核批改、错题、阶段报告、课堂行为、AI 问答和语音互动组成；低置信、未复核、`provisionalScore` 或 `archiveEligible=false` 来源进入 `blockedEvidence`，不能进入学生/家长端发布视图。
 
 - `POST /api/students/:studentId/profile/publish`
@@ -146,6 +148,27 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
     "tutoringFocus": [],
     "parentNextSteps": [],
     "timelinePreview": []
+  },
+  "printView": {
+    "templateType": "comprehensive_growth_archive",
+    "periodType": "weekly",
+    "periodLabel": "2026-06-29 至 2026-07-05",
+    "title": "周综合成长档案",
+    "pageHint": "1-2页",
+    "renderingPolicy": {
+      "pdfTextSource": "html_template",
+      "imagePreviewUsage": "visual_reference_only",
+      "requiresTeacherReview": true
+    },
+    "sections": {
+      "comprehensiveSummary": { "text": "本周综合成长摘要", "evidenceRefs": ["task_1"], "confidence": "supported" },
+      "subjectOverview": [],
+      "focusDirections": [],
+      "correctionLoop": [],
+      "stableGrowth": [],
+      "tutoringPlan": [],
+      "parentNextSteps": []
+    }
   },
   "teacherReview": {
     "evidenceItems": [],

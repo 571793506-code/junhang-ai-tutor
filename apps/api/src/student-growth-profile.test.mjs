@@ -5,7 +5,8 @@ import {
   buildProfileEvidencePack,
   buildStudentGrowthSnapshot,
   filterStudentProfileSnapshot,
-  mergeStudentProfileAiDraft
+  mergeStudentProfileAiDraft,
+  renderStudentGrowthProfilePrintHtml
 } from "./student-growth-profile.js";
 
 const now = new Date("2026-07-05T12:00:00.000Z");
@@ -185,4 +186,66 @@ test("student profile AI prompt requires structured growth archive JSON", () => 
   assert.match(runtime, /evidenceRefs/);
   assert.match(runtime, /confidence/);
   assert.match(runtime, /不要提及任何模型或供应商/);
+});
+
+test("weekly snapshot includes comprehensive-only print template", () => {
+  const snapshot = buildStudentGrowthSnapshot(studentFixture(), { periodType: "weekly", now });
+
+  assert.equal(snapshot.printView.templateType, "comprehensive_growth_archive");
+  assert.equal(snapshot.printView.title, "周综合成长档案");
+  assert.equal(snapshot.printView.periodType, "weekly");
+  assert.equal(snapshot.printView.renderingPolicy.pdfTextSource, "html_template");
+  assert.equal(snapshot.printView.renderingPolicy.imagePreviewUsage, "visual_reference_only");
+  assert.equal(snapshot.printView.singleSubjectTemplate, undefined);
+  assert.ok(snapshot.printView.sections.comprehensiveSummary.text.includes("本周"));
+  assert.ok(snapshot.printView.sections.subjectOverview.length === 3);
+  assert.ok(snapshot.printView.sections.focusDirections.length <= 1);
+});
+
+test("monthly snapshot deepens comprehensive print sections", () => {
+  const snapshot = buildStudentGrowthSnapshot(studentFixture(), { periodType: "monthly", now });
+  const sections = snapshot.printView.sections;
+
+  assert.equal(snapshot.printView.templateType, "comprehensive_growth_archive");
+  assert.equal(snapshot.printView.title, "月度综合成长档案");
+  assert.equal(snapshot.printView.periodType, "monthly");
+  assert.ok(Array.isArray(sections.evidenceCoverage));
+  assert.ok(Array.isArray(sections.subjectAbilityMap));
+  assert.ok(Array.isArray(sections.commonCauseAnalysis));
+  assert.ok(Array.isArray(sections.learningProcess));
+  assert.ok(Array.isArray(sections.homeSchoolCollaboration));
+  assert.ok(sections.parentCommunicationSummary.text.includes("家长"));
+});
+
+test("student print view keeps public template and hides teacher-only evidence", () => {
+  const snapshot = buildStudentGrowthSnapshot(studentFixture(), { periodType: "monthly", now });
+  const studentView = filterStudentProfileSnapshot(snapshot, "student");
+
+  assert.ok(studentView.printView);
+  assert.equal(studentView.printView.templateType, "comprehensive_growth_archive");
+  assert.equal(studentView.teacherReview, undefined);
+  assert.equal(studentView.profileEvidencePack, undefined);
+  assert.equal(studentView.printView.teacherReviewChecklist, undefined);
+  assert.equal(studentView.printView.profileEvidencePack, undefined);
+});
+
+test("renderStudentGrowthProfilePrintHtml renders official Chinese template text", () => {
+  const student = studentFixture();
+  const snapshot = buildStudentGrowthSnapshot(student, { periodType: "monthly", now });
+  const html = renderStudentGrowthProfilePrintHtml(student, {
+    ...snapshot,
+    provider: "DeepSeek",
+    model: "debug-model",
+    prompt: "internal prompt"
+  });
+
+  assert.match(html, /<!doctype html>/);
+  assert.match(html, /月度综合成长档案/);
+  assert.match(html, /综合成长摘要/);
+  assert.match(html, /证据覆盖摘要/);
+  assert.match(html, /三科总览/);
+  assert.match(html, /家校协同建议/);
+  assert.doesNotMatch(html, /DeepSeek/);
+  assert.doesNotMatch(html, /debug-model/);
+  assert.doesNotMatch(html, /internal prompt/);
 });
