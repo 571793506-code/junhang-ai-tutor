@@ -64,6 +64,7 @@ import {
   listTextbooks,
   openTextbook,
   markStudentTermReportSent,
+  patchGradingWorkbenchQuestion,
   publishClassroomBroadcast,
   publishDictation,
   publishReading,
@@ -786,11 +787,21 @@ function App() {
     }
   }
 
+  async function reviewQuestion(submissionId: string, questionId: string, input: Record<string, unknown>) {
+    try {
+      const response = await patchGradingWorkbenchQuestion(submissionId, questionId, input);
+      setGradingWorkbenches((items) => items.map((item) => (item.submissionId === submissionId ? response.workbench : item)));
+      setSync({ busy: false, ok: true, message: "已确认当前题，系统将按逐题得分汇总总分" });
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `题目复核失败：${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
   async function markReviewed(submissionId: string, input: Record<string, unknown> = {}) {
     try {
       await archiveGradingWorkbench(submissionId, input);
       await refreshTeacherOps();
-      setSync({ busy: false, ok: true, message: "已标记为复核完成并写入记录" });
+      setSync({ busy: false, ok: true, message: "逐题复核完成，已归档批改结果和错题记录" });
     } catch (error) {
       setSync({ busy: false, ok: false, message: `复核失败：${error instanceof Error ? error.message : String(error)}` });
     }
@@ -1102,7 +1113,7 @@ function App() {
       </aside>
       <main className="main">
         <header className="topbar"><div><p className="eyebrow">{roleLabel(role)}</p><h1>{role === "teacher" ? `教师端 · ${currentModule}` : role === "student" ? `学生端 · ${currentModule}` : `课堂平板 · ${currentModule}`}</h1></div><ApiSyncStatus state={syncForRole(sync, role)} /></header>
-        {role === "teacher" ? <TeacherWorkspace activeModule={currentModule} ai={ai} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentReject={rejectAssessmentDraft} onContentIndexRebuild={rebuildTeachingContentIndex} onContentUpload={uploadTeachingContent} onExportPrint={exportLatestPrint} onKnowledgeRefresh={refreshKnowledgeLibrary} onKnowledgeReview={reviewKnowledgeLibrarySource} onKnowledgeSourceCreate={addKnowledgeSource} onKnowledgeSync={syncKnowledgeLibrary} onMarkReviewed={markReviewed} onOpenModule={(module) => setActiveModule((value) => ({ ...value, teacher: module }))} onOpenTextbook={openTextbookAsset} onProfileDraft={createStudentProfileDraft} onProfilePrint={generateStudentProfilePrintFile} onProfilePublish={publishStudentProfileDraft} onRecognize={recognizeSubmission} onRefreshOps={refreshReviewQueue} onRefreshTextbooks={refreshTextbookLibrary} onRescanTextbooks={rescanTextbookLibrary} onResetCode={resetStudentCode} onSaveTextbookChapters={saveTextbookChapters} onSelectTextbookContext={setSelectedTextbookContext} onStudentAccess={updateStudentAccess} onStudentCreate={async (input) => {
+        {role === "teacher" ? <TeacherWorkspace activeModule={currentModule} ai={ai} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentReject={rejectAssessmentDraft} onContentIndexRebuild={rebuildTeachingContentIndex} onContentUpload={uploadTeachingContent} onExportPrint={exportLatestPrint} onKnowledgeRefresh={refreshKnowledgeLibrary} onKnowledgeReview={reviewKnowledgeLibrarySource} onKnowledgeSourceCreate={addKnowledgeSource} onKnowledgeSync={syncKnowledgeLibrary} onMarkReviewed={markReviewed} onOpenModule={(module) => setActiveModule((value) => ({ ...value, teacher: module }))} onOpenTextbook={openTextbookAsset} onProfileDraft={createStudentProfileDraft} onProfilePrint={generateStudentProfilePrintFile} onProfilePublish={publishStudentProfileDraft} onQuestionReview={reviewQuestion} onRecognize={recognizeSubmission} onRefreshOps={refreshReviewQueue} onRefreshTextbooks={refreshTextbookLibrary} onRescanTextbooks={rescanTextbookLibrary} onResetCode={resetStudentCode} onSaveTextbookChapters={saveTextbookChapters} onSelectTextbookContext={setSelectedTextbookContext} onStudentAccess={updateStudentAccess} onStudentCreate={async (input) => {
           const name = input.displayName.trim();
           if (!name || !input.guardianPhone.trim()) {
             setSync({ busy: false, ok: false, message: "请至少填写学生姓名和家长电话" });
@@ -1188,6 +1199,7 @@ function TeacherWorkspace({
   onProfileDraft,
   onProfilePrint,
   onProfilePublish,
+  onQuestionReview,
   onRecognize,
   onRefreshOps,
   onRefreshTextbooks,
@@ -1244,6 +1256,7 @@ function TeacherWorkspace({
   onProfileDraft: (studentId?: string, periodType?: ProfilePeriodType) => Promise<ProfileDraft | null>;
   onProfilePrint: (studentId: string, snapshot: Record<string, unknown>, text?: string) => Promise<PrintAssetLink | null>;
   onProfilePublish: (input: { studentId: string; text: string }) => Promise<void>;
+  onQuestionReview: (submissionId: string, questionId: string, input: Record<string, unknown>) => void;
   onRecognize: (submissionId: string) => void;
   onRefreshOps: () => void;
   onRefreshTextbooks: (filters?: { subject?: string; grade?: string; volume?: string; search?: string }) => void;
@@ -1670,7 +1683,7 @@ function TeacherWorkspace({
       </section>
     </section>
     <section className={moduleClass("批改复核", "panel span-6")}><PanelTitle badge="AI生成" icon={Upload} title="拍照上传批改" /><div className="template-controls"><label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName}</option>)}</select></label><label>类型<select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option>作业</option><option>小测</option><option>试卷</option><option>听写</option></select></label><label>科目<select value={uploadSubject} onChange={(event) => setUploadSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label></div><label className="field-label">记录标题<input value={uploadTitle} placeholder="例如：三角形单元试卷批改、英语Unit 1听写批改" onChange={(event) => setUploadTitle(event.target.value)} /></label><label className="field-label">拍照或选择图片<input multiple type="file" accept="image/*" capture="environment" onChange={(event) => setUploadFiles(Array.from(event.target.files || []))} /></label><p className="muted-line">批改记录绑定所选学生，教师复核确认后才进入学生档案、错题和学习分析。当前已选择 {uploadFiles.length} 张，上传数量不设上限。</p><div className="review-upload-action"><button className="primary-button" disabled={!selectedStudent || !uploadFiles.length || isReviewUploading("grading")} onClick={() => selectedStudent && submitReviewUpload("grading", { studentId: selectedStudent.id, subject: uploadSubject, kind: uploadKind, title: uploadTitle.trim() || `${selectedStudent.displayName}${uploadKind}批改`, images: uploadFiles })}><Upload size={17} />上传并批改</button>{renderReviewUploadStatus("grading")}</div></section>
-    <section className={moduleClass("批改复核", "panel full")}><PanelTitle icon={ListChecks} title="批改工作台" /><div className="button-row"><button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新工作台</button></div><GradingWorkbenchPanel onMarkReviewed={onMarkReviewed} onRecognize={onRecognize} reviewSubmissions={reviewSubmissions} workbenches={gradingWorkbenches} /></section>
+    <section className={moduleClass("批改复核", "panel full")}><PanelTitle icon={ListChecks} title="批改工作台" /><div className="button-row"><button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新工作台</button></div><GradingWorkbenchPanel onMarkReviewed={onMarkReviewed} onQuestionReview={onQuestionReview} onRecognize={onRecognize} reviewSubmissions={reviewSubmissions} workbenches={gradingWorkbenches} /></section>
     <section className={moduleClass("电视动态屏", "tv-display-shell full")}>
       <TvParentDisplay ai={ai} assignments={assignments} audit={audit} corrections={corrections} logs={logs} reports={reports} reviewSubmissions={reviewSubmissions} students={students} tasks={tasks} />
     </section>
@@ -2020,7 +2033,7 @@ function StudentModuleHome({ assignments, corrections, isLoggedIn, logs, onLogin
       </div> : null}
       <div className="student-timeline-card">
         <PanelTitle icon={Activity} title="学习动态" />
-        <StudentRealtimeSummary corrections={corrections} logs={logs} tasks={tasks} />
+        <StudentRealtimeSummary corrections={corrections} logs={logs} onModuleOpen={onModuleOpen} tasks={tasks} />
       </div>
     </section>
   </div>;
@@ -2375,12 +2388,51 @@ function StudentList({ onAccess, students }: { onAccess?: (studentId: string, en
   return <div className="record-list">{students.map((student) => <div className="record-row" key={student.id}><UsersRound size={17} /><div><strong>{student.displayName}</strong><span>{student.grade} · {student.guardianPhone} · {student.accessCode || "未开通"}</span></div><StatusPill label={student.loginEnabled ? "可登录" : "停用"} status={student.loginEnabled ? "ready" : "blocked"} />{onAccess ? <button className="secondary-button" onClick={() => onAccess(student.id, !student.loginEnabled)}>{student.loginEnabled ? "停用" : "开通"}</button> : null}</div>)}</div>;
 }
 
-function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions, workbenches }: { onMarkReviewed: (submissionId: string, input?: Record<string, unknown>) => void; onRecognize: (submissionId: string) => void; reviewSubmissions: ReviewSubmission[]; workbenches: GradingWorkbench[] }) {
+function reviewedQuestionReady(question: GradingWorkbench["questions"][number]) {
+  const score = question.score == null ? null : Number(question.score);
+  const maxScore = question.maxScore == null ? null : Number(question.maxScore);
+  return Boolean(
+    question.reviewedByTeacher &&
+    question.status !== "uncertain" &&
+    score != null &&
+    Number.isFinite(score) &&
+    score >= 0 &&
+    maxScore != null &&
+    Number.isFinite(maxScore) &&
+    maxScore > 0
+  );
+}
+
+function allQuestionsReviewed(questions: GradingWorkbench["questions"]) {
+  return questions.length > 0 && questions.every(reviewedQuestionReady);
+}
+
+function reviewedQuestionScore(questions: GradingWorkbench["questions"]) {
+  if (!allQuestionsReviewed(questions)) return null;
+  return Number(questions.reduce((sum, question) => sum + Number(question.score || 0), 0).toFixed(2));
+}
+
+function questionMaxScoreTotal(questions: GradingWorkbench["questions"]) {
+  if (!questions.length) return null;
+  const values: number[] = [];
+  for (const question of questions) {
+    if (question.maxScore == null) return null;
+    const value = Number(question.maxScore);
+    if (!Number.isFinite(value)) return null;
+    values.push(value);
+  }
+  return Number(values.reduce((sum, value) => sum + Number(value), 0).toFixed(2));
+}
+
+function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, reviewSubmissions, workbenches }: { onMarkReviewed: (submissionId: string, input?: Record<string, unknown>) => void; onQuestionReview: (submissionId: string, questionId: string, input: Record<string, unknown>) => void; onRecognize: (submissionId: string) => void; reviewSubmissions: ReviewSubmission[]; workbenches: GradingWorkbench[] }) {
   const [activeId, setActiveId] = useState(workbenches[0]?.submissionId || "");
   const active = workbenches.find((item) => item.submissionId === activeId) || workbenches[0];
   const [activePage, setActivePage] = useState(1);
   const [activeQuestionId, setActiveQuestionId] = useState(active?.questions[0]?.id || "");
-  const [reviewScore, setReviewScore] = useState("");
+  const [questionStatus, setQuestionStatus] = useState<"correct" | "wrong" | "partial" | "uncertain">("uncertain");
+  const [questionScore, setQuestionScore] = useState("");
+  const [questionMaxScore, setQuestionMaxScore] = useState("");
+  const [questionNote, setQuestionNote] = useState("");
   const [reviewNote, setReviewNote] = useState("");
   useEffect(() => {
     if (!workbenches.some((item) => item.submissionId === activeId)) setActiveId(workbenches[0]?.submissionId || "");
@@ -2388,9 +2440,16 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
   useEffect(() => {
     setActivePage(1);
     setActiveQuestionId(active?.questions[0]?.id || "");
-    setReviewScore(active?.score != null ? String(active.score) : active?.provisionalScore != null ? String(active.provisionalScore) : "");
     setReviewNote("");
   }, [active?.submissionId]);
+  const activeQuestions = active?.questions || [];
+  const activeQuestionForForm = activeQuestions.find((item) => item.id === activeQuestionId) || activeQuestions[0];
+  useEffect(() => {
+    setQuestionStatus(activeQuestionForForm?.status || "uncertain");
+    setQuestionScore(activeQuestionForForm?.score != null ? String(activeQuestionForForm.score) : "");
+    setQuestionMaxScore(activeQuestionForForm?.maxScore != null ? String(activeQuestionForForm.maxScore) : "");
+    setQuestionNote(activeQuestionForForm?.teacherNote || "");
+  }, [activeQuestionForForm?.id, activeQuestionForForm?.score, activeQuestionForForm?.maxScore, activeQuestionForForm?.status, activeQuestionForForm?.teacherNote]);
   if (!workbenches.length) {
     const batches = groupReviewSubmissions(reviewSubmissions).slice(0, 6);
     const pendingSubmissions = reviewSubmissions.filter((item) => item.needsReview || item.status !== "已复核").length;
@@ -2444,8 +2503,8 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
           <p className="grading-confidence">结构化识别完成后，将显示学生作答、参考答案、AI 判断和归档建议。</p>
         </div>
         <div className="review-confirm-form">
-          <label className="field-label">教师确认分数<input disabled placeholder="选择批次后填写" /></label>
-          <label className="field-label">复核备注<textarea disabled placeholder="选择批次后填写复核备注。" /></label>
+          <label className="field-label">当前题得分<input disabled placeholder="选择批次后逐题确认" /></label>
+          <label className="field-label">复核备注<textarea disabled placeholder="逐题确认完成后自动汇总总分。" /></label>
         </div>
         <div className="grading-action-dock">
           <button className="secondary-button" disabled><RefreshCw size={16} />重新识别</button>
@@ -2455,8 +2514,8 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
     </div>;
   }
   const page = active?.pages.find((item) => item.pageNumber === activePage) || active?.pages[0];
-  const question = active?.questions.find((item) => item.id === activeQuestionId) || active?.questions[0];
-  const pageQuestions = (active?.questions || []).filter((item) => Number(item.bbox?.page || 1) === (page?.pageNumber || 1));
+  const question = activeQuestionForForm;
+  const pageQuestions = activeQuestions.filter((item) => Number(item.bbox?.page || 1) === (page?.pageNumber || 1));
   const markers = page?.markers?.length ? page.markers : pageQuestions.map((item) => ({
     id: item.id,
     questionNo: item.questionNo,
@@ -2466,11 +2525,13 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
     y: item.bbox?.y ?? 0.12,
     w: item.bbox?.w ?? 0.18,
     h: item.bbox?.h ?? 0.08,
-    label: item.status === "correct" ? "✓" : item.status === "wrong" ? "×" : "?"
+    label: item.status === "correct" ? "✓" : item.status === "wrong" ? "×" : item.status === "partial" ? "△" : "?"
   }));
-  const needsScore = active?.needsTeacherReview || active?.archiveEligible === false || active?.quality?.lowConfidence || active?.score == null;
-  const scoreNumber = reviewScore.trim() === "" ? null : Number(reviewScore);
-  const scoreValid = scoreNumber != null && Number.isFinite(scoreNumber);
+  const questionScoreNumber = questionScore.trim() === "" ? null : Number(questionScore);
+  const questionMaxScoreNumber = questionMaxScore.trim() === "" ? null : Number(questionMaxScore);
+  const questionScoreValid = questionScoreNumber != null && Number.isFinite(questionScoreNumber) && questionScoreNumber >= 0;
+  const questionMaxScoreValid = questionMaxScoreNumber != null && Number.isFinite(questionMaxScoreNumber) && questionMaxScoreNumber > 0;
+  const questionScoreWithinMax = questionScoreValid && questionMaxScoreValid && Number(questionScoreNumber) <= Number(questionMaxScoreNumber);
   const pageQualityIssues = [...(page?.qualityIssues || []), ...(page?.qualityWarnings || [])];
   const pageQualityText = page?.qualityStatus === "ready"
     ? "图片质量可用"
@@ -2479,18 +2540,46 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
       : "图片需复核";
   const pendingQuestionTotal = workbenches.reduce((sum, item) => sum + item.pendingQuestionCount, 0);
   const lowConfidenceTotal = workbenches.filter((item) => item.needsTeacherReview || item.quality?.lowConfidence || item.archiveEligible === false).length;
-  const archiveReadyTotal = workbenches.filter((item) => !item.needsTeacherReview && item.archiveEligible !== false).length;
-  const activeQuestionIndex = active?.questions.findIndex((item) => item.id === question?.id) ?? -1;
-  const questionStatusCounts = (active?.questions || []).reduce((counts, item) => {
+  const archiveReadyTotal = workbenches.filter((item) => allQuestionsReviewed(item.questions)).length;
+  const activeQuestionIndex = activeQuestions.findIndex((item) => item.id === question?.id) ?? -1;
+  const questionStatusCounts = activeQuestions.reduce((counts, item) => {
     if (item.status === "correct") counts.correct += 1;
     else if (item.status === "wrong") counts.wrong += 1;
+    else if (item.status === "partial") counts.partial += 1;
     else counts.pending += 1;
+    if (reviewedQuestionReady(item)) counts.reviewed += 1;
     return counts;
-  }, { correct: 0, wrong: 0, pending: 0 });
+  }, { correct: 0, wrong: 0, partial: 0, pending: 0, reviewed: 0 });
+  const unresolvedQuestions = activeQuestions.filter((item) => !reviewedQuestionReady(item));
+  const allQuestionsReviewedForArchive = allQuestionsReviewed(activeQuestions);
+  const reviewedScoreTotal = reviewedQuestionScore(activeQuestions);
+  const maxScoreTotal = questionMaxScoreTotal(activeQuestions);
+  const questionConfirmDisabled = !active || !question || !questionScoreWithinMax;
+  const archiveDisabled = !active || !allQuestionsReviewedForArchive;
+  const archiveScoreLabel = reviewedScoreTotal != null
+    ? `${reviewedScoreTotal}${maxScoreTotal != null ? `/${maxScoreTotal}` : ""} 分`
+    : `待逐题确认 ${unresolvedQuestions.length} 题`;
   const selectPage = (pageNumber: number) => {
     setActivePage(pageNumber);
-    const firstQuestion = active?.questions.find((item) => Number(item.bbox?.page || 1) === pageNumber) || active?.questions[0];
+    const firstQuestion = activeQuestions.find((item) => Number(item.bbox?.page || 1) === pageNumber) || activeQuestions[0];
     if (firstQuestion) setActiveQuestionId(firstQuestion.id);
+  };
+  const chooseQuestionStatus = (status: "correct" | "wrong" | "partial" | "uncertain") => {
+    setQuestionStatus(status);
+    const max = questionMaxScoreNumber ?? (question?.maxScore != null ? Number(question.maxScore) : 0);
+    if (!Number.isFinite(max) || max <= 0) return;
+    if (status === "correct") setQuestionScore(String(max));
+    if (status === "partial") setQuestionScore(String(Number((max * 0.5).toFixed(2))));
+    if (status === "wrong" || status === "uncertain") setQuestionScore("0");
+  };
+  const confirmQuestionReview = () => {
+    if (!active || !question || !questionScoreWithinMax) return;
+    onQuestionReview(active.submissionId, question.id, {
+      status: questionStatus,
+      score: questionScoreNumber,
+      maxScore: questionMaxScoreNumber,
+      ...(questionNote.trim() ? { teacherNote: questionNote.trim() } : {})
+    });
   };
   return <div className="grading-workbench">
     <section className="grading-command-center">
@@ -2513,11 +2602,11 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
       <div className="grading-batch-list">
         {workbenches.map((item) => {
           const isActive = item.submissionId === active?.submissionId;
-          const itemRisk = item.needsTeacherReview || item.quality?.lowConfidence || item.archiveEligible === false;
+          const itemRisk = !allQuestionsReviewed(item.questions) || item.quality?.lowConfidence || item.archiveEligible === false;
           return <button className={isActive ? "active" : ""} key={item.submissionId} onClick={() => setActiveId(item.submissionId)}>
             <div className="grading-batch-title"><strong>{item.studentName} · {item.kind}</strong><StatusDot status={itemRisk ? "pending" : "ready"} /></div>
             <span>{item.subject} · {item.questionCount || 0}题 · {item.ocrStatusLabel}</span>
-            <small>{item.pendingQuestionCount ? `${item.pendingQuestionCount}题待确认` : "逐题结果已生成"}</small>
+            <small>{item.pendingQuestionCount ? `${item.pendingQuestionCount}题待确认` : `已确认 ${item.reviewedQuestionCount || item.questions.length}/${item.questionCount || item.questions.length}`}</small>
           </button>;
         })}
       </div>
@@ -2528,13 +2617,14 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
           <h3>{active?.title}</h3>
           <p>{active?.studentName} · {active?.subject} · {active?.kind} · {active ? new Date(active.submittedAt).toLocaleString("zh-CN") : ""}</p>
         </div>
-        <StatusPill label={active?.needsTeacherReview ? "待教师确认" : "可归档"} status={active?.needsTeacherReview ? "pending" : "ready"} />
+        <StatusPill label={allQuestionsReviewedForArchive ? "可归档" : "待逐题确认"} status={allQuestionsReviewedForArchive ? "ready" : "pending"} />
       </div>
       <div className="grading-score-strip">
         <span>正确 {questionStatusCounts.correct}</span>
-        <span>需处理 {questionStatusCounts.wrong + questionStatusCounts.pending}</span>
-        <span>{active?.score != null ? `${active.score}分` : active?.provisionalScore != null ? `AI初判 ${active.provisionalScore}分` : "待确认分数"}</span>
+        <span>半对/错误 {questionStatusCounts.partial + questionStatusCounts.wrong}</span>
+        <span>{archiveScoreLabel}</span>
       </div>
+      <p className={`context-note ${allQuestionsReviewedForArchive ? "" : "blocked"}`}><ShieldCheck size={15} />逐题确认完成后自动汇总总分；仍为“无法识别”的题目不会进入正式归档。</p>
       <div className="review-image-tabs">{active?.pages.map((item) => <button className={item.pageNumber === page?.pageNumber ? "active" : ""} key={item.id} onClick={() => selectPage(item.pageNumber)}>第 {item.pageNumber} 页</button>)}</div>
       {page ? <p className={`context-note ${page.qualityStatus === "ready" ? "" : "blocked"}`}><ShieldCheck size={15} />{pageQualityText}{page.qualityScore != null ? ` · 质量分 ${Math.round(page.qualityScore * 100)}%` : ""}{pageQualityIssues.length ? ` · ${pageQualityIssues.slice(0, 2).join("；")}` : ""}</p> : null}
       <div className="grading-image-stage">
@@ -2547,16 +2637,16 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
     </main>
     <aside className="grading-inspector">
       <div className="grading-question-strip">
-        {(active?.questions || []).map((item, index) => <button className={`${item.id === question?.id ? "active" : ""} ${item.status}`} key={`${item.id}-${index}`} onClick={() => {
+        {activeQuestions.map((item, index) => <button className={`${item.id === question?.id ? "active" : ""} ${item.status} ${reviewedQuestionReady(item) ? "reviewed" : "unreviewed"}`} key={`${item.id}-${index}`} onClick={() => {
           setActiveQuestionId(item.id);
           setActivePage(Number(item.bbox?.page || 1));
-        }}>{index + 1}</button>)}
+        }}>{item.questionNo || index + 1}</button>)}
         {!active?.questions.length ? <p className="review-empty">暂无逐题识别结果，请重新识别并重批。</p> : null}
       </div>
       {question ? <div className="question-detail-panel workbench-detail">
         <div className="question-detail-head">
           <div><strong>第 {question.questionNo} 题</strong><span>{activeQuestionIndex >= 0 ? `当前第 ${activeQuestionIndex + 1}/${active?.questions.length || 0} 题` : "当前题"}</span></div>
-          <StatusPill label={statusText(question.status)} status={question.status === "correct" ? "ready" : question.status === "wrong" ? "blocked" : "pending"} />
+          <StatusPill label={reviewedQuestionReady(question) ? "已确认" : statusText(question.status)} status={reviewedQuestionReady(question) ? "ready" : question.status === "wrong" ? "blocked" : "pending"} />
         </div>
         <p className="grading-confidence">{question.confidence != null ? `识别置信度 ${Math.round(question.confidence * 100)}%` : "识别置信度待补，建议教师确认。"}</p>
         <DetailLine label="学生作答" value={question.studentAnswer || "未识别到明确作答"} />
@@ -2565,14 +2655,29 @@ function GradingWorkbenchPanel({ onMarkReviewed, onRecognize, reviewSubmissions,
         <DetailLine label="错因定位" value={question.errorStep || (question.status === "correct" ? "未发现明显错误" : "等待教师复核")} />
         <DetailLine label="归档建议" value={question.suggestedPractice || active?.summary || "复核后进入错题和薄弱点分析"} />
       </div> : null}
+      <div className="question-review-editor">
+        <div className="question-review-status">
+          <button className={questionStatus === "correct" ? "active correct" : "correct"} disabled={!question} onClick={() => chooseQuestionStatus("correct")} type="button">对</button>
+          <button className={questionStatus === "partial" ? "active partial" : "partial"} disabled={!question} onClick={() => chooseQuestionStatus("partial")} type="button">半对</button>
+          <button className={questionStatus === "wrong" ? "active wrong" : "wrong"} disabled={!question} onClick={() => chooseQuestionStatus("wrong")} type="button">错</button>
+          <button className={questionStatus === "uncertain" ? "active uncertain" : "uncertain"} disabled={!question} onClick={() => chooseQuestionStatus("uncertain")} type="button">无法识别</button>
+        </div>
+        <div className="review-field-row">
+          <label className="field-label">本题得分<input min="0" step="0.5" type="number" value={questionScore} onChange={(event) => setQuestionScore(event.target.value)} placeholder="本题得分" /></label>
+          <label className="field-label">本题满分<input min="0.5" step="0.5" type="number" value={questionMaxScore} onChange={(event) => setQuestionMaxScore(event.target.value)} placeholder="满分" /></label>
+        </div>
+        <label className="field-label">本题备注<textarea value={questionNote} onChange={(event) => setQuestionNote(event.target.value)} placeholder="记录本题扣分原因、识别问题或需要后续跟进的知识点。" /></label>
+        {!questionScoreWithinMax ? <p className="context-note blocked"><ShieldCheck size={15} />本题得分必须有效，且不能超过本题满分。</p> : null}
+        {questionStatus === "uncertain" ? <p className="context-note blocked"><ShieldCheck size={15} />无法识别只能暂存复核状态，不能进入正式错题归档。</p> : null}
+        <button className="primary-button" disabled={questionConfirmDisabled} onClick={confirmQuestionReview} type="button"><CheckCircle2 size={16} />确认本题</button>
+      </div>
       <div className="review-confirm-form">
-        <label className="field-label">教师确认分数<input min="0" step="0.5" type="number" value={reviewScore} onChange={(event) => setReviewScore(event.target.value)} placeholder="确认后才归档" /></label>
-        <label className="field-label">复核备注<textarea value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} placeholder="记录扣分原因、图片识别问题或后续跟进建议。" /></label>
-        {needsScore ? <p className="context-note blocked"><ShieldCheck size={15} />当前记录必须由教师确认分数后才允许进入学生档案。</p> : null}
+        <label className="field-label">批次复核备注<textarea value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} placeholder="逐题确认完成后自动汇总总分，可在这里补充本次批改的总体说明。" /></label>
+        <p className={`context-note ${allQuestionsReviewedForArchive ? "" : "blocked"}`}><ShieldCheck size={15} />{allQuestionsReviewedForArchive ? `所有题目已确认，归档总分 ${archiveScoreLabel}。` : `还有 ${unresolvedQuestions.length} 题未满足归档条件。`}</p>
       </div>
       <div className="grading-action-dock">
         <button className="secondary-button" disabled={!active} onClick={() => active && onRecognize(active.submissionId)}><RefreshCw size={16} />重新识别</button>
-        <button className="primary-button" disabled={!active || (needsScore && !scoreValid)} onClick={() => active && onMarkReviewed(active.submissionId, { ...(scoreValid ? { score: scoreNumber } : {}), ...(reviewNote.trim() ? { reviewNote: reviewNote.trim() } : {}) })}><CheckCircle2 size={16} />确认归档</button>
+        <button className="primary-button" disabled={archiveDisabled} onClick={() => active && onMarkReviewed(active.submissionId, { ...(reviewNote.trim() ? { reviewNote: reviewNote.trim() } : {}) })}><CheckCircle2 size={16} />确认归档</button>
       </div>
     </aside>
   </div>;
@@ -3427,8 +3532,53 @@ function formatLearningLog(log: DisplayLogLike) {
   };
 }
 
-function StudentRealtimeSummary({ corrections, logs, tasks }: { corrections: CorrectionRecord[]; logs: LearningLog[]; tasks: LearningTaskCard[] }) {
-  return <div className="realtime-summary-grid"><div><strong>今天做了什么</strong><div className="record-list">{tasks.length ? tasks.slice(0, 3).map((task) => <div className="record-row" key={task.id}><SubjectBadge subject={task.subject} /><div><strong>{task.title}</strong><span>{task.status} · {task.minutes}分钟</span></div></div>) : logs.slice(0, 3).map((log) => { const item = formatLearningLog(log); return <div className="record-row" key={log.id}><CalendarDays size={17} /><div><strong>{log.time} · {item.title}</strong><span>{item.detail}</span></div></div>; })}</div></div><div><strong>待巩固内容</strong><div className="record-list">{corrections.length ? corrections.slice(0, 3).map((item) => <div className="record-row" key={item.id}><SubjectBadge subject={item.subject} /><div><strong>{item.point || item.knowledgePoint}</strong><span>{item.cause || item.prompt}</span></div><StatusPill label={item.state} status={statusToProviderStatus(item.state)} /></div>) : <p className="review-empty">暂无新的待巩固内容，完成批改后会实时同步。</p>}</div></div></div>;
+function studentSummaryPreview(value: unknown, maxLength = 44) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function StudentRealtimeSummary({ corrections, logs, onModuleOpen, tasks }: { corrections: CorrectionRecord[]; logs: LearningLog[]; onModuleOpen: (module: string) => void; tasks: LearningTaskCard[] }) {
+  const taskSummaries = tasks.length
+    ? tasks.slice(0, 2).map((task) => ({
+        id: task.id,
+        subject: task.subject,
+        title: task.title,
+        detail: `${task.status} · ${task.minutes}分钟`,
+        status: task.status
+      }))
+    : logs.slice(0, 2).map((log) => {
+        const item = formatLearningLog(log);
+        return {
+          id: log.id,
+          subject: null,
+          title: `${log.time} · ${item.title}`,
+          detail: item.detail,
+          status: "过程记录"
+        };
+      });
+  const needSummaries = corrections.slice(0, 2).map((item) => ({
+    id: item.id,
+    subject: item.subject,
+    title: item.point || item.knowledgePoint || "待巩固内容",
+    detail: item.cause || item.prompt || "老师复核后会补充具体订正建议。",
+    status: item.state
+  }));
+  return <div className="student-summary-stack">
+    <section className="student-summary-section">
+      <div className="student-summary-head"><div><strong>今日学习摘要</strong><span>首页只保留最近要做和已完成的关键信息。</span></div><button className="secondary-button" onClick={() => onModuleOpen("今日任务")} type="button">查看今日任务</button></div>
+      <div className="student-summary-list">{taskSummaries.length ? taskSummaries.map((item) => <article className="student-summary-card" key={item.id}>
+        <div className="student-summary-card-meta">{item.subject ? <SubjectBadge subject={item.subject} /> : <span className="student-summary-icon"><CalendarDays size={16} /></span>}<StatusPill label={item.status} status={statusToProviderStatus(item.status)} /></div>
+        <div><strong title={item.title}>{studentSummaryPreview(item.title)}</strong><span className="student-summary-card-detail" title={item.detail}>{studentSummaryPreview(item.detail, 58)}</span></div>
+      </article>) : <p className="review-empty">暂无今日学习记录，先查看老师发布的任务。</p>}</div>
+    </section>
+    <section className="student-summary-section">
+      <div className="student-summary-head"><div><strong>待巩固摘要</strong><span>只展示最近重点，完整内容进入学生档案查看。</span></div><button className="secondary-button" onClick={() => onModuleOpen("学生档案")} type="button">查看学生档案</button></div>
+      <div className="student-summary-list">{needSummaries.length ? needSummaries.map((item) => <article className="student-summary-card need-card" key={item.id}>
+        <div className="student-summary-card-meta"><SubjectBadge subject={item.subject} /><StatusPill label={item.status} status={statusToProviderStatus(item.status)} /></div>
+        <div><strong title={item.title}>{studentSummaryPreview(item.title)}</strong><span className="student-summary-card-detail" title={item.detail}>{studentSummaryPreview(item.detail, 58)}</span></div>
+      </article>) : <p className="review-empty">暂无新的待巩固内容，完成批改后会同步到这里。</p>}</div>
+    </section>
+  </div>;
 }
 
 function Mastery({ student }: { student: StudentProfile }) {

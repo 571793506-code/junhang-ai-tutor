@@ -42,6 +42,7 @@ import {
 import { checkDatabaseStatus, persistenceOptions, requireDatabase } from "./db-status.js";
 import { createEncodingGuardMiddleware } from "./encoding-guard-middleware.js";
 import { loadRuntimeConfig, publicConfigSummary } from "./env.js";
+import { gradingQuestionReviewState, requireAllQuestionsReviewedForArchive } from "./grading-review-gates.js";
 import { createSessionToken, readBearerToken, requireSession, verifySessionToken } from "./session.js";
 import {
   buildStudentGrowthSnapshot,
@@ -2642,6 +2643,9 @@ function normalizeQuestionWorkbenchItem(question = {}, index = 0, markers = []) 
     explanation: question.explanation || "",
     knowledgePoint: question.knowledgePoint || "",
     suggestedPractice: question.suggestedPractice || "",
+    teacherNote: question.teacherNote || "",
+    reviewedByTeacher: question.reviewedByTeacher === true,
+    reviewedAt: question.reviewedAt || null,
     confidence: optionalNumber(question.confidence) ?? null,
     bbox
   };
@@ -2760,6 +2764,7 @@ function mapGradingWorkbench(submission) {
       }];
   const questions = (Array.isArray(grading.questionResults) ? grading.questionResults : [])
     .map((question, index) => normalizeQuestionWorkbenchItem(question, index, markers));
+  const questionReviewState = gradingQuestionReviewState(questions);
   return {
     id: review.batchId || review.id,
     submissionId: review.id,
@@ -2782,7 +2787,10 @@ function mapGradingWorkbench(submission) {
     pages,
     questions,
     questionCount: questions.length,
-    pendingQuestionCount: questions.filter((item) => item.status === "uncertain").length,
+    pendingQuestionCount: questionReviewState.unresolved,
+    reviewedQuestionCount: questionReviewState.reviewed,
+    questionReviewReady: questionReviewState.readyForArchive,
+    reviewedQuestionScore: questionReviewState.score,
     uploadedBy: review.uploadedBy,
     submittedAt: review.submittedAt
   };
@@ -3988,6 +3996,17 @@ app.patch("/api/review/submissions/:submissionId/ocr", requireDatabase, requireS
 
 async function archiveSubmissionReview(req, res, submission, body = {}, action = "mark-submission-reviewed") {
   const currentResult = safeJson(submission.grading?.result, {});
+  const questionArchiveGate = requireAllQuestionsReviewedForArchive(currentResult);
+  if (!questionArchiveGate.ok) {
+    res.status(400).json({
+      ok: false,
+      error: questionArchiveGate.error,
+      message: questionArchiveGate.message,
+      state: questionArchiveGate.state
+    });
+    return null;
+  }
+  const reviewedScoreFromQuestions = questionArchiveGate.state.score;
   const reviewedScoreInput = optionalNumber(body.score);
   const hasScoreField = Object.prototype.hasOwnProperty.call(body, "score");
   if (hasScoreField && reviewedScoreInput == null) {
@@ -4001,7 +4020,7 @@ async function archiveSubmissionReview(req, res, submission, body = {}, action =
     currentResult.archiveEligible === false ||
     currentResult.quality?.lowConfidence === true ||
     (currentResult.score == null && currentResult.provisionalScore != null);
-  if (lowConfidenceNeedsScore && reviewedScoreInput == null) {
+  if (lowConfidenceNeedsScore && reviewedScoreInput == null && reviewedScoreFromQuestions == null) {
     res.status(400).json({
       ok: false,
       error: "LOW_CONFIDENCE_SCORE_REQUIRED",
@@ -4009,7 +4028,7 @@ async function archiveSubmissionReview(req, res, submission, body = {}, action =
     });
     return null;
   }
-  const reviewedScore = reviewedScoreInput ?? optionalNumber(currentResult.score) ?? optionalNumber(currentResult.provisionalScore) ?? submission.grading?.score ?? null;
+  const reviewedScore = reviewedScoreInput ?? reviewedScoreFromQuestions ?? optionalNumber(currentResult.score) ?? optionalNumber(currentResult.provisionalScore) ?? submission.grading?.score ?? null;
   const shouldArchiveMistakes = !currentResult.archivePublishedAt;
   const reviewedMistakes = shouldArchiveMistakes ? reviewedMistakesFromResult(currentResult, submission) : [];
   if (reviewedMistakes.length) {

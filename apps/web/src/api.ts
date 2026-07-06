@@ -710,11 +710,17 @@ export type GradingWorkbench = {
     explanation?: string;
     knowledgePoint?: string;
     suggestedPractice?: string;
+    teacherNote?: string;
+    reviewedByTeacher?: boolean;
+    reviewedAt?: string | null;
     confidence?: number | null;
     bbox?: { page: number; x: number; y: number; w: number; h: number };
   }>;
   questionCount: number;
   pendingQuestionCount: number;
+  reviewedQuestionCount?: number;
+  questionReviewReady?: boolean;
+  reviewedQuestionScore?: number | null;
   uploadedBy: string;
   submittedAt: string;
 };
