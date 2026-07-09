@@ -19,7 +19,7 @@
 - 默认草稿生成链路只做模型生成、服务层结构修复、本地审查和教师复核门禁；MiniMax/GPT 等深度模型审查必须显式开启，不能阻塞默认草稿返回。
 - E2E、联调或低延迟入口可以传 `assessmentTotalTimeoutMs` / `generationTimeoutMs` 给服务层；预算耗尽后必须走结构化动态兜底草稿和教师复核，不能让接口长时间等待模型。
 - timeout 预算和 token 上限必须分开处理：timeout 防止生成长时间不收口，`assessmentMaxTokens` / `generationMaxTokens` 给真实模型保留输出空间，不能用提高 token 上限替代超时边界。
-- 生成预算默认由服务层推导：E2E/联调可用短预算；小测走 `quiz-standard` 中预算；普通练习走 `practice-standard`；试卷和个性化练习走 `formal-full`，正式生成默认允许 20000 tokens。
+- 生成预算默认由服务层推导：E2E/联调可用短预算；小测走 `quiz-standard` 中预算，默认 210s / 20000 tokens；普通练习走 `practice-standard`，默认 210s / 20000 tokens；试卷和个性化练习走 `formal-full`，默认 270s / 24000 tokens。
 - `check:content-context` 低预算 E2E 只作为 `link-guard` 链路守卫，证明资料上下文、预算退出、动态兜底、教师复核和导出链路能收口；不得用它判断题目原创性、教师要求贴合度、个性化程度、解析质量或 PDF 视觉质量。
 - `check:generation:quality:quiz` 和 `check:generation:quality:formal` 才用于真实模型生成内容质量样本；质量样本必须 `modelAvailable=true`、`usedDynamicFallback=false`，否则不能通过。
 

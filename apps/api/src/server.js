@@ -3285,7 +3285,7 @@ app.post("/api/assessments/:assignmentId/print-export", requireDatabase, require
   }
   const metadata = safeJson(assignment.metadata, {});
   if (metadata.targetStudentId && !(await assertTeacherStudentScope(req, res, metadata.targetStudentId))) return;
-  if (metadata.draftReviewStatus !== "accepted" && req.body?.force !== true) {
+  if (metadata.draftReviewStatus !== "accepted") {
     return res.status(409).json({ ok: false, error: "DRAFT_REVIEW_REQUIRED", message: "请先审查并确认 PDF 草稿，再生成正式题目与解析 PDF。" });
   }
 
@@ -3339,7 +3339,7 @@ app.post("/api/assessments/:assignmentId/print-export", requireDatabase, require
     gates: {
       finalExportAllowed: true,
       finalExported: true,
-      teacherReviewStatus: metadata.draftReviewStatus || "accepted"
+      teacherReviewStatus: metadata.draftReviewStatus
     },
     assets: {
       studentPaperAssetId: asset.id,

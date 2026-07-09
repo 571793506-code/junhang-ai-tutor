@@ -8,6 +8,18 @@ function questionNo(question, index) {
   return String(question?.questionNo || question?.no || index + 1);
 }
 
+function hasText(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasMistakeEvidence(question) {
+  if (!["wrong", "partial"].includes(question?.status)) return true;
+  return Boolean(
+    hasText(question?.knowledgePoint) &&
+    (hasText(question?.errorStep) || hasText(question?.explanation))
+  );
+}
+
 function isReviewedQuestion(question) {
   const score = optionalNumber(question?.score);
   const maxScore = optionalNumber(question?.maxScore);
@@ -18,7 +30,8 @@ function isReviewedQuestion(question) {
     score != null &&
     maxScore != null &&
     score >= 0 &&
-    maxScore > 0
+    maxScore > 0 &&
+    hasMistakeEvidence(question)
   );
 }
 
@@ -56,7 +69,7 @@ export function requireAllQuestionsReviewedForArchive(result = {}) {
       ok: false,
       error: "QUESTIONS_REVIEW_REQUIRED",
       message: state.total
-        ? "请逐题确认所有题目的状态、得分和满分后再归档。"
+        ? "请逐题确认所有题目的状态、得分和满分；错题和半对题还需补充知识点和错因定位后再归档。"
         : "当前批改结果缺少逐题结果，请重新识别或补录题目后再归档。",
       state
     };

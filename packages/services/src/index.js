@@ -607,6 +607,7 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
 function parseGradingAuditResult(auditResult = null) {
   if (!auditResult) {
     return {
+      required: true,
       available: false,
       status: "needs_review",
       riskLevel: "high",
@@ -618,6 +619,7 @@ function parseGradingAuditResult(auditResult = null) {
   }
   if (auditResult.merged === true) {
     return {
+      required: auditResult.required !== false,
       available: Boolean(auditResult.available),
       status: auditResult.status || "needs_review",
       riskLevel: auditResult.riskLevel || "high",
@@ -646,6 +648,7 @@ function parseGradingAuditResult(auditResult = null) {
     issues.push(unavailable ? "模型审查未完成。" : "模型审查要求教师复核。");
   }
   return {
+    required: true,
     available: Boolean(auditResult.available),
     status,
     riskLevel,
@@ -764,11 +767,36 @@ function mergeGradingAudits(audits = [], config = {}) {
   };
 }
 
+function shouldRunDeepGradingAudit(config = {}, input = {}, options = {}) {
+  if (options.runDeepGradingAudit != null) return options.runDeepGradingAudit === true;
+  if (input.runDeepGradingAudit != null) return input.runDeepGradingAudit === true;
+  const configFlag = config.GRADING_RUN_DEEP_AUDIT ?? config.gradingRunDeepAudit ?? config.GRADING_ENABLE_DEEP_AUDIT ?? config.gradingEnableDeepAudit;
+  if (configFlag != null) return String(configFlag).toLowerCase() === "true";
+  return false;
+}
+
+function skippedGradingAudit() {
+  return {
+    merged: true,
+    required: false,
+    available: true,
+    status: "skipped",
+    riskLevel: "low",
+    scoreReliable: null,
+    archiveAllowed: false,
+    issues: [],
+    suggestions: ["深度批改审查未启用；归档仍需教师逐题复核确认。"],
+    raw: { audits: [] },
+    error: null
+  };
+}
+
 function applyGradingAudit(structured = {}, auditResult = null, config = {}) {
-  const requireAudit =
+  const audit = parseGradingAuditResult(auditResult);
+  const configRequiresAudit =
     String(config.GRADING_REQUIRE_SECOND_MODEL_AUDIT ?? config.gradingRequireSecondModelAudit ?? "true").toLowerCase() !== "false" ||
     String(config.GRADING_REQUIRE_PREMIUM_JUDGE ?? config.gradingRequirePremiumJudge ?? "true").toLowerCase() !== "false";
-  const audit = parseGradingAuditResult(auditResult);
+  const requireAudit = audit.required !== false && configRequiresAudit;
   const shouldBlock = requireAudit && (!audit.available || !audit.scoreReliable || !audit.archiveAllowed);
   if (!shouldBlock) {
     return {
@@ -3494,6 +3522,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
 export async function gradeSubmissionService(config, input = {}, options = {}) {
   const ocr = buildSubmissionOcr(input);
   const reference = await prepareSubmissionReferenceAnswers(config, input, ocr, options);
+  const deepAuditRequired = shouldRunDeepGradingAudit(config, input, options);
   const gradingInput = {
     ...input,
     ocrText: input.ocrText || ocr.text || "",
@@ -3511,83 +3540,94 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
       generateReferenceBeforeGrading: true,
       lowConfidenceNoFinalScore: true,
       teacherConfirmBeforeArchive: true,
-      secondModelAuditRequired: String(config.GRADING_REQUIRE_SECOND_MODEL_AUDIT ?? "true").toLowerCase() !== "false"
+      deepModelAuditRequired: deepAuditRequired,
+      secondModelAuditRequired: deepAuditRequired && String(config.GRADING_REQUIRE_SECOND_MODEL_AUDIT ?? "true").toLowerCase() !== "false"
     }
   };
-  const result = await gradeSubmissionText(config, gradingInput);
+  const gradingRunner = options.gradingRunner || gradeSubmissionText;
+  const result = await gradingRunner(config, gradingInput);
   const modelRun = await persistRun(result.modelRun, options);
   const initialStructured = normalizeGradingResult(result, gradingInput, ocr);
-  const auditResult = await reviewWithMiniMax(config, {
-    reviewTask: "submission-grading-audit",
-    title: input.title || "",
-    subject: input.subject || "",
-    kind: input.kind || "",
-    referenceAnswerMode: reference.mode,
-    referenceAnswerConfidence: reference.confidence,
-    referenceAnswers: reference.referenceAnswers || [],
-    questionLayoutManifest: input.questionLayoutManifest
-      ? {
-          version: input.questionLayoutManifest.version || null,
-          source: input.questionLayoutManifest.source || null,
-          questionCount: input.questionLayoutManifest.questionCount || input.questionLayoutManifest.questions?.length || 0,
-          questions: (input.questionLayoutManifest.questions || []).slice(0, 80)
-        }
-      : null,
-    ocr: {
-      status: ocr.status,
-      confidence: ocr.confidence,
-      textPreview: String(ocr.text || "").slice(0, 1200),
-      studentAnswerTextPreview: String(ocr.studentAnswerText || "").slice(0, 1200),
-      printedTextPreview: String(ocr.printedText || "").slice(0, 1200),
-      questions: (ocr.questions || []).slice(0, 80)
-    },
-    grading: {
-      score: initialStructured.score ?? initialStructured.provisionalScore,
-      summary: initialStructured.summary,
-      questionResults: initialStructured.questionResults
-    }
-  });
-  const auditModelRun = await persistRun(auditResult.modelRun, options);
-  const premiumAuditResult = await reviewWithGpt55(config, {
-    reviewTask: "submission-premium-grading-review",
-    title: input.title || "",
-    subject: input.subject || "",
-    kind: input.kind || "",
-    referenceAnswerMode: reference.mode,
-    referenceAnswerConfidence: reference.confidence,
-    referenceAnswers: reference.referenceAnswers || [],
-    questionLayoutManifest: input.questionLayoutManifest
-      ? {
-          version: input.questionLayoutManifest.version || null,
-          source: input.questionLayoutManifest.source || null,
-          questionCount: input.questionLayoutManifest.questionCount || input.questionLayoutManifest.questions?.length || 0,
-          questions: (input.questionLayoutManifest.questions || []).slice(0, 80)
-        }
-      : null,
-    ocr: {
-      status: ocr.status,
-      confidence: ocr.confidence,
-      engine: ocr.engine,
-      reason: ocr.reason,
-      textPreview: String(ocr.text || "").slice(0, 1800),
-      studentAnswerTextPreview: String(ocr.studentAnswerText || "").slice(0, 1800),
-      printedTextPreview: String(ocr.printedText || "").slice(0, 1800),
-      questions: (ocr.questions || []).slice(0, 80)
-    },
-    grading: {
-      score: initialStructured.score ?? initialStructured.provisionalScore,
-      summary: initialStructured.summary,
-      questionResults: initialStructured.questionResults,
-      annotationMarkers: initialStructured.annotationMarkers,
-      quality: initialStructured.quality
-    },
-    secondModelAudit: parseGradingAuditResult(auditResult)
-  });
-  const premiumAuditModelRun = await persistRun(premiumAuditResult.modelRun, options);
-  const combinedAudit = mergeGradingAudits([
-    { role: "second-model", label: "MiniMax二次审计", result: auditResult },
-    { role: "premium", label: "GPT5.5高级审查", result: premiumAuditResult }
-  ], config);
+  let auditModelRun = null;
+  let premiumAuditModelRun = null;
+  let combinedAudit = skippedGradingAudit();
+  if (deepAuditRequired) {
+    const reviewers = options.gradingReviewers || {};
+    const miniMaxReviewer = reviewers.minimax || reviewWithMiniMax;
+    const premiumReviewer = reviewers.premium || reviewWithGpt55;
+    const auditResult = await miniMaxReviewer(config, {
+      reviewTask: "submission-grading-audit",
+      title: input.title || "",
+      subject: input.subject || "",
+      kind: input.kind || "",
+      referenceAnswerMode: reference.mode,
+      referenceAnswerConfidence: reference.confidence,
+      referenceAnswers: reference.referenceAnswers || [],
+      questionLayoutManifest: input.questionLayoutManifest
+        ? {
+            version: input.questionLayoutManifest.version || null,
+            source: input.questionLayoutManifest.source || null,
+            questionCount: input.questionLayoutManifest.questionCount || input.questionLayoutManifest.questions?.length || 0,
+            questions: (input.questionLayoutManifest.questions || []).slice(0, 80)
+          }
+        : null,
+      ocr: {
+        status: ocr.status,
+        confidence: ocr.confidence,
+        textPreview: String(ocr.text || "").slice(0, 1200),
+        studentAnswerTextPreview: String(ocr.studentAnswerText || "").slice(0, 1200),
+        printedTextPreview: String(ocr.printedText || "").slice(0, 1200),
+        questions: (ocr.questions || []).slice(0, 80)
+      },
+      grading: {
+        score: initialStructured.score ?? initialStructured.provisionalScore,
+        summary: initialStructured.summary,
+        questionResults: initialStructured.questionResults
+      }
+    });
+    auditModelRun = await persistRun(auditResult.modelRun, options);
+    const premiumAuditResult = await premiumReviewer(config, {
+      reviewTask: "submission-premium-grading-review",
+      title: input.title || "",
+      subject: input.subject || "",
+      kind: input.kind || "",
+      referenceAnswerMode: reference.mode,
+      referenceAnswerConfidence: reference.confidence,
+      referenceAnswers: reference.referenceAnswers || [],
+      questionLayoutManifest: input.questionLayoutManifest
+        ? {
+            version: input.questionLayoutManifest.version || null,
+            source: input.questionLayoutManifest.source || null,
+            questionCount: input.questionLayoutManifest.questionCount || input.questionLayoutManifest.questions?.length || 0,
+            questions: (input.questionLayoutManifest.questions || []).slice(0, 80)
+          }
+        : null,
+      ocr: {
+        status: ocr.status,
+        confidence: ocr.confidence,
+        engine: ocr.engine,
+        reason: ocr.reason,
+        textPreview: String(ocr.text || "").slice(0, 1800),
+        studentAnswerTextPreview: String(ocr.studentAnswerText || "").slice(0, 1800),
+        printedTextPreview: String(ocr.printedText || "").slice(0, 1800),
+        questions: (ocr.questions || []).slice(0, 80)
+      },
+      grading: {
+        score: initialStructured.score ?? initialStructured.provisionalScore,
+        summary: initialStructured.summary,
+        questionResults: initialStructured.questionResults,
+        annotationMarkers: initialStructured.annotationMarkers,
+        quality: initialStructured.quality
+      },
+      secondModelAudit: parseGradingAuditResult(auditResult)
+    });
+    premiumAuditModelRun = await persistRun(premiumAuditResult.modelRun, options);
+    combinedAudit = mergeGradingAudits([
+      { role: "second-model", label: "MiniMax二次审计", result: auditResult },
+      { role: "premium", label: "GPT5.5高级审查", result: premiumAuditResult }
+    ], config);
+    combinedAudit.required = true;
+  }
   const structured = applyGradingAudit({
     ...initialStructured,
     referenceAnswer: reference,

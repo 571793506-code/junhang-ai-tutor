@@ -2391,6 +2391,8 @@ function StudentList({ onAccess, students }: { onAccess?: (studentId: string, en
 function reviewedQuestionReady(question: GradingWorkbench["questions"][number]) {
   const score = question.score == null ? null : Number(question.score);
   const maxScore = question.maxScore == null ? null : Number(question.maxScore);
+  const needsMistakeEvidence = question.status === "wrong" || question.status === "partial";
+  const hasMistakeEvidence = !needsMistakeEvidence || Boolean(question.knowledgePoint?.trim() && (question.errorStep?.trim() || question.explanation?.trim()));
   return Boolean(
     question.reviewedByTeacher &&
     question.status !== "uncertain" &&
@@ -2399,7 +2401,8 @@ function reviewedQuestionReady(question: GradingWorkbench["questions"][number]) 
     score >= 0 &&
     maxScore != null &&
     Number.isFinite(maxScore) &&
-    maxScore > 0
+    maxScore > 0 &&
+    hasMistakeEvidence
   );
 }
 
@@ -2432,6 +2435,9 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
   const [questionStatus, setQuestionStatus] = useState<"correct" | "wrong" | "partial" | "uncertain">("uncertain");
   const [questionScore, setQuestionScore] = useState("");
   const [questionMaxScore, setQuestionMaxScore] = useState("");
+  const [questionKnowledgePoint, setQuestionKnowledgePoint] = useState("");
+  const [questionErrorStep, setQuestionErrorStep] = useState("");
+  const [questionSuggestedPractice, setQuestionSuggestedPractice] = useState("");
   const [questionNote, setQuestionNote] = useState("");
   const [reviewNote, setReviewNote] = useState("");
   useEffect(() => {
@@ -2448,8 +2454,11 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
     setQuestionStatus(activeQuestionForForm?.status || "uncertain");
     setQuestionScore(activeQuestionForForm?.score != null ? String(activeQuestionForForm.score) : "");
     setQuestionMaxScore(activeQuestionForForm?.maxScore != null ? String(activeQuestionForForm.maxScore) : "");
+    setQuestionKnowledgePoint(activeQuestionForForm?.knowledgePoint || "");
+    setQuestionErrorStep(activeQuestionForForm?.errorStep || activeQuestionForForm?.explanation || "");
+    setQuestionSuggestedPractice(activeQuestionForForm?.suggestedPractice || "");
     setQuestionNote(activeQuestionForForm?.teacherNote || "");
-  }, [activeQuestionForForm?.id, activeQuestionForForm?.score, activeQuestionForForm?.maxScore, activeQuestionForForm?.status, activeQuestionForForm?.teacherNote]);
+  }, [activeQuestionForForm?.id, activeQuestionForForm?.score, activeQuestionForForm?.maxScore, activeQuestionForForm?.status, activeQuestionForForm?.knowledgePoint, activeQuestionForForm?.errorStep, activeQuestionForForm?.explanation, activeQuestionForForm?.suggestedPractice, activeQuestionForForm?.teacherNote]);
   if (!workbenches.length) {
     const batches = groupReviewSubmissions(reviewSubmissions).slice(0, 6);
     const pendingSubmissions = reviewSubmissions.filter((item) => item.needsReview || item.status !== "已复核").length;
@@ -2532,6 +2541,8 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
   const questionScoreValid = questionScoreNumber != null && Number.isFinite(questionScoreNumber) && questionScoreNumber >= 0;
   const questionMaxScoreValid = questionMaxScoreNumber != null && Number.isFinite(questionMaxScoreNumber) && questionMaxScoreNumber > 0;
   const questionScoreWithinMax = questionScoreValid && questionMaxScoreValid && Number(questionScoreNumber) <= Number(questionMaxScoreNumber);
+  const questionMistakeEvidenceRequired = questionStatus === "wrong" || questionStatus === "partial";
+  const questionMistakeEvidenceReady = !questionMistakeEvidenceRequired || Boolean(questionKnowledgePoint.trim() && questionErrorStep.trim());
   const pageQualityIssues = [...(page?.qualityIssues || []), ...(page?.qualityWarnings || [])];
   const pageQualityText = page?.qualityStatus === "ready"
     ? "图片质量可用"
@@ -2554,7 +2565,7 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
   const allQuestionsReviewedForArchive = allQuestionsReviewed(activeQuestions);
   const reviewedScoreTotal = reviewedQuestionScore(activeQuestions);
   const maxScoreTotal = questionMaxScoreTotal(activeQuestions);
-  const questionConfirmDisabled = !active || !question || !questionScoreWithinMax;
+  const questionConfirmDisabled = !active || !question || !questionScoreWithinMax || !questionMistakeEvidenceReady;
   const archiveDisabled = !active || !allQuestionsReviewedForArchive;
   const archiveScoreLabel = reviewedScoreTotal != null
     ? `${reviewedScoreTotal}${maxScoreTotal != null ? `/${maxScoreTotal}` : ""} 分`
@@ -2568,7 +2579,11 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
     setQuestionStatus(status);
     const max = questionMaxScoreNumber ?? (question?.maxScore != null ? Number(question.maxScore) : 0);
     if (!Number.isFinite(max) || max <= 0) return;
-    if (status === "correct") setQuestionScore(String(max));
+    if (status === "correct") {
+      setQuestionScore(String(max));
+      setQuestionErrorStep("");
+      setQuestionSuggestedPractice("");
+    }
     if (status === "partial") setQuestionScore(String(Number((max * 0.5).toFixed(2))));
     if (status === "wrong" || status === "uncertain") setQuestionScore("0");
   };
@@ -2578,6 +2593,9 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
       status: questionStatus,
       score: questionScoreNumber,
       maxScore: questionMaxScoreNumber,
+      knowledgePoint: questionKnowledgePoint.trim(),
+      errorStep: questionErrorStep.trim(),
+      suggestedPractice: questionSuggestedPractice.trim(),
       ...(questionNote.trim() ? { teacherNote: questionNote.trim() } : {})
     });
   };
@@ -2666,8 +2684,12 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
           <label className="field-label">本题得分<input min="0" step="0.5" type="number" value={questionScore} onChange={(event) => setQuestionScore(event.target.value)} placeholder="本题得分" /></label>
           <label className="field-label">本题满分<input min="0.5" step="0.5" type="number" value={questionMaxScore} onChange={(event) => setQuestionMaxScore(event.target.value)} placeholder="满分" /></label>
         </div>
-        <label className="field-label">本题备注<textarea value={questionNote} onChange={(event) => setQuestionNote(event.target.value)} placeholder="记录本题扣分原因、识别问题或需要后续跟进的知识点。" /></label>
+        <label className="field-label">知识点<input value={questionKnowledgePoint} onChange={(event) => setQuestionKnowledgePoint(event.target.value)} placeholder="如：分数加减、方程求解" /></label>
+        <label className="field-label">错因定位<textarea value={questionErrorStep} onChange={(event) => setQuestionErrorStep(event.target.value)} placeholder="错/半对题必填：写明具体错在审题、步骤、计算还是表达。" /></label>
+        <label className="field-label">后续练习<textarea value={questionSuggestedPractice} onChange={(event) => setQuestionSuggestedPractice(event.target.value)} placeholder="可选：填写后续安排的同类题或巩固建议。" /></label>
+        <label className="field-label">本题备注<textarea value={questionNote} onChange={(event) => setQuestionNote(event.target.value)} placeholder="补充识别问题、给家长或老师内部看的处理说明。" /></label>
         {!questionScoreWithinMax ? <p className="context-note blocked"><ShieldCheck size={15} />本题得分必须有效，且不能超过本题满分。</p> : null}
+        {questionMistakeEvidenceRequired && !questionMistakeEvidenceReady ? <p className="context-note blocked"><ShieldCheck size={15} />错题和半对题需要填写知识点与错因定位，才能作为错题证据归档。</p> : null}
         {questionStatus === "uncertain" ? <p className="context-note blocked"><ShieldCheck size={15} />无法识别只能暂存复核状态，不能进入正式错题归档。</p> : null}
         <button className="primary-button" disabled={questionConfirmDisabled} onClick={confirmQuestionReview} type="button"><CheckCircle2 size={16} />确认本题</button>
       </div>

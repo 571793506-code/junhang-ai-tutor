@@ -238,14 +238,14 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 - `POST /api/submissions/grade`
   - 支持 `multipart/form-data`，图片字段名为 `images`，不限制上传张数。
   - 关键字段：`assignmentId`, `studentId`, `subject`, `kind`, `title`, `uploadedBy`。
-  - 上传后先返回 `queued=true`，后台执行混合 OCR、参考答案准备、AI 批改、第二模型审计和 GPT5.5 高级审查。
+  - 上传后先返回 `queued=true`，后台执行混合 OCR、参考答案准备和 AI 主批改；第二模型审计和 GPT5.5 高级审查默认不阻塞主链路，仅在显式传入 `runDeepGradingAudit=true` 或服务端 `GRADING_RUN_DEEP_AUDIT=true` 时执行。
   - 默认 OCR 链路为 `OCR_ENGINE=vision`：MiniMax 视觉识别学生作答、印刷题干、题目区域和批改痕迹。
   - 有 `assignmentId` 时优先使用生成记录里的题目和答案；没有答案键时先生成 `referenceAnswers` 再批改。
   - 若关联作业含 `questionLayoutManifest`，服务层必须优先使用该清单进行逐题参考答案、分值、解析和近似图片标注位置对齐，避免把整页 OCR 文本重新猜分题。
-  - DeepSeek assessment v4 负责参考答案生成和主批改；MiniMax M3 负责二次审计；GPT5.5 负责异常分数拦截和归档前高级审查。
+  - DeepSeek assessment v4 负责参考答案生成和主批改；MiniMax M3 / GPT5.5 深度审查作为显式开启的质量门禁，不作为默认同步主链路。
   - API 在 OCR 前执行本地图片质量检查，记录 `imageQuality`；分辨率、亮度、对比度或清晰度不达标时进入教师复核。
   - 视觉 OCR 会尽量生成 `ocrQuestions[]`，每项包含 `questionNo`, `printedPrompt`, `studentAnswer`, `observedWork`, `bbox`, `confidence`，用于逐题批改和图片标注。
-  - 低置信、图片质量需复核、审计未通过或高级审查未通过时只保留 `provisionalScore`，不生成最终分、不写入学生档案。
+  - 低置信、图片质量需复核、深度审查未通过时只保留 `provisionalScore`，不生成最终分、不写入学生档案；未启用深度审查时仍必须由教师逐题确认后归档。
 
 - `GET /api/grading/workbench`
   - 教师端批改工作台列表。

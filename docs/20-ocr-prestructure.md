@@ -1,6 +1,6 @@
 # OCR 预结构与批改图片元数据
 
-当前阶段图片批改已经绑定到统一的视觉识别与 AI 批改链路：上传后先进入后台队列，API 使用 MiniMax 视觉识别学生作答、印刷题干和逐题位置，再进入参考答案生成、AI 批改、第二模型审计、GPT5.5 高级审查和教师复核。Web、小程序和课堂平板都复用同一组字段，不在前端单独实现识别或批改逻辑。
+当前阶段图片批改已经绑定到统一的视觉识别与 AI 批改链路：上传后先进入后台队列，API 使用 MiniMax 视觉识别学生作答、印刷题干和逐题位置，再进入参考答案生成、AI 主批改和教师复核。第二模型审计和 GPT5.5 高级审查只在显式开启深度批改审查时进入链路。Web、小程序和课堂平板都复用同一组字段，不在前端单独实现识别或批改逻辑。
 
 ## 写入位置
 
@@ -47,8 +47,8 @@
 - 没有答案键时，先由 DeepSeek assessment v4 根据题干生成 `referenceAnswers`，再进行逐题批改。
 - MiniMax 视觉负责图片内容、学生作答、印刷题干和题目区域提取。
 - DeepSeek assessment v4 负责参考答案生成和主批改。
-- MiniMax M3 负责第二模型审计；GPT5.5 负责高级审查、异常分数拦截和归档门禁。
-- MiniMax 或 GPT5.5 任一必需审查未通过时不给最终分。
+- MiniMax M3 和 GPT5.5 的深度审查默认不阻塞主链路，仅在 `runDeepGradingAudit=true` 或 `GRADING_RUN_DEEP_AUDIT=true` 时执行。
+- 深度审查启用后，MiniMax 或 GPT5.5 任一必需审查未通过时不给最终分。
 - 低置信、OCR 证据不足、参考答案不足、逐题结果与分数不一致时，只保留 `provisionalScore`，不写入学生档案。
 - 只有教师在复核页确认后，才允许把分数、错题和薄弱点归档。
 
@@ -75,7 +75,7 @@
 4. 若提交关联生成卷，服务层先读取作业元数据或生成资产中的 `questionLayoutManifest`，避免重新按整页 OCR 猜题。
 5. 识别后写入 `text`、`studentAnswerText`、`printedText`、`confidence`、`engine`。
 6. 服务层准备参考答案：有答案键或布局清单优先，无答案键先生成参考答案。
-7. DeepSeek assessment v4 进行逐题批改，MiniMax M3 做第二模型审计。
-8. GPT5.5 对 OCR 证据、参考答案、逐题批改、异常分数和 MiniMax 审计结果做高级审查。
+7. DeepSeek assessment v4 进行逐题批改。
+8. 如显式开启深度批改审查，MiniMax M3 做第二模型审计，GPT5.5 对 OCR 证据、参考答案、逐题批改、异常分数和 MiniMax 审计结果做高级审查。
 9. 结果进入教师复核队列；低置信不出最终分、不入档。
-10. 教师确认后，才写入 `MistakeRecord` 和学生档案分析。
+10. 教师逐题确认后，才写入 `MistakeRecord` 和学生档案分析。
