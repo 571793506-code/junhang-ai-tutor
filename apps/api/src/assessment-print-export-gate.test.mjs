@@ -14,3 +14,9 @@ test("assessment print export cannot bypass draft review with force", () => {
   assert.doesNotMatch(routeSource, /req\.body\?\.force/);
   assert.doesNotMatch(routeSource, /teacherReviewStatus:\s*metadata\.draftReviewStatus\s*\|\|\s*"accepted"/);
 });
+
+test("assessment print layout keeps English four-line estimates compact", () => {
+  assert.match(source, /type === "fill" \? 9 : Math\.max\(16, spaceMm\)\) \* 2\.35/);
+  assert.match(source, /\.english-four-line div \{ height: 6\.6mm; position: relative; margin-bottom: 0\.8mm; \}/);
+  assert.doesNotMatch(source, /type === "fill" \? 16 : spaceMm\) \* 3\.2/);
+});

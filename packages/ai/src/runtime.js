@@ -755,11 +755,18 @@ export async function draftAssessment(config, input = {}) {
     }
   ];
 
+  const assessmentTotalTimeoutMs = firstPositiveNumber(
+    input.assessmentTotalTimeoutMs,
+    input.generationTimeoutMs,
+    config.ASSESSMENT_DRAFT_TOTAL_TIMEOUT_MS,
+    config.assessmentDraftTotalTimeoutMs
+  );
   const assessmentTimeoutMs = firstPositiveNumber(
     config.DEEPSEEK_ASSESSMENT_DRAFT_TIMEOUT_MS ||
     config.deepseekAssessmentDraftTimeoutMs ||
     config.DEEPSEEK_ASSESSMENT_TIMEOUT_MS ||
     config.deepseekAssessmentTimeoutMs ||
+    assessmentTotalTimeoutMs ||
     240000
   );
   const premiumAssessmentTimeoutMs = firstPositiveNumber(
@@ -772,12 +779,6 @@ export async function draftAssessment(config, input = {}) {
     config.MINIMAX_ASSESSMENT_TIMEOUT_MS ||
     config.minimaxAssessmentTimeoutMs ||
     150000
-  );
-  const assessmentTotalTimeoutMs = firstPositiveNumber(
-    input.assessmentTotalTimeoutMs,
-    input.generationTimeoutMs,
-    config.ASSESSMENT_DRAFT_TOTAL_TIMEOUT_MS,
-    config.assessmentDraftTotalTimeoutMs
   );
   const assessmentMaxTokens = firstPositiveNumber(
     input.assessmentMaxTokens,

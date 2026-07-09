@@ -97,3 +97,71 @@ test("gradeSubmissionService runs deep grading audits when explicitly enabled", 
   assert.equal(result.structured.gradingAudit.status, "pass");
   assert.equal(result.structured.gradingAudit.archiveAllowed, true);
 });
+
+test("gradeSubmissionService supplies structured evidence to deep grading audits from answer key and typed text", async () => {
+  const auditPayloads = [];
+  const reviewer = async (_config, payload) => {
+    auditPayloads.push(payload);
+    return {
+      available: true,
+      reviewText: JSON.stringify({
+        status: "pass",
+        riskLevel: "low",
+        scoreReliable: true,
+        archiveAllowed: true,
+        issues: [],
+        suggestions: []
+      }),
+      modelRun: { status: "SUCCESS" }
+    };
+  };
+
+  const result = await gradeSubmissionService(
+    {},
+    {
+      subject: "数学",
+      kind: "小测",
+      title: "结构化证据审计",
+      answerKey: "1=42;2=18",
+      printedText: "1. 6*7=? 2. 3*6=?",
+      studentAnswerText: "1. 42 2. 18",
+      runDeepGradingAudit: true
+    },
+    {
+      persist: false,
+      gradingRunner: async () => ({
+        available: true,
+        providerId: "fake",
+        gradingText: JSON.stringify({
+          score: 100,
+          summary: "两题均正确。",
+          needsTeacherReview: true,
+          questionResults: [
+            { questionNo: "1", status: "correct", studentAnswer: "42", correctAnswer: "42", confidence: 0.95 },
+            { questionNo: "2", status: "correct", studentAnswer: "18", correctAnswer: "18", confidence: 0.95 }
+          ]
+        }),
+        modelRun: { provider: "fake", model: "fake", skill: "submission-grading", status: "SUCCESS" }
+      }),
+      gradingReviewers: {
+        minimax: reviewer,
+        premium: reviewer
+      }
+    }
+  );
+
+  assert.equal(auditPayloads.length, 2);
+  for (const payload of auditPayloads) {
+    assert.deepEqual(
+      payload.referenceAnswers.map((item) => [item.questionNo, item.correctAnswer]),
+      [["1", "42"], ["2", "18"]]
+    );
+    assert.equal(payload.questionLayoutManifest.questionCount, 2);
+    assert.deepEqual(
+      payload.ocr.questions.map((item) => [item.questionNo, item.printedText, item.studentAnswer]),
+      [["1", "6*7=?", "42"], ["2", "3*6=?", "18"]]
+    );
+    assert.equal(payload.ocr.confidence, 0.92);
+  }
+  assert.equal(result.structured.gradingAudit.status, "pass");
+});

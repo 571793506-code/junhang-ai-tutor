@@ -160,6 +160,74 @@ test("draftAssessmentService assigns standard quiz generation budget", async () 
   assert.equal(result.generationPipeline.model.assessmentMaxTokens, 20000);
 });
 
+test("draftAssessmentService fallback English unit quiz reserves enough reading content for two-page layout", async () => {
+  const result = await draftAssessmentService(
+    {},
+    {
+      subject: "英语",
+      kind: "小测",
+      grade: "五年级",
+      requirement: "五年级下册第四单元英语小测，包含中英文互译、写单词、造句、选择和阅读。"
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async () => ({
+        available: false,
+        providerId: "fake",
+        draftText: "",
+        modelRun: {
+          provider: "fake",
+          model: "fake-assessment",
+          skill: "assessment-draft",
+          status: "FAILED",
+          metadata: { attempts: [] }
+        }
+      })
+    }
+  );
+
+  const readingItems = result.draftItems.filter((item) => item.itemType === "reading");
+  const visiblePassage = readingItems.find((item) => item.metadata?.showPassage);
+
+  assert.equal(result.usedDynamicFallback, true);
+  assert.ok(readingItems.length >= 6);
+  assert.ok(String(visiblePassage?.metadata?.passageText || "").length >= 900);
+});
+
+test("draftAssessmentService fallback English practice keeps enough reading work instead of sparse second page", async () => {
+  const result = await draftAssessmentService(
+    {},
+    {
+      subject: "英语",
+      kind: "练习",
+      grade: "五年级",
+      requirement: "针对 Unit 4 词汇、句型表达和阅读薄弱点生成英语练习。"
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async () => ({
+        available: false,
+        providerId: "fake",
+        draftText: "",
+        modelRun: {
+          provider: "fake",
+          model: "fake-assessment",
+          skill: "assessment-draft",
+          status: "FAILED",
+          metadata: { attempts: [] }
+        }
+      })
+    }
+  );
+
+  const readingItems = result.draftItems.filter((item) => item.itemType === "reading");
+  const visiblePassage = readingItems.find((item) => item.metadata?.showPassage);
+
+  assert.equal(result.usedDynamicFallback, true);
+  assert.ok(readingItems.length >= 4);
+  assert.ok(String(visiblePassage?.metadata?.passageText || "").length >= 650);
+});
+
 test("draftAssessmentService expands all configured generation profile budgets", async () => {
   const runnerInputs = [];
   const runner = async (_config, input) => {

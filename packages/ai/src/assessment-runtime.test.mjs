@@ -176,3 +176,58 @@ test("draftAssessment uses expanded default assessment model attempt timeouts", 
     await close(server);
   }
 });
+
+test("draftAssessment lets request-level total budget expand primary assessment timeout", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              title: "语文阅读表达练习",
+              sections: [
+                {
+                  title: "三、阅读提升",
+                  items: [
+                    {
+                      itemType: "reading",
+                      prompt: "短文主要写了什么？",
+                      answer: "围绕阅读材料概括主要内容。",
+                      analysisSteps: ["先读全文。", "再概括人物和事件。"],
+                      knowledgePoint: "阅读概括"
+                    }
+                  ]
+                }
+              ]
+            })
+          }
+        }
+      ]
+    }));
+  });
+  const address = await listen(server);
+  try {
+    const result = await draftAssessment(
+      {
+        DEEPSEEK_API_KEY: "test-key",
+        DEEPSEEK_BASE_URL: `http://127.0.0.1:${address.port}`,
+        DEEPSEEK_ASSESSMENT_MODEL: "formal-budget-model",
+        DEEPSEEK_ASSESSMENT_FALLBACK_MODEL: "formal-budget-model"
+      },
+      {
+        subject: "语文",
+        kind: "练习",
+        grade: "五年级",
+        requirement: "正式预算生成",
+        assessmentTotalTimeoutMs: 270000
+      }
+    );
+
+    assert.equal(result.available, true);
+    assert.equal(result.modelRun.metadata.assessmentTimeoutMs, 270000);
+    assert.equal(result.modelRun.metadata.assessmentTotalTimeoutMs, 270000);
+  } finally {
+    await close(server);
+  }
+});

@@ -85,6 +85,30 @@ test("layout check ignores template guidance text when scanning English short as
   assert.deepEqual(check.issues, []);
 });
 
+test("layout check does not treat guidance or option text as an English writing section", () => {
+  const check = evaluateGenerationLayoutPdf({
+    name: "英语练习-题目.pdf",
+    pages: 2,
+    text: [
+      "五年级英语练习排版稿",
+      "英语 · 不默认使用试卷式文章选词填空、完形填空、短文语法填空或写作。",
+      "三、易错选择题",
+      "9. What did Mia want to improve? （　　　）",
+      "A. English speaking",
+      "B. Maths writing",
+      "四、短阅读巩固"
+    ].join("\n"),
+    pageMetrics: [
+      { page: 1, bottomBlankMm: 92.1, drawingCount: 12 },
+      { page: 2, bottomBlankMm: 133.8, drawingCount: 5 }
+    ]
+  });
+
+  assert.equal(check.ok, false);
+  assert.ok(check.issues.includes("末页底部留白 133.8mm，疑似题量或作答区分配不足。"));
+  assert.equal(check.issues.some((issue) => issue.includes("写作页")), false);
+});
+
 test("layout check accepts a dense two-page math quiz", () => {
   const check = evaluateGenerationLayoutPdf({
     name: "数学小测-题目.pdf",
@@ -125,6 +149,40 @@ test("layout check allows intentional final math solution work space", () => {
     pageMetrics: [
       { page: 1, bottomBlankMm: 96.8, drawingCount: 10, text: "三、计算题\n9. 解方程：x÷1.5 = 6.4。" },
       { page: 2, bottomBlankMm: 128.5, drawingCount: 10, text: "四、解决问题\n13. 如图，三角形 ABC 中，∠A=46°，∠B=∠C。" }
+    ]
+  });
+
+  assert.equal(check.ok, true);
+  assert.deepEqual(check.issues, []);
+});
+
+test("layout check allows final math exam page with labeled solution and bonus work areas", () => {
+  const check = evaluateGenerationLayoutPdf({
+    name: "数学试卷-题目.pdf",
+    pages: 4,
+    text: "六年级数学试卷\n试卷 · A4 · 第1/4页\n试卷 · A4 · 第2/4页\n试卷 · A4 · 第3/4页\n试卷 · A4 · 第4/4页\n六、综合应用题\n综合分析与解答\n七、附加题\n附加题思考过程",
+    pageMetrics: [
+      { page: 1, bottomBlankMm: 70.2, drawingCount: 6, text: "一、填空题" },
+      { page: 2, bottomBlankMm: 60.1, drawingCount: 6, text: "三、计算题\n计算过程" },
+      { page: 3, bottomBlankMm: 84.7, drawingCount: 6, text: "五、解决问题\n解答过程" },
+      { page: 4, bottomBlankMm: 226.1, drawingCount: 2, text: "六、综合应用题\n综合分析与解答\n七、附加题\n附加题思考过程" }
+    ]
+  });
+
+  assert.equal(check.ok, true);
+  assert.deepEqual(check.issues, []);
+});
+
+test("layout check allows final math exam page with word problems reserving answer space", () => {
+  const check = evaluateGenerationLayoutPdf({
+    name: "数学试卷-题目.pdf",
+    pages: 4,
+    text: "六年级数学试卷\n试卷 · A4 · 第1/4页\n试卷 · A4 · 第2/4页\n试卷 · A4 · 第3/4页\n试卷 · A4 · 第4/4页\n四、解答题",
+    pageMetrics: [
+      { page: 1, bottomBlankMm: 70.2, drawingCount: 6, text: "一、填空题" },
+      { page: 2, bottomBlankMm: 60.1, drawingCount: 6, text: "三、计算题\n计算过程" },
+      { page: 3, bottomBlankMm: 84.7, drawingCount: 6, text: "四、解答题\n解答过程" },
+      { page: 4, bottomBlankMm: 226.1, drawingCount: 5, text: "33. 一个圆柱形水桶（无盖）。（1）做这个水桶至少需要多少平方分米的铁皮？（2）这个水桶能盛水多少升？\n34. 甲乙两地相距多少千米？" }
     ]
   });
 

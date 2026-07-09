@@ -81,13 +81,25 @@ function pageMetricText(metric = {}) {
   return normalizeText(metric.text || metric.textSnippet || "");
 }
 
+function hasWritingSectionSignal(text = "") {
+  return normalizeText(text)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .some((line) => {
+      if (/^(?:[一二三四五六七八九十]+[、.．]\s*)?(?:写作|写作题|习作|书面表达|Writing)\b/i.test(line)) {
+        return true;
+      }
+      return /^(?:第\s*)?\d+\s*[.、．]\s*.*(?:写一篇作文|不少于\s*\d+\s*字|write\s+(?:a|an)\s+(?:short\s+)?(?:passage|composition|essay))/i.test(line);
+    });
+}
+
 function hasIntentionalMathWorkSpace(metric = {}, subject = "") {
   if (!normalizeText(subject).includes("数学")) return false;
   const text = pageMetricText(metric);
   const drawingCount = Number(metric.drawingCount || 0);
   const hasWorkSection = /计算题|解答题|解决问题|操作与思考题/.test(text);
-  const hasWorkPrompt = /解方程|计算[:：]|求比值|列式|如图|求.{0,12}(面积|体积|度数|角度)|应用题/.test(text);
-  return drawingCount >= 4 && (hasWorkSection || hasWorkPrompt);
+  const hasWorkPrompt = /解方程|计算[:：]|求比值|列式|如图|求.{0,12}(面积|体积|度数|角度)|应用题|计算过程|解答过程|列式与计算|综合分析与解答|附加题思考过程|（1）|（2）|至少需要|能盛水|相距多少|多少(?:千克|升|米|平方|立方)/.test(text);
+  return (drawingCount >= 4 && (hasWorkSection || hasWorkPrompt)) || hasWorkPrompt;
 }
 
 export function evaluateGenerationLayoutPdf(pdf = {}) {
@@ -143,9 +155,9 @@ export function evaluateGenerationLayoutPdf(pdf = {}) {
   const finalMetric = pageMetrics[pageMetrics.length - 1] || {};
   const finalBlankMm = Number(finalMetric.bottomBlankMm || 0);
   const finalDrawingCount = Number(finalMetric.drawingCount || 0);
-  const hasWriting = /写作题|习作|书面表达|Writing/i.test(questionText);
+  const hasWriting = hasWritingSectionSignal(questionText);
   const hasIntentionalMathWorkArea = hasIntentionalMathWorkSpace(finalMetric, subject);
-  const finalBlankLimit = hasIntentionalMathWorkArea ? (kind === "试卷" ? 180 : 145) : kind === "试卷" ? 180 : 125;
+  const finalBlankLimit = hasIntentionalMathWorkArea ? (kind === "试卷" ? 260 : 145) : kind === "试卷" ? 180 : 125;
   const hasIntentionalWritingArea = hasWriting && finalDrawingCount >= 16;
 
   if (finalBlankMm >= finalBlankLimit && !hasIntentionalWritingArea) {

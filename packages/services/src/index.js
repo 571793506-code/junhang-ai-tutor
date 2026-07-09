@@ -301,17 +301,17 @@ function buildAssessmentBlueprint(input = {}) {
         { title: includeListening ? "四、阅读理解" : "三、阅读理解", type: "reading", target: 10 },
         { title: includeListening ? "五、写作" : "四、写作", type: "writing", target: 1 }
       ] },
-      小测: { pages: 2, minItems: 14, maxItems: 18, sections: [
+      小测: { pages: 2, minItems: 16, maxItems: 20, sections: [
         { title: "一、词汇与短语", type: "fill", target: 8 },
         { title: "二、句子运用", type: "solution", target: 2 },
         { title: "三、单项选择题", type: "choice", target: 4 },
-        { title: "四、阅读理解", type: "reading", target: 4 }
+        { title: "四、阅读理解", type: "reading", target: 6 }
       ] },
-      练习: { pages: 2, minItems: 14, maxItems: 16, sections: [
+      练习: { pages: 2, minItems: 16, maxItems: 16, sections: [
         { title: "一、针对性词汇巩固", type: "fill", target: 4 },
         { title: "二、句型表达练习", type: "solution", target: 4 },
         { title: "三、易错选择题", type: "choice", target: 4 },
-        { title: "四、短阅读巩固", type: "reading", target: 2 }
+        { title: "四、短阅读巩固", type: "reading", target: 4 }
       ] }
     }
   };
@@ -434,7 +434,7 @@ function buildSubmissionOcr(input = {}) {
     studentAnswerText,
     printedText,
     manualText,
-    confidence: optionalNumber(input.ocrConfidence),
+    confidence: optionalNumber(input.ocrConfidence) ?? (manualText ? 1 : ocrText || studentAnswerText || printedText ? 0.92 : null),
     pageNumber: optionalNumber(input.pageNumber),
     questionRange: optionalText(input.questionRange),
     imageIndex: optionalNumber(input.imageIndex),
@@ -474,6 +474,52 @@ function toStringArray(value) {
     .split(/\n|；|;|、/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function parseNumberedTextSegments(value) {
+  const source = String(value || "")
+    .replace(/\r?\n/g, " ")
+    .replace(/^\s*(?:答案|参考答案)\s*[:：]\s*/i, "")
+    .trim();
+  if (!source) return [];
+  const entries = [];
+  const pattern = /(?:^|[\s;；,，])(?:第\s*)?(\d{1,3})\s*(?:题)?\s*[.、:=：）)]\s*([\s\S]*?)(?=(?:[\s;；,，]+(?:第\s*)?\d{1,3}\s*(?:题)?\s*[.、:=：）)])|$)/g;
+  let match;
+  while ((match = pattern.exec(source))) {
+    const text = String(match[2] || "").replace(/[;；,，]\s*$/, "").trim();
+    if (match[1] && text) entries.push({ questionNo: String(Number(match[1])), text });
+  }
+  if (entries.length) return entries;
+  return source
+    .split(/[;；,\n\r]+/)
+    .map((part) => part.trim())
+    .map((part) => part.match(/^(?:第\s*)?(\d{1,3})\s*(?:题)?\s*[.、:=：）)]?\s*(.+)$/))
+    .filter(Boolean)
+    .map((item) => ({ questionNo: String(Number(item[1])), text: item[2].trim() }))
+    .filter((item) => item.text);
+}
+
+function parseAnswerKeyReferenceAnswers(answerKey) {
+  return parseNumberedTextSegments(answerKey).map((item, index) => normalizeReferenceAnswerItem({
+    questionNo: item.questionNo,
+    correctAnswer: item.text,
+    confidence: 1
+  }, index));
+}
+
+function mergeReferenceAnswerGroups(...groups) {
+  const merged = [];
+  const seen = new Set();
+  for (const group of groups) {
+    for (const item of Array.isArray(group) ? group : []) {
+      const normalized = normalizeReferenceAnswerItem(item, merged.length);
+      const key = String(normalized.questionNo || "");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(normalized);
+    }
+  }
+  return merged;
 }
 
 function normalizeReferenceAnswerItem(item, index) {
@@ -541,13 +587,16 @@ function hasReferenceAnswerEvidence(input = {}) {
 
 async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, options = {}) {
   const assignmentReferences = assignmentAnswerReferences(input);
-  if (input.answerKey || assignmentReferences.length) {
+  const explicitReferences = Array.isArray(input.referenceAnswers) ? input.referenceAnswers.map(normalizeReferenceAnswerItem) : [];
+  const answerKeyReferences = parseAnswerKeyReferenceAnswers(input.answerKey);
+  const keyedReferenceAnswers = mergeReferenceAnswerGroups(assignmentReferences, explicitReferences, answerKeyReferences);
+  if (input.answerKey || keyedReferenceAnswers.length) {
     return {
       mode: "answer_key",
       available: true,
       source: "teacher_or_generated_assignment",
       answerKey: input.answerKey || null,
-      referenceAnswers: assignmentReferences,
+      referenceAnswers: keyedReferenceAnswers,
       confidence: 1,
       needsTeacherReview: false,
       modelRunId: null,
@@ -893,6 +942,108 @@ function normalizeBBox(value, index, total, input = {}, questionNo = "") {
     y: clampUnit(source.y ?? source.top, fallback.y),
     w: Math.max(0.04, clampUnit(source.w ?? source.width, fallback.w)),
     h: Math.max(0.035, clampUnit(source.h ?? source.height, fallback.h))
+  };
+}
+
+function normalizeSubmissionOcrQuestion(item, index, total, input = {}, referenceByQuestion = new Map()) {
+  const source = item && typeof item === "object" ? item : {};
+  const questionNo = String(source.questionNo || source.no || source.index || index + 1);
+  const reference = referenceByQuestion.get(questionNo) || {};
+  return {
+    questionNo,
+    printedText: String(source.printedText || source.prompt || source.question || reference.prompt || "").trim(),
+    studentAnswer: String(source.studentAnswer || source.studentAnswerText || source.answer || source.studentWork || "").trim(),
+    correctAnswer: String(source.correctAnswer || source.expectedAnswer || reference.correctAnswer || "").trim(),
+    confidence: clampUnit(source.confidence, 0.92),
+    bbox: normalizeBBox(source.bbox || source.box || source.position, index, total, input, questionNo)
+  };
+}
+
+function buildStructuredSubmissionOcrQuestions(input = {}, ocr = {}, referenceAnswers = []) {
+  const referenceByQuestion = new Map(
+    (Array.isArray(referenceAnswers) ? referenceAnswers : []).map((item) => [String(item.questionNo || ""), item])
+  );
+  const existingQuestions = Array.isArray(ocr.questions) ? ocr.questions : [];
+  const existingByQuestion = new Map(existingQuestions.map((item, index) => [
+    String(item?.questionNo || item?.no || item?.index || index + 1),
+    item
+  ]));
+  const printedByQuestion = new Map(parseNumberedTextSegments(input.printedText || ocr.printedText || input.ocrText || ocr.text)
+    .map((item) => [item.questionNo, item.text]));
+  const studentByQuestion = new Map(parseNumberedTextSegments(input.studentAnswerText || ocr.studentAnswerText || input.ocrStudentAnswerText)
+    .map((item) => [item.questionNo, item.text]));
+  const questionNos = Array.from(new Set([
+    ...referenceByQuestion.keys(),
+    ...printedByQuestion.keys(),
+    ...studentByQuestion.keys(),
+    ...existingByQuestion.keys()
+  ])).filter(Boolean);
+
+  return questionNos.map((questionNo, index) => {
+    const existing = existingByQuestion.get(questionNo) || {};
+    return normalizeSubmissionOcrQuestion({
+      ...existing,
+      questionNo,
+      printedText: existing.printedText || existing.prompt || printedByQuestion.get(questionNo) || "",
+      studentAnswer: existing.studentAnswer || existing.studentAnswerText || existing.answer || studentByQuestion.get(questionNo) || "",
+      correctAnswer: existing.correctAnswer || referenceByQuestion.get(questionNo)?.correctAnswer || ""
+    }, index, questionNos.length, input, referenceByQuestion);
+  });
+}
+
+function enrichSubmissionOcr(input = {}, ocr = {}, referenceAnswers = []) {
+  const questions = Array.isArray(ocr.questions) && ocr.questions.length
+    ? ocr.questions.map((item, index) => normalizeSubmissionOcrQuestion(
+        item,
+        index,
+        ocr.questions.length,
+        input,
+        new Map((referenceAnswers || []).map((reference) => [String(reference.questionNo || ""), reference]))
+      ))
+    : buildStructuredSubmissionOcrQuestions(input, ocr, referenceAnswers);
+  return {
+    ...ocr,
+    confidence: ocr.confidence ?? (questions.length ? 0.92 : null),
+    questions
+  };
+}
+
+function buildSubmissionQuestionLayoutManifest(input = {}, ocr = {}, referenceAnswers = []) {
+  if (input.questionLayoutManifest?.questions?.length) return input.questionLayoutManifest;
+  const questions = Array.isArray(ocr.questions) && ocr.questions.length
+    ? ocr.questions
+    : buildStructuredSubmissionOcrQuestions(input, ocr, referenceAnswers);
+  if (!questions.length) return null;
+  const referenceByQuestion = new Map((referenceAnswers || []).map((item) => [String(item.questionNo || ""), item]));
+  return {
+    version: "submission-layout-manifest-v1",
+    source: "typed-text-estimate",
+    questionCount: questions.length,
+    generatedAt: new Date().toISOString(),
+    questions: questions.map((question, index) => {
+      const questionNo = String(question.questionNo || index + 1);
+      const reference = referenceByQuestion.get(questionNo) || {};
+      return {
+        questionNo,
+        orderIndex: index + 1,
+        prompt: question.printedText || reference.prompt || "",
+        answer: question.correctAnswer || reference.correctAnswer || "",
+        score: optionalNumber(reference.score),
+        page: question.bbox?.page || 1,
+        bbox: question.bbox || fallbackBBox(index, questions.length, 1),
+        bboxSource: "typed-text-estimate"
+      };
+    })
+  };
+}
+
+function summarizeQuestionLayoutManifestForAudit(manifest = null) {
+  if (!manifest) return null;
+  return {
+    version: manifest.version || null,
+    source: manifest.source || null,
+    questionCount: manifest.questionCount || manifest.questions?.length || 0,
+    questions: (manifest.questions || []).slice(0, 80)
   };
 }
 
@@ -1978,6 +2129,8 @@ function ensureLongEnglishPassage(id, text, targetWords = 260) {
   const words = String(text || "").match(/[A-Za-z]+/g)?.length || 0;
   if (words >= targetWords) return text;
   const extras = {
+    "grade5-unit4-special-days": "Before each special day, Amy's group checks the class calendar and writes a short plan. On Monday, they choose what to prepare. On Tuesday, they ask classmates who can help. Before the art show, Amy and Chen Jie put pictures into different boxes, so younger students could find their work quickly. Before the sports meet, Zhang Peng made a small running chart and wrote every practice day on it. Their teacher said a special day is not only a date on the wall. It is also a chance to plan, practise, share and thank the people who help. After the singing contest, the class wrote thank-you cards to the music teacher because she helped them listen carefully and sing together.",
+    "english-practice-short": "After two weeks, Mia did not stop practising. She made a new table with three columns: new words, difficult sounds and useful sentences. Every Friday, she checked the table with her partner. Sometimes she still made mistakes, but now she could find the reason. Her partner wrote one friendly suggestion after each practice. Mia also listened to two short recordings from her teacher and copied the best sentence into her notebook. At the end of the month, she gave a one-minute talk about her reading plan. She was nervous, but she spoke more slowly and clearly than before. Her teacher said the best practice was not doing many exercises once, but using a small method again and again.",
     "english-reading-a": "The next week, Jack's group did not stop at the blue box. They counted the paper again and asked two younger classes why they sometimes forgot to use the other side. One child said the notice was too high to see, so the group moved it lower and added a small picture. Another child said there was no place to put clean half-used paper, so Jack divided the box into two parts. These small changes made the plan easier to follow. When the class wrote their final report, they included numbers, photos and short interviews instead of only saying the project was useful. The report also showed a problem they had not expected. Some students used the saved paper for quick notes and then threw it away again. Jack's group decided to make a second notice: Good paper deserves a second job, not only a second touch. After that, art teachers began to keep small paper baskets on every table. The project became part of the school's Green Week display, and younger students used the notebooks to record plant changes in science class.",
     "english-reading-b": "Anna later changed the way she used Book Helper. She first wrote down her own question, then used the screen to find possible books. After that, she compared the contents pages and checked whether each book really answered her question. Sometimes the screen gave a quick direction, but a real answer still came from careful reading. Mr Brown asked Anna to share this method with younger children. She told them, 'A screen can open a door, but your own question decides which room you enter.' The children laughed, but they remembered the idea when they started their reports. Two weeks later, Anna returned to the library with three classmates. They wanted to learn why some whales travel so far every year. Book Helper showed many shelves, but Anna asked everyone to choose only books that gave reasons, examples and maps. Their report was not the fastest one, but it was the clearest. Mr Brown put it near the screen to remind children that tools are useful only when readers think for themselves.",
     "english-reading-c": "The project did not end with the old map. Ms Lee divided the class into three groups. One group looked for old photos, one group interviewed teachers, and the third group drew a new map of the school. They found that many names in the school had stories behind them. The Reading Steps were once the place where students read aloud every Friday. The quiet path behind the music room used to be a vegetable garden. When the students put the old and new maps together, they understood that a school is not only made of buildings. It is also made of memories and shared work. At first, some students wanted to make the display colourful and finish it quickly. Ms Lee asked them to add evidence for every sentence. The class then wrote dates under old photos, marked changed places with blue stars, and added short interview notes. Parents stopped at the display during Open Day because it looked like a real history report, not just a pretty poster.",
@@ -2187,13 +2340,15 @@ function buildEnglishUnitQuizItems(input = {}) {
   const passage = ensureLongEnglishPassage(
     "grade5-unit4-special-days",
     "Hello, I am Amy. Our school has many special days in April and May. The art show is on April 4th. I will draw a picture of our garden for it. The sports meet is on April 18th. Zhang Peng likes running, so he is happy and practises after class. The reading festival is on April 25th. We will share our favourite books in the library. The singing contest is on May 5th, and Chen Jie wants to sing an English song with her friends. My birthday is on May 12th, too. I like these special days because we can study, play, help each other and share our work with friends. When a special day comes, our teacher asks us to write it on the class calendar, so everyone can remember the date and get ready.",
-    175
+    240
   );
   const readingItems = [
     ["When is the art show?", ["A. April 4th", "B. April 18th", "C. May 5th", "D. May 12th"], "A", "细节定位"],
     ["What will Amy do for the art show?", ["A. Run", "B. Draw a picture", "C. Sing a song", "D. Play football"], "B", "信息提取"],
     ["Who likes running?", ["A. Amy", "B. Zhang Peng", "C. Mike", "D. Sarah"], "B", "人物信息"],
-    ["Why does Amy like these special days?", ["A. Because she can sleep at school.", "B. Because she can study, play and share work with friends.", "C. Because she has no homework.", "D. Because she likes rain."], "B", "原因理解"]
+    ["Why does Amy like these special days?", ["A. Because she can sleep at school.", "B. Because she can study, play and share work with friends.", "C. Because she has no homework.", "D. Because she likes rain."], "B", "原因理解"],
+    ["What does Amy's group do on Tuesday?", ["A. They ask who can help.", "B. They clean the classroom.", "C. They buy sports shoes.", "D. They change the school trip."], "A", "计划细节"],
+    ["What does the teacher think a special day can help students do?", ["A. Forget their homework.", "B. Plan, practise, share and thank others.", "C. Stay at home.", "D. Only remember dates."], "B", "主旨理解"]
   ].map(([prompt, options, answer, knowledgePoint], index) => ({
     itemType: "reading",
     sectionTitle: readingSection,
@@ -2281,11 +2436,13 @@ function buildEnglishPracticeItems(input = {}) {
   const passage = ensureLongEnglishPassage(
     "english-practice-short",
     "Mia wanted to improve her English speaking. At first, she only read new words from the book. Her teacher asked her to make a small plan: read one short dialogue, record her voice, and listen again. Mia found that she often forgot the ending sounds of words. She practised with her partner every Tuesday and Thursday. Two weeks later, she could ask and answer questions more clearly. She learned that a small plan is useful when she follows it every day.",
-    150
+    220
   );
   const readingItems = [
     ["What did Mia want to improve?", ["A. English speaking", "B. Maths writing", "C. Art drawing", "D. Running"], "A", "细节定位"],
-    ["What did Mia learn from the practice?", ["A. A small plan is useful when she follows it.", "B. She should stop recording.", "C. Dialogues are not helpful.", "D. Ending sounds are never important."], "A", "主旨理解"]
+    ["What did Mia learn from the practice?", ["A. A small plan is useful when she follows it.", "B. She should stop recording.", "C. Dialogues are not helpful.", "D. Ending sounds are never important."], "A", "主旨理解"],
+    ["What did Mia write in her new table?", ["A. New words, difficult sounds and useful sentences.", "B. Sports scores and lunch plans.", "C. Art colours and songs.", "D. Bus times and weather."], "A", "信息提取"],
+    ["Why did the teacher like Mia's practice method?", ["A. Because she used a small method again and again.", "B. Because she never made mistakes.", "C. Because she stopped speaking.", "D. Because she finished only one exercise."], "A", "推理理解"]
   ].map(([prompt, options, answer, knowledgePoint], index) => ({
     itemType: "reading",
     sectionTitle: readingSection,
@@ -3520,8 +3677,10 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
 }
 
 export async function gradeSubmissionService(config, input = {}, options = {}) {
-  const ocr = buildSubmissionOcr(input);
-  const reference = await prepareSubmissionReferenceAnswers(config, input, ocr, options);
+  const baseOcr = buildSubmissionOcr(input);
+  const reference = await prepareSubmissionReferenceAnswers(config, input, baseOcr, options);
+  const ocr = enrichSubmissionOcr(input, baseOcr, reference.referenceAnswers || []);
+  const questionLayoutManifest = buildSubmissionQuestionLayoutManifest(input, ocr, reference.referenceAnswers || []);
   const deepAuditRequired = shouldRunDeepGradingAudit(config, input, options);
   const gradingInput = {
     ...input,
@@ -3529,7 +3688,7 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
     studentAnswerText: input.studentAnswerText || ocr.studentAnswerText || "",
     printedText: input.printedText || ocr.printedText || "",
     ocrQuestions: Array.isArray(input.ocrQuestions) ? input.ocrQuestions : ocr.questions || [],
-    questionLayoutManifest: input.questionLayoutManifest || null,
+    questionLayoutManifest,
     answerKey: input.answerKey || reference.answerKey || null,
     referenceAnswers: reference.referenceAnswers || [],
     referenceAnswerMode: reference.mode,
@@ -3563,14 +3722,7 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
       referenceAnswerMode: reference.mode,
       referenceAnswerConfidence: reference.confidence,
       referenceAnswers: reference.referenceAnswers || [],
-      questionLayoutManifest: input.questionLayoutManifest
-        ? {
-            version: input.questionLayoutManifest.version || null,
-            source: input.questionLayoutManifest.source || null,
-            questionCount: input.questionLayoutManifest.questionCount || input.questionLayoutManifest.questions?.length || 0,
-            questions: (input.questionLayoutManifest.questions || []).slice(0, 80)
-          }
-        : null,
+      questionLayoutManifest: summarizeQuestionLayoutManifestForAudit(questionLayoutManifest),
       ocr: {
         status: ocr.status,
         confidence: ocr.confidence,
@@ -3594,14 +3746,7 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
       referenceAnswerMode: reference.mode,
       referenceAnswerConfidence: reference.confidence,
       referenceAnswers: reference.referenceAnswers || [],
-      questionLayoutManifest: input.questionLayoutManifest
-        ? {
-            version: input.questionLayoutManifest.version || null,
-            source: input.questionLayoutManifest.source || null,
-            questionCount: input.questionLayoutManifest.questionCount || input.questionLayoutManifest.questions?.length || 0,
-            questions: (input.questionLayoutManifest.questions || []).slice(0, 80)
-          }
-        : null,
+      questionLayoutManifest: summarizeQuestionLayoutManifestForAudit(questionLayoutManifest),
       ocr: {
         status: ocr.status,
         confidence: ocr.confidence,
@@ -3631,7 +3776,7 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
   const structured = applyGradingAudit({
     ...initialStructured,
     referenceAnswer: reference,
-    questionLayoutManifest: input.questionLayoutManifest || null
+    questionLayoutManifest
   }, combinedAudit, config);
   const assignment =
     options.persist === false
@@ -3668,7 +3813,7 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
               studentAnswerText: input.studentAnswerText || null,
               printedText: input.printedText || null,
               ocrQuestions: ocr.questions || [],
-              questionLayoutManifest: input.questionLayoutManifest || null,
+              questionLayoutManifest,
               ocrStatus: ocr.status,
               ocr,
               imageNames: input.imageNames || [],
@@ -3687,7 +3832,7 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
               providerId: result.providerId,
               available: result.available,
               referenceAnswer: reference,
-              questionLayoutManifest: input.questionLayoutManifest || null,
+              questionLayoutManifest,
               gradingAuditModelRunId: auditModelRun?.id || null,
               premiumAuditModelRunId: premiumAuditModelRun?.id || null
             },

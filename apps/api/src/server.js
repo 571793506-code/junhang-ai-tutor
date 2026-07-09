@@ -1812,12 +1812,12 @@ function splitSequentialPages(items = [], pageCount = 2, subject = "", kind = ""
       : 0;
     const spaceMm = answerSpaceMm(item, subject, kind);
     const answerSpaceHeightPx = answerFormat === "english-four-line"
-      ? Math.ceil((type === "fill" ? 16 : spaceMm) * 3.2)
+      ? Math.ceil((type === "fill" ? 9 : Math.max(16, spaceMm)) * 2.35)
       : spaceMm > 0 ? Math.ceil(spaceMm * 3.2) : 0;
     const promptLineCount = Math.max(1, Math.ceil(readableText(item?.prompt, "").length / 110));
     const baseHeightPx =
       compactChoice ? 34 :
-      type === "fill" && answerFormat === "english-four-line" ? 46 :
+      type === "fill" && answerFormat === "english-four-line" ? 34 :
       type === "fill" || type === "judgment" || type === "listening" ? 32 :
       type === "reading" && optionCount ? 42 :
       type === "reading" ? 48 :
@@ -1847,7 +1847,7 @@ function splitSequentialPages(items = [], pageCount = 2, subject = "", kind = ""
       : subjectText.includes("英语") ? (kindText.includes("小测") ? 860 : 800) : subjectText.includes("数学") ? 650 : subjectText.includes("语文") ? 800 : 720;
     const physicalBudgetPx =
       subjectText.includes("语文") ? (index === 0 ? 820 : 850) :
-      subjectText.includes("英语") ? (index === 0 ? (safePageCount >= 4 ? 820 : kindText.includes("小测") ? 900 : 820) : 860) :
+      subjectText.includes("英语") ? (index === 0 ? (safePageCount >= 4 ? 820 : kindText.includes("小测") ? 980 : 860) : 900) :
       subjectText.includes("数学") ? (safePageCount >= 4 ? (index === 0 ? 650 : 700) : (index === 0 ? 760 : 820)) :
       (index === 0 ? 760 : 820);
     return Math.min(physicalBudgetPx, Math.max(minBudgetPx, Math.ceil(idealPageBudgetPx * 1.08)));
@@ -1961,9 +1961,9 @@ h1 { margin: 4px 0 2px; font-size: 16pt; text-align: center; font-family: "SimHe
 .tianzige-cells span { width: 11mm; height: 11mm; border: 1px solid #111; box-sizing: border-box; position: relative; background: #fff; }
 .tianzige-cells span::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1px solid #111; transform: translateX(-0.5px); }
 .tianzige-cells span::after { content: ""; position: absolute; top: 50%; left: 0; right: 0; border-top: 1px solid #111; transform: translateY(-0.5px); }
-.english-four-line { margin: 3mm 0 1mm 18px; }
-.english-four-line div { height: 7.5mm; position: relative; margin-bottom: 1.4mm; }
-.english-four-line span { display: block; height: 1.75mm; border-bottom: 1px solid #b9c6d3; }
+.english-four-line { margin: 2mm 0 0.5mm 18px; }
+.english-four-line div { height: 6.6mm; position: relative; margin-bottom: 0.8mm; }
+.english-four-line span { display: block; height: 1.55mm; border-bottom: 1px solid #b9c6d3; }
 .chinese-square-grid { margin: 5mm 0 1mm 0; }
 .chinese-square-grid div { display: grid; grid-template-columns: repeat(18, 1fr); }
 .chinese-square-grid span { aspect-ratio: 1 / 1; border: 1px solid #111; border-right-width: 0; border-bottom-width: 0; box-sizing: border-box; background: #fff; }
@@ -1975,7 +1975,7 @@ h1 { margin: 4px 0 2px; font-size: 16pt; text-align: center; font-family: "SimHe
 .passage-word-bank { display: flex; flex-wrap: wrap; gap: 5px 9px; align-items: center; margin-bottom: 4px; line-height: 1.2; }
 .passage-word-bank strong { margin-right: 1px; font-weight: 700; }
 .passage-word-bank span { display: inline-block; padding: 1px 5px; border: 1px solid #b9c6d3; border-radius: 2px; background: #fff; font-family: Arial, sans-serif; }
-.passage-text { line-height: 1.18; text-align: left; white-space: pre-wrap; }
+.passage-text { line-height: 1.12; text-align: left; white-space: pre-wrap; }
 .figure-block { display: flex; justify-content: center; margin: 4px 0 3px; }
 .math-figure-answer-row { display: grid; grid-template-columns: minmax(0, 1fr) 48mm; column-gap: 5mm; align-items: end; }
 .math-figure-answer-row .figure-block { justify-content: flex-end; align-self: end; margin: 1mm 0 0; }
