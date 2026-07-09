@@ -12,7 +12,8 @@ const DEFAULT_RUNTIME_SCAN_PATHS = [
 
 const PRESERVED_LOCAL_FILE_PATTERNS = [
   /^exports\/student-profile-template-pdfs\/.+\.(?:pdf|png)$/i,
-  /^exports\/student-profile-template-pngs\/.+\.png$/i
+  /^exports\/student-profile-template-pngs\/.+\.png$/i,
+  /^tmp\/(?:export_student_archive_pngs|generate_student_archive_pdfs|make_pdf_contact_sheet)\.py$/i
 ];
 
 export function parseGitStatus(lines = []) {

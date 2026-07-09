@@ -92,6 +92,10 @@ cmd /c npm.cmd run workspace:archive-residue
   - `exports/student-profile-template-pdfs/**/*.pdf`
   - `exports/student-profile-template-pdfs/**/*.png`
   - `exports/student-profile-template-pngs/**/*.png`
+- 已确认保留的学生档案本地导出辅助脚本：
+  - `tmp/export_student_archive_pngs.py`
+  - `tmp/generate_student_archive_pdfs.py`
+  - `tmp/make_pdf_contact_sheet.py`
 
 处理方式：优先用 `.gitignore` 屏蔽，保留本地文件，不在未确认前删除。
 

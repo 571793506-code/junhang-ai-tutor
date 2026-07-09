@@ -102,13 +102,13 @@ test("buildWorkspaceGuardianReport preserves approved student profile export PDF
 
   assert.equal(report.clean, false);
   assert.deepEqual(report.ignoredRuntimeFiles, [
-    "tmp/generate_student_archive_pdfs.py",
     "exports/api-start.log"
   ]);
   assert.deepEqual(report.ignoredPreservedLocalFiles, [
     "exports/student-profile-template-pdfs/20260706-archive-print-clean/weekly-student-growth-archive.pdf",
     "exports/student-profile-template-pdfs/20260706-archive-print-clean/previews/weekly-page-1.png",
-    "exports/student-profile-template-pngs/20260706-moments/weekly/weekly-moments-long.png"
+    "exports/student-profile-template-pngs/20260706-moments/weekly/weekly-moments-long.png",
+    "tmp/generate_student_archive_pdfs.py"
   ]);
 });
 
