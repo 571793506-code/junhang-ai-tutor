@@ -88,6 +88,10 @@ cmd /c npm.cmd run workspace:archive-residue
 - 根目录临时截图
 - Python `__pycache__/` 和 `*.pyc`
 - 疑似误生成文件，例如 `console.log*`、`{console.error*`
+- 已确认保留的学生档案本地导出图片和 PDF：
+  - `exports/student-profile-template-pdfs/**/*.pdf`
+  - `exports/student-profile-template-pdfs/**/*.png`
+  - `exports/student-profile-template-pngs/**/*.png`
 
 处理方式：优先用 `.gitignore` 屏蔽，保留本地文件，不在未确认前删除。
 

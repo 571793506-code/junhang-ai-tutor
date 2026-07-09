@@ -82,6 +82,57 @@ test("buildWorkspaceGuardianReport treats local ahead as push reminder instead o
   assert.ok(report.recommendations.includes("本地领先远端；验证后可推送。"));
 });
 
+test("buildWorkspaceGuardianReport preserves approved student profile export PDFs and PNGs locally", async () => {
+  const runGit = async (args) => {
+    if (args.includes("--ignored")) {
+      return [
+        "!! exports/student-profile-template-pdfs/20260706-archive-print-clean/weekly-student-growth-archive.pdf",
+        "!! exports/student-profile-template-pdfs/20260706-archive-print-clean/previews/weekly-page-1.png",
+        "!! exports/student-profile-template-pngs/20260706-moments/weekly/weekly-moments-long.png",
+        "!! tmp/generate_student_archive_pdfs.py",
+        "!! exports/api-start.log"
+      ];
+    }
+    if (args[0] === "status") return ["## main...origin/main"];
+    if (args[0] === "log") return ["abc1234 docs: update guard"];
+    return [];
+  };
+
+  const report = await buildWorkspaceGuardianReport({ runGit });
+
+  assert.equal(report.clean, false);
+  assert.deepEqual(report.ignoredRuntimeFiles, [
+    "tmp/generate_student_archive_pdfs.py",
+    "exports/api-start.log"
+  ]);
+  assert.deepEqual(report.ignoredPreservedLocalFiles, [
+    "exports/student-profile-template-pdfs/20260706-archive-print-clean/weekly-student-growth-archive.pdf",
+    "exports/student-profile-template-pdfs/20260706-archive-print-clean/previews/weekly-page-1.png",
+    "exports/student-profile-template-pngs/20260706-moments/weekly/weekly-moments-long.png"
+  ]);
+});
+
+test("buildWorkspaceGuardianReport stays clean when ignored files are only approved local PDFs and PNGs", async () => {
+  const runGit = async (args) => {
+    if (args.includes("--ignored")) {
+      return [
+        "!! exports/student-profile-template-pdfs/20260706-archive-showcase/final-student-growth-archive.pdf",
+        "!! exports/student-profile-template-pdfs/20260706-archive-showcase/previews/final-page-1.png",
+        "!! exports/student-profile-template-pngs/20260706-moments/final/final-moments-long.png"
+      ];
+    }
+    if (args[0] === "status") return ["## main...origin/main"];
+    if (args[0] === "log") return ["abc1234 docs: update guard"];
+    return [];
+  };
+
+  const report = await buildWorkspaceGuardianReport({ runGit });
+
+  assert.equal(report.clean, true);
+  assert.deepEqual(report.ignoredRuntimeFiles, []);
+  assert.equal(report.ignoredPreservedLocalFiles.length, 3);
+});
+
 test("recommendWorkspaceActions classifies next actions conservatively", () => {
   const recommendations = recommendWorkspaceActions({
     stagedFiles: ["SKILLS.md"],
@@ -108,6 +159,7 @@ test("formatWorkspaceGuardianReport renders a readable Chinese summary", () => {
     unstagedFiles: [],
     untrackedFiles: ["scripts/workspace-guardian-lib.mjs"],
     ignoredRuntimeFiles: ["exports/api-start.log"],
+    ignoredPreservedLocalFiles: [],
     recentCommits: ["abc1234 docs: update guard"],
     recommendations: ["存在未跟踪文件；不要使用 git add .，先确认是否为源码、文档、资产或运行产物。"]
   });

@@ -10,6 +10,11 @@ const DEFAULT_RUNTIME_SCAN_PATHS = [
   "tmp"
 ];
 
+const PRESERVED_LOCAL_FILE_PATTERNS = [
+  /^exports\/student-profile-template-pdfs\/.+\.(?:pdf|png)$/i,
+  /^exports\/student-profile-template-pngs\/.+\.png$/i
+];
+
 export function parseGitStatus(lines = []) {
   const branchLine = lines.find((line) => line.startsWith("## ")) || "";
   const stagedFiles = [];
@@ -50,9 +55,11 @@ export async function buildWorkspaceGuardianReport(options = {}) {
   ]);
   const recentCommits = await runGit(["log", "--oneline", "-5"]);
   const status = parseGitStatus(statusLines);
-  const ignoredRuntimeFiles = ignoredLines
+  const ignoredFiles = ignoredLines
     .filter((line) => line.startsWith("!! "))
     .map(statusPath);
+  const ignoredPreservedLocalFiles = ignoredFiles.filter(isPreservedLocalFile);
+  const ignoredRuntimeFiles = ignoredFiles.filter((filePath) => !isPreservedLocalFile(filePath));
   const clean = !status.stagedFiles.length &&
     !status.unstagedFiles.length &&
     !status.untrackedFiles.length &&
@@ -63,6 +70,7 @@ export async function buildWorkspaceGuardianReport(options = {}) {
     clean,
     ...status,
     ignoredRuntimeFiles,
+    ignoredPreservedLocalFiles,
     recentCommits,
     recommendations: recommendWorkspaceActions({ ...status, ignoredRuntimeFiles })
   };
@@ -153,6 +161,8 @@ export function formatWorkspaceGuardianReport(report) {
     ...formatItems(report.untrackedFiles),
     `- 被忽略运行残留：${report.ignoredRuntimeFiles.length}`,
     ...formatItems(report.ignoredRuntimeFiles),
+    `- 被忽略本地保留：${report.ignoredPreservedLocalFiles?.length || 0}`,
+    ...formatItems(report.ignoredPreservedLocalFiles || []),
     "- 最近提交：",
     ...formatItems(report.recentCommits),
     "- 建议下一步：",
@@ -176,6 +186,11 @@ function normalizeRelativePath(filePath = "") {
   const normalized = String(filePath).replace(/\\/g, "/").replace(/^\/+/, "");
   if (!normalized || normalized.includes("../") || normalized === "..") return "";
   return normalized;
+}
+
+function isPreservedLocalFile(filePath = "") {
+  const normalized = normalizeRelativePath(filePath);
+  return PRESERVED_LOCAL_FILE_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 function timestampForArchive(date) {
