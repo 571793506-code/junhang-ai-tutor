@@ -65,12 +65,19 @@ export function validateAssessmentPartition(parsed = {}, partition = {}) {
   if (!items.length) codes.push("missing_items");
 
   const allowedItemTypes = new Set(Array.isArray(partition?.itemTypes) ? partition.itemTypes : []);
-  if (items.some((item) => item?.itemType && allowedItemTypes.size > 0 && !allowedItemTypes.has(item.itemType))) {
+  if (items.some((item) => !String(item?.itemType ?? "").trim())) {
+    codes.push("missing_item_type");
+  }
+  if (items.some((item) => {
+    const itemType = String(item?.itemType ?? "").trim();
+    return itemType && allowedItemTypes.size > 0 && !allowedItemTypes.has(itemType);
+  })) {
     codes.push("disallowed_item_type");
   }
   if (items.some((item) => (
     !String(item?.prompt || "").trim() ||
-    !String(item?.answer || "").trim() ||
+    item?.answer == null ||
+    (typeof item.answer === "string" && !item.answer.trim()) ||
     !Array.isArray(item?.analysisSteps) ||
     !item.analysisSteps.some((step) => String(step || "").trim()) ||
     (!String(item?.knowledgePoint || "").trim() && !String(item?.commonMistake || "").trim())

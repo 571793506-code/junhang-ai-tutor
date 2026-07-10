@@ -115,6 +115,7 @@ export interface AssessmentExecutionOptions {
   timeoutMs?: number;
   disableSolEscalation?: boolean;
   evidenceSufficient?: boolean;
+  now?: () => number;
 }
 
 export declare function buildAiStartupSnapshot(config?: RuntimeConfigLike): AiStartupSnapshot;

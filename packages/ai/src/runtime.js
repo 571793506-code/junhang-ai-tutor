@@ -847,7 +847,9 @@ export async function draftAssessment(config, input = {}, execution = {}) {
     return kind === "试卷" ? allocated : Math.min(allocated, 8000);
   };
   const primaryModel = execution.model || runtime.gpt56Model;
-  const primaryReasoningEffort = execution.reasoningEffort || (kind === "试卷" ? "high" : "medium");
+  const primaryReasoningEffort = primaryModel === runtime.gpt56SolModel
+    ? "high"
+    : execution.reasoningEffort || (kind === "试卷" ? "high" : "medium");
   const solGateOpen = (
     solEscalationEnabled(runtime) &&
     execution.disableSolEscalation !== true &&
@@ -980,23 +982,24 @@ export async function draftAssessment(config, input = {}, execution = {}) {
       ? 240000
       : 150000;
   const solTotalBudgetMs = eligibleFailures.length > 0 && allTerraUnusable ? solScenarioBudgetMs : null;
-  const solStartedAt = Date.now();
+  const solNow = typeof execution.now === "function" ? execution.now : Date.now;
+  const solStartedAt = solNow();
   const solAttemptTimeoutMs = () => {
     if (!solTotalBudgetMs) return runtime.gpt56SolFallbackTimeoutMs;
-    const remaining = Math.max(1, solTotalBudgetMs - (Date.now() - solStartedAt));
+    const remaining = Math.max(0, solTotalBudgetMs - (solNow() - solStartedAt));
     return Math.min(runtime.gpt56SolFallbackTimeoutMs, remaining);
   };
-  const escalatedPartitions = await mapWithConcurrency(eligibleFailures, 2, (entry) => callPartition(
-    entry.partition,
-    entry.index,
-    {
+  const escalatedPartitions = await mapWithConcurrency(eligibleFailures, 2, async (entry) => {
+    const timeoutMs = solAttemptTimeoutMs();
+    if (timeoutMs <= 0) return entry;
+    return callPartition(entry.partition, entry.index, {
       role: "sol-escalation",
       model: runtime.gpt56SolModel,
       reasoningEffort: "high",
-      timeoutMs: solAttemptTimeoutMs(),
+      timeoutMs,
       trigger: entry.trigger
-    }
-  ).then(parsePartition));
+    }).then(parsePartition);
+  });
   const escalatedByIndex = new Map(escalatedPartitions.map((entry) => [entry.index, entry]));
   const finalPartitions = parsedTerraPartitions.map((entry) => escalatedByIndex.get(entry.index) || entry);
   let successfulPartitions = finalPartitions.filter((entry) => entry.usable);

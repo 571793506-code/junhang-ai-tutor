@@ -72,6 +72,89 @@ test("assessment partition validation accepts complete allowed items", () => {
   });
 });
 
+test("assessment partition validation rejects missing or blank item types", () => {
+  const result = validateAssessmentPartition({
+    sections: [
+      {
+        items: [
+          {
+            prompt: "缺少题型",
+            answer: "答案",
+            analysisSteps: ["分析。"],
+            knowledgePoint: "考点"
+          },
+          {
+            itemType: "   ",
+            prompt: "空白题型",
+            answer: "答案",
+            analysisSteps: ["分析。"],
+            commonMistake: "易错点"
+          }
+        ]
+      }
+    ]
+  }, { id: "foundation", itemTypes: ["fill"] });
+
+  assert.equal(result.valid, false);
+  assert.deepEqual(result.codes, ["missing_item_type"]);
+  assert.deepEqual(result.issues, ["partition:foundation:missing_item_type"]);
+});
+
+test("assessment partition validation accepts numeric and boolean answers", () => {
+  const result = validateAssessmentPartition({
+    sections: [
+      {
+        items: [
+          {
+            itemType: "fill",
+            prompt: "零是自然数吗？",
+            answer: 0,
+            analysisSteps: ["识别数值。"],
+            knowledgePoint: "自然数"
+          },
+          {
+            itemType: "fill",
+            prompt: "该判断是否正确？",
+            answer: false,
+            analysisSteps: ["判断命题。"],
+            commonMistake: "不要把布尔值当成缺失。"
+          }
+        ]
+      }
+    ]
+  }, { id: "foundation", itemTypes: ["fill"] });
+
+  assert.deepEqual(result, { valid: true, codes: [], issues: [] });
+});
+
+test("assessment partition validation rejects null and blank-string answers", () => {
+  const result = validateAssessmentPartition({
+    sections: [
+      {
+        items: [
+          {
+            itemType: "fill",
+            prompt: "缺少答案",
+            answer: null,
+            analysisSteps: ["分析。"],
+            knowledgePoint: "考点"
+          },
+          {
+            itemType: "fill",
+            prompt: "空白答案",
+            answer: "   ",
+            analysisSteps: ["分析。"],
+            commonMistake: "易错点"
+          }
+        ]
+      }
+    ]
+  }, { id: "foundation", itemTypes: ["fill"] });
+
+  assert.equal(result.valid, false);
+  assert.deepEqual(result.codes, ["incomplete_item"]);
+});
+
 test("describeModelError preserves structured error details", () => {
   assert.deepEqual(
     describeModelError({

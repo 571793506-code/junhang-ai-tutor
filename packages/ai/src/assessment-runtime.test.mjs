@@ -751,3 +751,78 @@ test("draftAssessment keeps valid Terra-only requests on the existing model and 
     await close(server);
   }
 });
+
+test("draftAssessment forces high reasoning for direct internal Sol execution", async (t) => {
+  for (const kind of ["小测", "练习"]) {
+    await t.test(kind, async () => {
+      const payloads = [];
+      const server = http.createServer(async (req, res) => {
+        const payload = await readJsonRequest(req);
+        payloads.push(payload);
+        sendChatContent(res, validPartitionContent(payload));
+      });
+      const address = await listen(server);
+
+      try {
+        const result = await draftAssessment(
+          enabledSolConfig(`http://127.0.0.1:${address.port}`),
+          compactAssessmentInput({ kind }),
+          { model: "gpt-5.6-sol", reasoningEffort: "low" }
+        );
+
+        assert.equal(payloads.length, 2);
+        assert.equal(payloads.every((payload) => payload.model === "gpt-5.6-sol"), true);
+        assert.equal(payloads.every((payload) => payload.reasoning_effort === "high"), true);
+        assert.equal(result.modelRun.metadata.attempts.every((attempt) => attempt.reasoningEffort === "high"), true);
+      } finally {
+        await close(server);
+      }
+    });
+  }
+});
+
+test("draftAssessment stops queued Sol partitions when the new scenario budget is exhausted", async () => {
+  const payloads = [];
+  let nowMs = 0;
+  let activeSol = 0;
+  let maxActiveSol = 0;
+  const server = http.createServer(async (req, res) => {
+    const payload = await readJsonRequest(req);
+    payloads.push(payload);
+    if (payload.model === "gpt-5.6-terra") {
+      res.writeHead(524, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "upstream_timeout", message: "temporary timeout" } }));
+      return;
+    }
+
+    activeSol += 1;
+    maxActiveSol = Math.max(maxActiveSol, activeSol);
+    nowMs += 120000;
+    setTimeout(() => {
+      activeSol -= 1;
+      sendChatContent(res, validPartitionContent(payload));
+    }, 10);
+  });
+  const address = await listen(server);
+
+  try {
+    const result = await draftAssessment(
+      enabledSolConfig(`http://127.0.0.1:${address.port}`),
+      compactAssessmentInput({ kind: "试卷", assessmentMaxTokens: 24000 }),
+      { now: () => nowMs }
+    );
+    const solPayloads = payloads.filter((payload) => payload.model === "gpt-5.6-sol");
+    const solAttempts = result.modelRun.metadata.attempts.filter((attempt) => attempt.role === "sol-escalation");
+
+    assert.equal(solPayloads.length, 2);
+    assert.equal(solAttempts.length, 2);
+    assert.equal(maxActiveSol <= 2, true);
+    assert.equal(result.modelRun.metadata.escalationScopes.length, 2);
+    assert.equal(result.modelRun.metadata.solTotalBudgetMs, 240000);
+    assert.equal(result.modelRun.metadata.partialGeneration, true);
+    assert.equal(result.modelRun.metadata.usedModelEscalation, true);
+    assert.equal(result.modelRun.metadata.fallbackProvider, null);
+  } finally {
+    await close(server);
+  }
+});
