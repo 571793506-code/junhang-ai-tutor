@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   archiveRuntimeResidue,
   buildWorkspaceGuardianReport,
+  classifyWorkspaceFile,
   formatWorkspaceGuardianReport,
   parseGitStatus,
   recommendWorkspaceActions
@@ -80,6 +81,53 @@ test("buildWorkspaceGuardianReport treats local ahead as push reminder instead o
 
   assert.equal(report.clean, true);
   assert.ok(report.recommendations.includes("本地领先远端；验证后可推送。"));
+});
+
+test("classifyWorkspaceFile groups visible files by guardian closeout intent", () => {
+  assert.deepEqual(classifyWorkspaceFile("docs/52-workspace-guardian.md"), {
+    bucket: "closeout",
+    label: "收口提交"
+  });
+  assert.deepEqual(classifyWorkspaceFile("scripts/workspace-guardian-lib.mjs"), {
+    bucket: "closeout",
+    label: "收口提交"
+  });
+  assert.deepEqual(classifyWorkspaceFile("apps/web/src/main.tsx"), {
+    bucket: "track",
+    label: "继续跟踪"
+  });
+  assert.deepEqual(classifyWorkspaceFile("exports/demo.pdf"), {
+    bucket: "local",
+    label: "本地保存"
+  });
+  assert.deepEqual(classifyWorkspaceFile("apps/miniprogram/pages/index/index.js"), {
+    bucket: "caution",
+    label: "谨慎处理"
+  });
+});
+
+test("buildWorkspaceGuardianReport adds a task review summary for visible work", async () => {
+  const runGit = async (args) => {
+    if (args.includes("--ignored")) return [];
+    if (args[0] === "status") {
+      return [
+        "## main...origin/main",
+        " M docs/52-workspace-guardian.md",
+        " M apps/web/src/main.tsx",
+        "?? exports/demo.pdf",
+        "?? apps/miniprogram/pages/index/index.js"
+      ];
+    }
+    if (args[0] === "log") return ["abc1234 docs: update guard"];
+    return [];
+  };
+
+  const report = await buildWorkspaceGuardianReport({ runGit });
+
+  assert.deepEqual(report.taskReview.closeout, ["docs/52-workspace-guardian.md"]);
+  assert.deepEqual(report.taskReview.track, ["apps/web/src/main.tsx"]);
+  assert.deepEqual(report.taskReview.local, ["exports/demo.pdf"]);
+  assert.deepEqual(report.taskReview.caution, ["apps/miniprogram/pages/index/index.js"]);
 });
 
 test("buildWorkspaceGuardianReport preserves approved student profile export PDFs and PNGs locally", async () => {
@@ -160,6 +208,12 @@ test("formatWorkspaceGuardianReport renders a readable Chinese summary", () => {
     untrackedFiles: ["scripts/workspace-guardian-lib.mjs"],
     ignoredRuntimeFiles: ["exports/api-start.log"],
     ignoredPreservedLocalFiles: [],
+    taskReview: {
+      closeout: [],
+      track: ["scripts/workspace-guardian-lib.mjs"],
+      local: [],
+      caution: []
+    },
     recentCommits: ["abc1234 docs: update guard"],
     recommendations: ["存在未跟踪文件；不要使用 git add .，先确认是否为源码、文档、资产或运行产物。"]
   });
@@ -168,6 +222,8 @@ test("formatWorkspaceGuardianReport renders a readable Chinese summary", () => {
   assert.match(text, /已暂存：1/);
   assert.match(text, /未跟踪：1/);
   assert.match(text, /被忽略运行残留：1/);
+  assert.match(text, /任务审查/);
+  assert.match(text, /继续跟踪：1/);
   assert.match(text, /不要使用 git add \./);
 });
 
@@ -199,4 +255,27 @@ test("archiveRuntimeResidue moves ignored runtime files outside the workspace", 
     assert.equal(fs.existsSync(path.join(workspaceRoot, relativePath)), false);
     assert.equal(fs.readFileSync(path.join(result.archiveDir, relativePath), "utf8"), relativePath);
   }
+});
+
+test("archiveRuntimeResidue refuses to move approved preserved local files", async () => {
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "guardian-workspace-"));
+  const archiveRoot = fs.mkdtempSync(path.join(os.tmpdir(), "guardian-archive-"));
+  const preservedFile = "exports/student-profile-template-pdfs/20260706-archive-print-clean/weekly-student-growth-archive.pdf";
+  const sourcePath = path.join(workspaceRoot, preservedFile);
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.writeFileSync(sourcePath, "pdf", "utf8");
+
+  const result = await archiveRuntimeResidue({
+    cwd: workspaceRoot,
+    archiveRoot,
+    ignoredRuntimeFiles: [preservedFile],
+    timestamp: "2026-07-05T11-00-00"
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(fs.existsSync(sourcePath), true);
+  assert.deepEqual(result.movedFiles, []);
+  assert.deepEqual(result.skippedFiles, [
+    { file: preservedFile, reason: "PRESERVED_LOCAL_FILE" }
+  ]);
 });

@@ -16,6 +16,41 @@ const PRESERVED_LOCAL_FILE_PATTERNS = [
   /^tmp\/(?:export_student_archive_pngs|generate_student_archive_pdfs|make_pdf_contact_sheet)\.py$/i
 ];
 
+const CLOSEOUT_PATTERNS = [
+  /^AGENTS\.md$/i,
+  /^SKILLS\.md$/i,
+  /^docs\/(?:45-git-traceability-runbook|49-codex-plugin-usage-boundary-and-optimization|51-project-pitfall-review|52-workspace-guardian)\.md$/i,
+  /^scripts\/workspace-guardian(?:-lib|\.test)?\.mjs$/i,
+  /^scripts\/workspace-archive-residue\.mjs$/i
+];
+
+const CAUTION_PATTERNS = [
+  /^apps\/miniprogram\//i,
+  /^miniapp\//i,
+  /^apps\/tablet\//i,
+  /^apps\/public-screen\//i
+];
+
+const LOCAL_PATTERNS = [
+  /^exports\//i,
+  /^storage\//i,
+  /^apps\/api\/storage\/uploads\//i,
+  /^logs\//i,
+  /^tmp\//i,
+  /\.log$/i,
+  /\.traineddata$/i,
+  /\.tgz$/i,
+  /(?:^|\/)console\.log/i,
+  /(?:^|\/)\{console\.error/i
+];
+
+const TASK_REVIEW_BUCKETS = [
+  ["closeout", "收口提交"],
+  ["track", "继续跟踪"],
+  ["local", "本地保存"],
+  ["caution", "谨慎处理"]
+];
+
 export function parseGitStatus(lines = []) {
   const branchLine = lines.find((line) => line.startsWith("## ")) || "";
   const stagedFiles = [];
@@ -61,6 +96,7 @@ export async function buildWorkspaceGuardianReport(options = {}) {
     .map(statusPath);
   const ignoredPreservedLocalFiles = ignoredFiles.filter(isPreservedLocalFile);
   const ignoredRuntimeFiles = ignoredFiles.filter((filePath) => !isPreservedLocalFile(filePath));
+  const taskReview = buildTaskReview(status);
   const clean = !status.stagedFiles.length &&
     !status.unstagedFiles.length &&
     !status.untrackedFiles.length &&
@@ -72,9 +108,24 @@ export async function buildWorkspaceGuardianReport(options = {}) {
     ...status,
     ignoredRuntimeFiles,
     ignoredPreservedLocalFiles,
+    taskReview,
     recentCommits,
     recommendations: recommendWorkspaceActions({ ...status, ignoredRuntimeFiles })
   };
+}
+
+export function classifyWorkspaceFile(filePath = "") {
+  const normalized = normalizeRelativePath(filePath);
+  if (CLOSEOUT_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return { bucket: "closeout", label: "收口提交" };
+  }
+  if (LOCAL_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return { bucket: "local", label: "本地保存" };
+  }
+  if (CAUTION_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return { bucket: "caution", label: "谨慎处理" };
+  }
+  return { bucket: "track", label: "继续跟踪" };
 }
 
 export async function archiveRuntimeResidue(options = {}) {
@@ -92,6 +143,10 @@ export async function archiveRuntimeResidue(options = {}) {
     const safeRelativePath = normalizeRelativePath(relativeFile);
     if (!safeRelativePath) {
       skippedFiles.push({ file: relativeFile, reason: "INVALID_PATH" });
+      continue;
+    }
+    if (isPreservedLocalFile(safeRelativePath)) {
+      skippedFiles.push({ file: safeRelativePath, reason: "PRESERVED_LOCAL_FILE" });
       continue;
     }
 
@@ -164,6 +219,8 @@ export function formatWorkspaceGuardianReport(report) {
     ...formatItems(report.ignoredRuntimeFiles),
     `- 被忽略本地保留：${report.ignoredPreservedLocalFiles?.length || 0}`,
     ...formatItems(report.ignoredPreservedLocalFiles || []),
+    "- 任务审查：",
+    ...formatTaskReview(report.taskReview),
     "- 最近提交：",
     ...formatItems(report.recentCommits),
     "- 建议下一步：",
@@ -189,6 +246,22 @@ function normalizeRelativePath(filePath = "") {
   return normalized;
 }
 
+function buildTaskReview(status) {
+  const review = Object.fromEntries(TASK_REVIEW_BUCKETS.map(([bucket]) => [bucket, []]));
+  const visibleFiles = [
+    ...(status.stagedFiles || []),
+    ...(status.unstagedFiles || []),
+    ...(status.untrackedFiles || [])
+  ];
+  for (const filePath of visibleFiles) {
+    const { bucket } = classifyWorkspaceFile(filePath);
+    if (!review[bucket].includes(filePath)) {
+      review[bucket].push(filePath);
+    }
+  }
+  return review;
+}
+
 function isPreservedLocalFile(filePath = "") {
   const normalized = normalizeRelativePath(filePath);
   return PRESERVED_LOCAL_FILE_PATTERNS.some((pattern) => pattern.test(normalized));
@@ -210,6 +283,16 @@ function timestampForArchive(date) {
 function formatItems(items = []) {
   if (!items.length) return ["  - 无"];
   return items.map((item) => `  - ${item}`);
+}
+
+function formatTaskReview(taskReview = {}) {
+  return TASK_REVIEW_BUCKETS.flatMap(([bucket, label]) => {
+    const files = taskReview[bucket] || [];
+    return [
+      `  - ${label}：${files.length}`,
+      ...files.map((filePath) => `    - ${filePath}`)
+    ];
+  });
 }
 
 function gitLines(args, cwd = process.cwd()) {
