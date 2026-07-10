@@ -83,6 +83,7 @@ export async function runProbe(
   if (!apiKey) throw new Error("GPT56_API_KEY is not configured.");
   const probeTargets = buildGpt56ProbeTargets(env, { includeSol });
   const targets = [];
+  let requiredTargetsOk = true;
   for (const target of probeTargets) {
     const checks = [];
     const reasoningEffort = target.role === "sol-fallback" ? "high" : "low";
@@ -103,15 +104,20 @@ export async function runProbe(
         checks.push({ id: probe.id, ...classifyGpt56ProbeResult({ ok: false, status: response?.status || null, body, error: error instanceof Error ? error.message : String(error) }) });
       }
     }
+    const requiredCheckIds = target.role === "sol-fallback"
+      ? ["text", "json_object", "reasoning_effort", "json_schema", "project_grading_json"]
+      : ["text"];
+    const targetOk = requiredCheckIds.every((id) => checks.some((item) => item.id === id && item.supported));
+    if (target.required && !targetOk) requiredTargetsOk = false;
     targets.push({
       role: target.role,
       model: target.model,
-      ok: checks.some((item) => item.id === "text" && item.supported),
+      ok: targetOk,
       checks
     });
   }
   return {
-    ok: targets.every((target, index) => !probeTargets[index].required || target.ok),
+    ok: requiredTargetsOk,
     baseUrl,
     targets
   };
