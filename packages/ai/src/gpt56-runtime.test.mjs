@@ -72,6 +72,22 @@ test("normalizeRuntimeConfig supports the GPT56 assessment timeout migration ali
   assert.equal(migrated.gpt56GradingTimeoutMs, 240000);
 });
 
+test("normalizeRuntimeConfig exposes Sol defaults and explicit overrides", () => {
+  const defaults = normalizeRuntimeConfig({});
+  assert.equal(defaults.gpt56SolFallbackEnabled, false);
+  assert.equal(defaults.gpt56SolModel, "gpt-5.6-sol");
+  assert.equal(defaults.gpt56SolFallbackTimeoutMs, 180000);
+
+  const overridden = normalizeRuntimeConfig({
+    GPT56_SOL_FALLBACK_ENABLED: "true",
+    GPT56_SOL_MODEL: "gpt-5.6-sol-preview",
+    GPT56_SOL_FALLBACK_TIMEOUT_MS: "210000"
+  });
+  assert.equal(overridden.gpt56SolFallbackEnabled, true);
+  assert.equal(overridden.gpt56SolModel, "gpt-5.6-sol-preview");
+  assert.equal(overridden.gpt56SolFallbackTimeoutMs, 210000);
+});
+
 test("buildAiStartupSnapshot assigns Junhang text capabilities to GPT-5.6", () => {
   const snapshot = buildAiStartupSnapshot({
     GPT56_API_KEY: "test-key",
@@ -142,6 +158,40 @@ test("callGpt56Chat only sends reasoning_effort when intermediary support is ena
     assert.equal(Object.hasOwn(payloads[0], "reasoning_effort"), false);
     assert.equal(payloads[1].reasoning_effort, "medium");
     assert.equal(payloads[1].model, "gpt-5.6");
+  } finally {
+    await close(server);
+  }
+});
+
+test("callGpt56Chat preserves upstream status and error code", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(429, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      error: {
+        message: "quota exhausted",
+        code: "insufficient_quota"
+      }
+    }));
+  });
+  const address = await listen(server);
+
+  try {
+    await assert.rejects(
+      callGpt56Chat(
+        {
+          GPT56_API_KEY: "test-key",
+          GPT56_BASE_URL: `http://127.0.0.1:${address.port}`,
+          GPT56_MODEL: "gpt-5.6"
+        },
+        [{ role: "user", content: "test" }]
+      ),
+      (error) => {
+        assert.equal(error.message, "429 quota exhausted");
+        assert.equal(error.status, 429);
+        assert.equal(error.code, "insufficient_quota");
+        return true;
+      }
+    );
   } finally {
     await close(server);
   }

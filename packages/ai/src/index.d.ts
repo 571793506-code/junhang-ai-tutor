@@ -79,7 +79,26 @@ export declare function normalizeRuntimeConfig(config?: RuntimeConfigLike): {
   gpt56GradingTimeoutMs: number;
   gpt56ReviewTimeoutMs: number;
   gpt56ReasoningEffortEnabled: boolean;
+  gpt56SolFallbackEnabled: boolean;
+  gpt56SolModel: string;
+  gpt56SolFallbackTimeoutMs: number;
 };
+
+export declare function describeModelError(error?: unknown): {
+  message: string;
+  status: number | null;
+  code: string | null;
+};
+export declare function classifySolEscalationError(error?: unknown): {
+  allowed: boolean;
+  triggerClass: "availability" | "configuration";
+  triggerCode: string;
+};
+export declare function solEscalationEnabled(runtime?: {
+  gpt56SolFallbackEnabled?: boolean;
+  gpt56ReasoningEffortEnabled?: boolean;
+  gpt56SolModel?: string;
+}): boolean;
 
 export declare function buildAiStartupSnapshot(config?: RuntimeConfigLike): AiStartupSnapshot;
 export declare function createDemoAiSnapshot(): AiStartupSnapshot;

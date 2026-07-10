@@ -1,4 +1,5 @@
 import { buildAssessmentPartitions, mapWithConcurrency } from "./assessment-partitions.js";
+import { describeModelError } from "./model-escalation.js";
 
 export const providerCatalog = [
   {
@@ -136,7 +137,10 @@ export function normalizeRuntimeConfig(config = {}) {
     gpt56GenerationTimeoutMs: Number(config.GPT56_GENERATION_TIMEOUT_MS || config.gpt56GenerationTimeoutMs || config.GPT56_ASSESSMENT_TIMEOUT_MS || config.gpt56AssessmentTimeoutMs || config.GPT55_ASSESSMENT_TIMEOUT_MS || config.gpt55AssessmentTimeoutMs || 90000),
     gpt56GradingTimeoutMs: Number(config.GPT56_GRADING_TIMEOUT_MS || config.gpt56GradingTimeoutMs || config.GPT56_ASSESSMENT_TIMEOUT_MS || config.gpt56AssessmentTimeoutMs || config.GPT55_ASSESSMENT_TIMEOUT_MS || config.gpt55AssessmentTimeoutMs || 90000),
     gpt56ReviewTimeoutMs: Number(config.GPT56_REVIEW_TIMEOUT_MS || config.gpt56ReviewTimeoutMs || config.GPT55_REVIEW_TIMEOUT_MS || config.gpt55ReviewTimeoutMs || 60000),
-    gpt56ReasoningEffortEnabled: String(config.GPT56_REASONING_EFFORT_ENABLED ?? config.gpt56ReasoningEffortEnabled ?? "false").toLowerCase() === "true"
+    gpt56ReasoningEffortEnabled: String(config.GPT56_REASONING_EFFORT_ENABLED ?? config.gpt56ReasoningEffortEnabled ?? "false").toLowerCase() === "true",
+    gpt56SolFallbackEnabled: String(config.GPT56_SOL_FALLBACK_ENABLED ?? config.gpt56SolFallbackEnabled ?? "false").toLowerCase() === "true",
+    gpt56SolModel: config.GPT56_SOL_MODEL || config.gpt56SolModel || "gpt-5.6-sol",
+    gpt56SolFallbackTimeoutMs: Number(config.GPT56_SOL_FALLBACK_TIMEOUT_MS || config.gpt56SolFallbackTimeoutMs || 180000)
   };
 }
 
@@ -320,7 +324,10 @@ export async function callOpenAiCompatibleChat({
 
   if (!response.ok) {
     const message = body?.error?.message || body?.message || response.statusText;
-    throw new Error(`${response.status} ${message}`);
+    const requestError = new Error(`${response.status} ${message}`);
+    requestError.status = response.status;
+    requestError.code = body?.error?.code || body?.code || null;
+    throw requestError;
   }
 
   return body;
@@ -435,11 +442,13 @@ async function timedCall(run) {
     const body = await run();
     return { body, latencyMs: Date.now() - started, status: "SUCCESS" };
   } catch (error) {
+    const errorDetails = describeModelError(error);
     return {
       body: null,
       latencyMs: Date.now() - started,
       status: "ERROR",
-      error: error instanceof Error ? error.message : String(error)
+      error: errorDetails.message,
+      errorDetails
     };
   }
 }
