@@ -56,3 +56,33 @@ export function solEscalationEnabled(runtime = {}) {
     Boolean(runtime.gpt56SolModel)
   );
 }
+
+export function validateAssessmentPartition(parsed = {}, partition = {}) {
+  const sections = Array.isArray(parsed?.sections) ? parsed.sections : [];
+  const items = sections.flatMap((section) => Array.isArray(section?.items) ? section.items : []);
+  const codes = [];
+  if (!sections.length) codes.push("missing_sections");
+  if (!items.length) codes.push("missing_items");
+
+  const allowedItemTypes = new Set(Array.isArray(partition?.itemTypes) ? partition.itemTypes : []);
+  if (items.some((item) => item?.itemType && allowedItemTypes.size > 0 && !allowedItemTypes.has(item.itemType))) {
+    codes.push("disallowed_item_type");
+  }
+  if (items.some((item) => (
+    !String(item?.prompt || "").trim() ||
+    !String(item?.answer || "").trim() ||
+    !Array.isArray(item?.analysisSteps) ||
+    !item.analysisSteps.some((step) => String(step || "").trim()) ||
+    (!String(item?.knowledgePoint || "").trim() && !String(item?.commonMistake || "").trim())
+  ))) {
+    codes.push("incomplete_item");
+  }
+
+  const uniqueCodes = [...new Set(codes)];
+  const partitionId = partition?.id || "unknown";
+  return {
+    valid: uniqueCodes.length === 0,
+    codes: uniqueCodes,
+    issues: uniqueCodes.map((code) => `partition:${partitionId}:${code}`)
+  };
+}

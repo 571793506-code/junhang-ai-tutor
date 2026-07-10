@@ -1,10 +1,76 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as modelEscalation from "./model-escalation.js";
 import {
   classifySolEscalationError,
   describeModelError,
   solEscalationEnabled
 } from "./model-escalation.js";
+
+const validateAssessmentPartition = modelEscalation.validateAssessmentPartition || (() => ({
+  valid: true,
+  codes: [],
+  issues: []
+}));
+
+test("assessment partition validation reports missing sections and items", () => {
+  const partition = { id: "foundation", itemTypes: ["fill", "choice"] };
+
+  const empty = validateAssessmentPartition({ sections: [] }, partition);
+  assert.equal(empty.valid, false);
+  assert.ok(empty.codes.includes("missing_sections"));
+  assert.ok(empty.codes.includes("missing_items"));
+  assert.ok(empty.issues.includes("partition:foundation:missing_sections"));
+  assert.ok(empty.issues.includes("partition:foundation:missing_items"));
+
+  const noItems = validateAssessmentPartition({ sections: [{ title: "基础", items: [] }] }, partition);
+  assert.equal(noItems.valid, false);
+  assert.deepEqual(noItems.codes, ["missing_items"]);
+  assert.deepEqual(noItems.issues, ["partition:foundation:missing_items"]);
+});
+
+test("assessment partition validation rejects disallowed and incomplete items once", () => {
+  const result = validateAssessmentPartition({
+    sections: [
+      {
+        items: [
+          { itemType: "writing", prompt: "写作", answer: "示例", analysisSteps: ["审题。"], knowledgePoint: "表达" },
+          { itemType: "fill", prompt: "", answer: "", analysisSteps: [], commonMistake: "" },
+          { itemType: "fill", prompt: "第二题", answer: "", analysisSteps: [], knowledgePoint: "" }
+        ]
+      }
+    ]
+  }, { id: "language", itemTypes: ["fill", "choice"] });
+
+  assert.equal(result.valid, false);
+  assert.deepEqual(result.codes, ["disallowed_item_type", "incomplete_item"]);
+  assert.deepEqual(result.issues, [
+    "partition:language:disallowed_item_type",
+    "partition:language:incomplete_item"
+  ]);
+});
+
+test("assessment partition validation accepts complete allowed items", () => {
+  assert.deepEqual(validateAssessmentPartition({
+    sections: [
+      {
+        items: [
+          {
+            itemType: "fill",
+            prompt: "1 + 1 = ?",
+            answer: "2",
+            analysisSteps: ["计算两个一相加。"],
+            commonMistake: "不要漏写答案。"
+          }
+        ]
+      }
+    ]
+  }, { id: "foundation", itemTypes: ["fill"] }), {
+    valid: true,
+    codes: [],
+    issues: []
+  });
+});
 
 test("describeModelError preserves structured error details", () => {
   assert.deepEqual(

@@ -1,5 +1,10 @@
 import { buildAssessmentPartitions, mapWithConcurrency } from "./assessment-partitions.js";
-import { describeModelError } from "./model-escalation.js";
+import {
+  classifySolEscalationError,
+  describeModelError,
+  solEscalationEnabled,
+  validateAssessmentPartition
+} from "./model-escalation.js";
 
 export const providerCatalog = [
   {
@@ -718,7 +723,7 @@ export async function draftTeacherTask(config, input = {}) {
   };
 }
 
-export async function draftAssessment(config, input = {}) {
+export async function draftAssessment(config, input = {}, execution = {}) {
   const snapshot = buildAiStartupSnapshot(config);
   const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const runtime = normalizeRuntimeConfig(config);
@@ -841,55 +846,170 @@ export async function draftAssessment(config, input = {}) {
     const allocated = basePartitionTokens + (index < extraPartitionTokens ? 1 : 0);
     return kind === "试卷" ? allocated : Math.min(allocated, 8000);
   };
+  const primaryModel = execution.model || runtime.gpt56Model;
+  const primaryReasoningEffort = execution.reasoningEffort || (kind === "试卷" ? "high" : "medium");
+  const solGateOpen = (
+    solEscalationEnabled(runtime) &&
+    execution.disableSolEscalation !== true &&
+    execution.evidenceSufficient !== false &&
+    primaryModel !== runtime.gpt56SolModel
+  );
   const attempts = [];
-  const recordAttempt = (role, partition, attemptResult) => {
+  const recordAttempt = (role, partition, attemptResult, options = {}) => {
     markBudgetFromResult(attemptResult);
+    const trigger = options.trigger || null;
     attempts.push({
       role,
       partitionId: partition.id,
       providerId: "gpt56",
-      model: runtime.gpt56Model,
+      model: options.model,
+      reasoningEffort: options.reasoningEffort,
+      timeoutMs: options.timeoutMs,
+      maxTokens: options.maxTokens,
+      trigger: trigger ? {
+        triggerClass: trigger.triggerClass,
+        triggerCode: trigger.triggerCode,
+        issues: trigger.issues || []
+      } : null,
+      triggerClass: trigger?.triggerClass || null,
+      triggerCode: trigger?.triggerCode || null,
+      triggerIssues: trigger?.issues || [],
       status: attemptResult.status,
       latencyMs: attemptResult.latencyMs ?? null,
       error: attemptResult.error || null
     });
   };
-  const callPartition = async (partition, index, role = "primary") => {
+  const callPartition = async (partition, index, {
+    role = "primary",
+    model = runtime.gpt56Model,
+    reasoningEffort = kind === "试卷" ? "high" : "medium",
+    timeoutMs = attemptTimeoutMs(assessmentTimeoutMs),
+    trigger = null
+  } = {}) => {
     const partitionTokens = partitionTokenBudget(index);
     const partitionMessages = messages.map((message) => message.role !== "user" ? message : {
       ...message,
-      content: `${message.content}\n\n本次只生成分区：${partition.title}。允许题型：${partition.itemTypes.join(", ")}。不要生成其他分区。顶层仍返回 {title,layout,sections,printNotes}，sections 只包含本分区。请精简输出，避免重复规则和冗长说明；优先保证 JSON 完整，并让每题的答案、解析步骤、考点、易错点和分值字段齐全。`
+      content: `${message.content}\n\n本次只生成分区：${partition.title}。允许题型：${partition.itemTypes.join(", ")}。不要生成其他分区。顶层仍返回 {title,layout,sections,printNotes}，sections 只包含本分区。请精简输出，避免重复规则和冗长说明；优先保证 JSON 完整，并让每题的答案、解析步骤、考点、易错点和分值字段齐全。${trigger?.issues?.length ? `必须修复：${trigger.issues.join("；")}。` : ""}`
     });
     const result = await timedCall(() => callGpt56Chat(config, partitionMessages, {
-      model: runtime.gpt56Model,
+      model,
       temperature: 0.2,
       responseFormat: { type: "json_object" },
       maxTokens: partitionTokens,
-      timeoutMs: attemptTimeoutMs(assessmentTimeoutMs),
-      reasoningEffort: kind === "试卷" ? "high" : "medium"
+      timeoutMs,
+      reasoningEffort
     }));
-    recordAttempt(role, partition, result);
+    recordAttempt(role, partition, result, {
+      model,
+      reasoningEffort,
+      timeoutMs,
+      maxTokens: partitionTokens,
+      trigger
+    });
     return { partition, index, partitionTokens, result };
   };
-  let partitionResults = await mapWithConcurrency(partitions, 2, (partition, index) => callPartition(partition, index));
+  const primaryCallOptions = {
+    role: execution.role,
+    model: primaryModel,
+    reasoningEffort: primaryReasoningEffort,
+    timeoutMs: execution.timeoutMs
+  };
+  let partitionResults = await mapWithConcurrency(
+    partitions,
+    2,
+    (partition, index) => callPartition(partition, index, primaryCallOptions)
+  );
   const reserveMs = assessmentTotalTimeoutMs ? Math.max(1000, Math.floor(assessmentTotalTimeoutMs * 0.15)) : 0;
-  const retryable = partitionResults.filter((entry) => entry.result.status !== "SUCCESS");
+  const retryable = partitionResults.filter((entry) => {
+    if (entry.result.status === "SUCCESS") return false;
+    const classification = classifySolEscalationError(entry.result.errorDetails || { message: entry.result.error });
+    return !(solGateOpen && classification.allowed);
+  });
   if (retryable.length && hasBudget() && (remainingBudgetMs() == null || remainingBudgetMs() > reserveMs)) {
-    const retries = await mapWithConcurrency(retryable, 2, (entry) => callPartition(entry.partition, entry.index, "partition-retry"));
+    const retries = await mapWithConcurrency(retryable, 2, (entry) => callPartition(entry.partition, entry.index, {
+      ...primaryCallOptions,
+      role: "partition-retry"
+    }));
     const retryByIndex = new Map(retries.map((entry) => [entry.index, entry]));
     partitionResults = partitionResults.map((entry) => retryByIndex.get(entry.index) || entry);
   }
-  const parsedPartitions = partitionResults.map((entry) => {
+  const parsePartition = (entry) => {
     const text = entry.result.body ? extractChatText(entry.result.body) : "";
-    return { ...entry, text, parsed: parseJsonObjectText(text) };
-  });
-  let successfulPartitions = parsedPartitions.filter((entry) => entry.result.status === "SUCCESS" && entry.parsed);
+    const parsed = parseJsonObjectText(text);
+    let validation = null;
+    let trigger = null;
+    if (entry.result.status !== "SUCCESS") {
+      trigger = classifySolEscalationError(entry.result.errorDetails || { message: entry.result.error });
+    } else if (!parsed) {
+      const issues = [`partition:${entry.partition.id}:malformed_json`];
+      validation = { valid: false, codes: ["malformed_json"], issues };
+      trigger = {
+        allowed: true,
+        triggerClass: "quality",
+        triggerCode: "partition_validation",
+        issues
+      };
+    } else {
+      validation = validateAssessmentPartition(parsed, entry.partition);
+      if (!validation.valid) {
+        trigger = {
+          allowed: true,
+          triggerClass: "quality",
+          triggerCode: "partition_validation",
+          issues: validation.issues
+        };
+      }
+    }
+    return {
+      ...entry,
+      text,
+      parsed,
+      validation,
+      trigger,
+      usable: entry.result.status === "SUCCESS" && Boolean(parsed) && validation?.valid === true
+    };
+  };
+  const parsedTerraPartitions = partitionResults.map(parsePartition);
+  const eligibleFailures = solGateOpen
+    ? parsedTerraPartitions.filter((entry) => !entry.usable && entry.trigger?.allowed === true)
+    : [];
+  const allTerraUnusable = parsedTerraPartitions.every((entry) => !entry.usable);
+  const solScenarioBudgetMs = kind === "小测"
+    ? 120000
+    : kind === "试卷" || input.generationProfile === "formal-full"
+      ? 240000
+      : 150000;
+  const solTotalBudgetMs = eligibleFailures.length > 0 && allTerraUnusable ? solScenarioBudgetMs : null;
+  const solStartedAt = Date.now();
+  const solAttemptTimeoutMs = () => {
+    if (!solTotalBudgetMs) return runtime.gpt56SolFallbackTimeoutMs;
+    const remaining = Math.max(1, solTotalBudgetMs - (Date.now() - solStartedAt));
+    return Math.min(runtime.gpt56SolFallbackTimeoutMs, remaining);
+  };
+  const escalatedPartitions = await mapWithConcurrency(eligibleFailures, 2, (entry) => callPartition(
+    entry.partition,
+    entry.index,
+    {
+      role: "sol-escalation",
+      model: runtime.gpt56SolModel,
+      reasoningEffort: "high",
+      timeoutMs: solAttemptTimeoutMs(),
+      trigger: entry.trigger
+    }
+  ).then(parsePartition));
+  const escalatedByIndex = new Map(escalatedPartitions.map((entry) => [entry.index, entry]));
+  const finalPartitions = parsedTerraPartitions.map((entry) => escalatedByIndex.get(entry.index) || entry);
+  let successfulPartitions = finalPartitions.filter((entry) => entry.usable);
+  const solAttempts = attempts.filter((attempt) => attempt.role === "sol-escalation");
+  const escalationTriggered = solAttempts.length > 0;
+  const usedModelEscalation = escalatedPartitions.some((entry) => entry.usable);
+  const escalationScopes = solAttempts.map((attempt) => attempt.partitionId);
   let usedProvider = "gpt56";
-  let usedModel = runtime.gpt56Model;
+  let usedModel = usedModelEscalation ? runtime.gpt56SolModel : primaryModel;
   let fallbackProvider = null;
   let fallbackBody = null;
   const emergencyFallbackEnabled = String(config.DEEPSEEK_EMERGENCY_FALLBACK_ENABLED ?? config.deepseekEmergencyFallbackEnabled ?? "false").toLowerCase() === "true";
-  if (!successfulPartitions.length && emergencyFallbackEnabled && runtime.deepseekApiKey && hasBudget()) {
+  if (!successfulPartitions.length && !escalationTriggered && emergencyFallbackEnabled && runtime.deepseekApiKey && hasBudget()) {
     const fallbackResult = await timedCall(() => callDeepSeekChat(config, messages, {
       model: runtime.deepseekEmergencyFallbackModel,
       temperature: 0.2,
@@ -930,7 +1050,7 @@ export async function draftAssessment(config, input = {}) {
   } : null;
   const text = mergedDraft ? JSON.stringify(mergedDraft) : "";
   const status = successfulPartitions.length ? "SUCCESS" : "ERROR";
-  const failedPartitions = fallbackProvider ? [] : parsedPartitions.filter((entry) => entry.result.status !== "SUCCESS" || !entry.parsed);
+  const failedPartitions = fallbackProvider ? [] : finalPartitions.filter((entry) => !entry.usable);
   const latencyMs = Date.now() - totalStartedAt;
   const primaryError = failedPartitions[0]?.result.error || null;
   if (!successfulPartitions.length && assessmentTotalTimeoutMs && latencyMs >= assessmentTotalTimeoutMs - 5) totalBudgetExhausted = true;
@@ -956,6 +1076,19 @@ export async function draftAssessment(config, input = {}) {
         defaultPages,
         primaryAssessmentModel: runtime.gpt56Model,
         fallbackAssessmentModel: null,
+        primaryModel,
+        escalationModel: runtime.gpt56SolModel,
+        escalationTriggered,
+        usedModelEscalation,
+        usedDynamicFallback: false,
+        escalationScopes,
+        solFallbackTimeoutMs: runtime.gpt56SolFallbackTimeoutMs,
+        solTotalBudgetMs,
+        solBudget: {
+          partitionTimeoutMs: runtime.gpt56SolFallbackTimeoutMs,
+          totalTimeoutMs: solTotalBudgetMs,
+          maxConcurrency: 2
+        },
         emergencyFallbackEnabled,
         minimaxFallbackModel: runtime.minimaxModel || null,
         assessmentTimeoutMs,
