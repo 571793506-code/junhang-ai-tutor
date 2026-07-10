@@ -51,6 +51,8 @@ const TASK_REVIEW_BUCKETS = [
   ["caution", "谨慎处理"]
 ];
 
+const STAGE_SUGGESTION_BUCKETS = new Set(["closeout", "track"]);
+
 export function parseGitStatus(lines = []) {
   const branchLine = lines.find((line) => line.startsWith("## ")) || "";
   const stagedFiles = [];
@@ -97,6 +99,13 @@ export async function buildWorkspaceGuardianReport(options = {}) {
   const ignoredPreservedLocalFiles = ignoredFiles.filter(isPreservedLocalFile);
   const ignoredRuntimeFiles = ignoredFiles.filter((filePath) => !isPreservedLocalFile(filePath));
   const taskReview = buildTaskReview(status);
+  const stageReview = buildTaskReview({
+    stagedFiles: [],
+    unstagedFiles: status.unstagedFiles,
+    untrackedFiles: status.untrackedFiles
+  });
+  const pushStatus = buildPushStatus(status.branchLine);
+  const riskReview = buildRiskReview({ ...status, ignoredRuntimeFiles, taskReview, pushStatus });
   const clean = !status.stagedFiles.length &&
     !status.unstagedFiles.length &&
     !status.untrackedFiles.length &&
@@ -109,6 +118,10 @@ export async function buildWorkspaceGuardianReport(options = {}) {
     ignoredRuntimeFiles,
     ignoredPreservedLocalFiles,
     taskReview,
+    riskReview,
+    pushStatus,
+    closeoutOrder: buildCloseoutOrder(taskReview),
+    stageSuggestions: buildStageSuggestions(stageReview),
     recentCommits,
     recommendations: recommendWorkspaceActions({ ...status, ignoredRuntimeFiles })
   };
@@ -209,6 +222,9 @@ export function formatWorkspaceGuardianReport(report) {
     `工作区守护者：${report.clean ? "通过" : "不通过"}`,
     "",
     `- 分支状态：${report.branchLine || "未知"}`,
+    `- 风险等级：${report.riskReview?.label || "未知"}`,
+    ...formatItems(report.riskReview?.reasons || []),
+    `- 推送状态：${formatPushStatus(report.pushStatus)}`,
     `- 已暂存：${report.stagedFiles.length}`,
     ...formatItems(report.stagedFiles),
     `- 未暂存：${report.unstagedFiles.length}`,
@@ -221,6 +237,10 @@ export function formatWorkspaceGuardianReport(report) {
     ...formatItems(report.ignoredPreservedLocalFiles || []),
     "- 任务审查：",
     ...formatTaskReview(report.taskReview),
+    "- 收口顺序：",
+    ...formatCloseoutOrder(report.closeoutOrder),
+    "- 显式 stage 建议：",
+    ...formatStageSuggestions(report.stageSuggestions),
     "- 最近提交：",
     ...formatItems(report.recentCommits),
     "- 建议下一步：",
@@ -228,8 +248,143 @@ export function formatWorkspaceGuardianReport(report) {
   ].join("\n") + "\n";
 }
 
+export function buildPushStatus(branchLine = "") {
+  const ahead = matchBranchCount(branchLine, "ahead");
+  const behind = matchBranchCount(branchLine, "behind");
+  if (!branchLine) {
+    return {
+      state: "unknown",
+      label: "未知",
+      action: "无法读取分支状态；先运行 git status --short --branch。"
+    };
+  }
+  if (ahead && behind) {
+    return {
+      state: "diverged",
+      label: `分叉（ahead ${ahead}, behind ${behind}）`,
+      action: "开始新任务前先确认同步策略。"
+    };
+  }
+  if (behind) {
+    return {
+      state: "behind",
+      label: `落后远端（behind ${behind}）`,
+      action: "开始新任务前先 fetch/rebase 或确认同步策略。"
+    };
+  }
+  if (ahead) {
+    return {
+      state: "ahead",
+      label: `领先远端（ahead ${ahead}）`,
+      action: "验证后可推送。"
+    };
+  }
+  if (branchLine.includes("...")) {
+    return {
+      state: "synced",
+      label: "已同步",
+      action: "无需推送。"
+    };
+  }
+  return {
+    state: "local",
+    label: "本地分支",
+    action: "没有远端跟踪信息；需要推送时先确认 upstream。"
+  };
+}
+
+function buildRiskReview(report) {
+  const reasons = [];
+  const stagedLocal = (report.stagedFiles || []).filter((filePath) => classifyWorkspaceFile(filePath).bucket === "local");
+  const stagedCaution = (report.stagedFiles || []).filter((filePath) => classifyWorkspaceFile(filePath).bucket === "caution");
+  const visibleCount = (report.stagedFiles?.length || 0) +
+    (report.unstagedFiles?.length || 0) +
+    (report.untrackedFiles?.length || 0);
+
+  if (report.pushStatus?.state === "diverged" || report.pushStatus?.state === "behind") {
+    reasons.push("本地分支落后远端；先确认同步策略。");
+  }
+  if (stagedLocal.length) {
+    reasons.push("暂存区包含本地保存类文件；提交前需要人工确认。");
+  }
+  if (stagedCaution.length) {
+    reasons.push("暂存区包含谨慎处理类文件；提交前需要单独验证边界。");
+  }
+  if (report.taskReview?.caution?.length) {
+    reasons.push("存在小程序、平板或公共屏等谨慎处理范围。");
+  }
+  if (report.ignoredRuntimeFiles?.length) {
+    reasons.push("存在被忽略运行残留；默认本地保存，不纳入 Git。");
+  }
+  if (visibleCount) {
+    reasons.push("存在可见未收口文件；按任务审查顺序分组处理。");
+  }
+  if (!visibleCount && !report.ignoredRuntimeFiles?.length && report.pushStatus?.state === "ahead") {
+    reasons.push("工作区干净，本地提交尚未推送。");
+  }
+  if (!reasons.length) {
+    reasons.push("工作区无可见未提交文件，无 ignored 运行残留。");
+  }
+
+  const highRisk = report.pushStatus?.state === "diverged" ||
+    report.pushStatus?.state === "behind" ||
+    stagedLocal.length ||
+    stagedCaution.length;
+  if (highRisk) {
+    return { level: "high", label: "高风险", reasons };
+  }
+  if (visibleCount || report.ignoredRuntimeFiles?.length || report.pushStatus?.state === "ahead") {
+    return { level: "attention", label: "需关注", reasons };
+  }
+  return { level: "clean", label: "干净", reasons };
+}
+
+function buildCloseoutOrder(taskReview = {}) {
+  return TASK_REVIEW_BUCKETS
+    .map(([bucket, label]) => {
+      const files = taskReview[bucket] || [];
+      return {
+        bucket,
+        label,
+        count: files.length,
+        files,
+        action: closeoutAction(bucket)
+      };
+    })
+    .filter((item) => item.count);
+}
+
+function buildStageSuggestions(taskReview = {}) {
+  return TASK_REVIEW_BUCKETS
+    .map(([bucket, label]) => {
+      const files = taskReview[bucket] || [];
+      if (!files.length) return null;
+      if (!STAGE_SUGGESTION_BUCKETS.has(bucket)) {
+        return {
+          bucket,
+          label,
+          files,
+          command: null,
+          note: bucket === "local" ?
+            "默认本地保存或加入忽略，不建议纳入提交。" :
+            "先确认 API/服务层边界和专项验证，再决定是否显式 stage。"
+        };
+      }
+      return {
+        bucket,
+        label,
+        files,
+        command: `git add -- ${files.map(quoteGitPath).join(" ")}`,
+        note: bucket === "closeout" ?
+          "适合守护者或规则收口提交，提交前运行对应验证。" :
+          "按模块确认验证范围后再使用。"
+      };
+    })
+    .filter(Boolean);
+}
+
 function statusPath(line) {
-  return line.slice(3).trim().replace(/^"|"$/g, "");
+  return normalizeRelativePath(line.slice(3).trim().replace(/^"|"$/g, ""));
 }
 
 function hasAhead(branchLine = "") {
@@ -238,6 +393,11 @@ function hasAhead(branchLine = "") {
 
 function hasBehind(branchLine = "") {
   return /\bbehind\s+\d+/.test(branchLine);
+}
+
+function matchBranchCount(branchLine = "", key) {
+  const match = branchLine.match(new RegExp(`\\b${key}\\s+(\\d+)`));
+  return match ? Number(match[1]) : 0;
 }
 
 function normalizeRelativePath(filePath = "") {
@@ -285,6 +445,11 @@ function formatItems(items = []) {
   return items.map((item) => `  - ${item}`);
 }
 
+function formatPushStatus(pushStatus) {
+  if (!pushStatus) return "未知";
+  return `${pushStatus.label}；${pushStatus.action}`;
+}
+
 function formatTaskReview(taskReview = {}) {
   return TASK_REVIEW_BUCKETS.flatMap(([bucket, label]) => {
     const files = taskReview[bucket] || [];
@@ -293,6 +458,48 @@ function formatTaskReview(taskReview = {}) {
       ...files.map((filePath) => `    - ${filePath}`)
     ];
   });
+}
+
+function formatCloseoutOrder(closeoutOrder = []) {
+  if (!closeoutOrder.length) return ["  - 无"];
+  return closeoutOrder.map((item, index) => (
+    `  ${index + 1}. ${item.label}：${item.count}；${item.action}`
+  ));
+}
+
+function formatStageSuggestions(stageSuggestions = []) {
+  if (!stageSuggestions.length) return ["  - 无"];
+  return stageSuggestions.flatMap((item) => {
+    if (!item.command) {
+      return [`  - ${item.label}：${item.note}`];
+    }
+    return [
+      `  - ${item.label}：${item.note}`,
+      `    ${item.command}`
+    ];
+  });
+}
+
+function closeoutAction(bucket) {
+  if (bucket === "closeout") {
+    return "优先验证并提交。";
+  }
+  if (bucket === "track") {
+    return "按模块验证后单独提交。";
+  }
+  if (bucket === "local") {
+    return "默认本地保存或加入忽略，不提交。";
+  }
+  if (bucket === "caution") {
+    return "先确认边界和专项验证，不混入普通收口。";
+  }
+  return "人工确认。";
+}
+
+function quoteGitPath(filePath) {
+  const normalized = normalizeRelativePath(filePath);
+  if (/^[A-Za-z0-9_./-]+$/.test(normalized)) return normalized;
+  return `"${normalized.replace(/(["\\$`])/g, "\\$1")}"`;
 }
 
 function gitLines(args, cwd = process.cwd()) {

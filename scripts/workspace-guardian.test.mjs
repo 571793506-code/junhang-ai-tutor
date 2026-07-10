@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   archiveRuntimeResidue,
+  buildPushStatus,
   buildWorkspaceGuardianReport,
   classifyWorkspaceFile,
   formatWorkspaceGuardianReport,
@@ -29,6 +30,17 @@ test("parseGitStatus separates staged, unstaged, and untracked files", () => {
   ]);
   assert.deepEqual(result.unstagedFiles, ["docs/52-workspace-guardian.md"]);
   assert.deepEqual(result.untrackedFiles, ["tmp-note.md"]);
+});
+
+test("parseGitStatus normalizes Windows path separators", () => {
+  const result = parseGitStatus([
+    "## main...origin/main",
+    " M docs\\52-workspace-guardian.md",
+    "?? apps\\web\\src\\main.tsx"
+  ]);
+
+  assert.deepEqual(result.unstagedFiles, ["docs/52-workspace-guardian.md"]);
+  assert.deepEqual(result.untrackedFiles, ["apps/web/src/main.tsx"]);
 });
 
 test("buildWorkspaceGuardianReport collects git state without mutating the workspace", async () => {
@@ -130,6 +142,86 @@ test("buildWorkspaceGuardianReport adds a task review summary for visible work",
   assert.deepEqual(report.taskReview.caution, ["apps/miniprogram/pages/index/index.js"]);
 });
 
+test("buildWorkspaceGuardianReport adds read-only risk, closeout, and stage guidance", async () => {
+  const runGit = async (args) => {
+    if (args.includes("--ignored")) return ["!! exports/api-start.log"];
+    if (args[0] === "status") {
+      return [
+        "## main...origin/main [ahead 1]",
+        " M docs\\52-workspace-guardian.md",
+        "?? apps\\web\\src\\main.tsx",
+        "?? exports\\demo.pdf",
+        "?? apps\\miniprogram\\pages\\index\\index.js"
+      ];
+    }
+    if (args[0] === "log") return ["abc1234 docs: update guard"];
+    return [];
+  };
+
+  const report = await buildWorkspaceGuardianReport({ runGit });
+
+  assert.equal(report.riskReview.level, "attention");
+  assert.equal(report.pushStatus.state, "ahead");
+  assert.deepEqual(report.closeoutOrder.map((item) => item.bucket), [
+    "closeout",
+    "track",
+    "local",
+    "caution"
+  ]);
+  assert.equal(
+    report.stageSuggestions.find((item) => item.bucket === "closeout")?.command,
+    "git add -- docs/52-workspace-guardian.md"
+  );
+  assert.equal(
+    report.stageSuggestions.find((item) => item.bucket === "track")?.command,
+    "git add -- apps/web/src/main.tsx"
+  );
+  assert.equal(
+    report.stageSuggestions.find((item) => item.bucket === "local")?.command,
+    null
+  );
+});
+
+test("buildWorkspaceGuardianReport marks staged local or caution files as high risk", async () => {
+  const runGit = async (args) => {
+    if (args.includes("--ignored")) return [];
+    if (args[0] === "status") {
+      return [
+        "## main...origin/main",
+        "A  exports/demo.pdf",
+        "A  apps/miniprogram/pages/index/index.js"
+      ];
+    }
+    if (args[0] === "log") return ["abc1234 docs: update guard"];
+    return [];
+  };
+
+  const report = await buildWorkspaceGuardianReport({ runGit });
+
+  assert.equal(report.riskReview.level, "high");
+  assert.match(report.riskReview.reasons.join("\n"), /暂存区包含本地保存类文件/);
+  assert.match(report.riskReview.reasons.join("\n"), /暂存区包含谨慎处理类文件/);
+});
+
+test("buildWorkspaceGuardianReport does not suggest staging files already staged", async () => {
+  const runGit = async (args) => {
+    if (args.includes("--ignored")) return [];
+    if (args[0] === "status") {
+      return [
+        "## main...origin/main",
+        "M  docs/52-workspace-guardian.md"
+      ];
+    }
+    if (args[0] === "log") return ["abc1234 docs: update guard"];
+    return [];
+  };
+
+  const report = await buildWorkspaceGuardianReport({ runGit });
+
+  assert.deepEqual(report.taskReview.closeout, ["docs/52-workspace-guardian.md"]);
+  assert.deepEqual(report.stageSuggestions, []);
+});
+
 test("buildWorkspaceGuardianReport preserves approved student profile export PDFs and PNGs locally", async () => {
   const runGit = async (args) => {
     if (args.includes("--ignored")) {
@@ -199,10 +291,38 @@ test("recommendWorkspaceActions classifies next actions conservatively", () => {
   assert.ok(recommendations.includes("本地落后远端；开始新任务前先 fetch/rebase 或确认同步策略。"));
 });
 
+test("buildPushStatus summarizes branch sync states", () => {
+  assert.deepEqual(buildPushStatus("## main...origin/main"), {
+    state: "synced",
+    label: "已同步",
+    action: "无需推送。"
+  });
+  assert.deepEqual(buildPushStatus("## main...origin/main [ahead 2]"), {
+    state: "ahead",
+    label: "领先远端（ahead 2）",
+    action: "验证后可推送。"
+  });
+  assert.deepEqual(buildPushStatus("## main...origin/main [ahead 1, behind 3]"), {
+    state: "diverged",
+    label: "分叉（ahead 1, behind 3）",
+    action: "开始新任务前先确认同步策略。"
+  });
+});
+
 test("formatWorkspaceGuardianReport renders a readable Chinese summary", () => {
   const text = formatWorkspaceGuardianReport({
     clean: false,
     branchLine: "## main...origin/main [ahead 1]",
+    riskReview: {
+      level: "attention",
+      label: "需关注",
+      reasons: ["存在可见未收口文件；按任务审查顺序分组处理。"]
+    },
+    pushStatus: {
+      state: "ahead",
+      label: "领先远端（ahead 1）",
+      action: "验证后可推送。"
+    },
     stagedFiles: ["SKILLS.md"],
     unstagedFiles: [],
     untrackedFiles: ["scripts/workspace-guardian-lib.mjs"],
@@ -214,16 +334,39 @@ test("formatWorkspaceGuardianReport renders a readable Chinese summary", () => {
       local: [],
       caution: []
     },
+    closeoutOrder: [
+      {
+        bucket: "track",
+        label: "继续跟踪",
+        count: 1,
+        files: ["scripts/workspace-guardian-lib.mjs"],
+        action: "按模块验证后单独提交。"
+      }
+    ],
+    stageSuggestions: [
+      {
+        bucket: "track",
+        label: "继续跟踪",
+        files: ["scripts/workspace-guardian-lib.mjs"],
+        command: "git add -- scripts/workspace-guardian-lib.mjs",
+        note: "按模块确认验证范围后再使用。"
+      }
+    ],
     recentCommits: ["abc1234 docs: update guard"],
     recommendations: ["存在未跟踪文件；不要使用 git add .，先确认是否为源码、文档、资产或运行产物。"]
   });
 
   assert.match(text, /工作区守护者：不通过/);
+  assert.match(text, /风险等级：需关注/);
+  assert.match(text, /推送状态：领先远端/);
   assert.match(text, /已暂存：1/);
   assert.match(text, /未跟踪：1/);
   assert.match(text, /被忽略运行残留：1/);
   assert.match(text, /任务审查/);
+  assert.match(text, /收口顺序/);
+  assert.match(text, /显式 stage 建议/);
   assert.match(text, /继续跟踪：1/);
+  assert.match(text, /git add -- scripts\/workspace-guardian-lib\.mjs/);
   assert.match(text, /不要使用 git add \./);
 });
 
