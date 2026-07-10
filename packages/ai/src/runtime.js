@@ -325,7 +325,14 @@ export async function callOpenAiCompatibleChat({
     try {
       body = JSON.parse(text);
     } catch (error) {
-      if (response.ok) throw error;
+      if (response.ok) {
+        const responseError = new Error(`Invalid upstream response: ${error.message}`, {
+          cause: error
+        });
+        responseError.status = response.status;
+        responseError.code = "invalid_upstream_response";
+        throw responseError;
+      }
     }
   }
 

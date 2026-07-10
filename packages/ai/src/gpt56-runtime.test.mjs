@@ -226,6 +226,35 @@ test("callGpt56Chat preserves status for a non-JSON upstream error", async () =>
   }
 });
 
+test("callGpt56Chat classifies a successful non-JSON upstream response", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end("<html>gateway error</html>");
+  });
+  const address = await listen(server);
+
+  try {
+    await assert.rejects(
+      callGpt56Chat(
+        {
+          GPT56_API_KEY: "test-key",
+          GPT56_BASE_URL: `http://127.0.0.1:${address.port}`,
+          GPT56_MODEL: "gpt-5.6"
+        },
+        [{ role: "user", content: "test" }]
+      ),
+      (error) => {
+        assert.match(error.message, /Invalid upstream response/);
+        assert.equal(error.status, 200);
+        assert.equal(error.code, "invalid_upstream_response");
+        return true;
+      }
+    );
+  } finally {
+    await close(server);
+  }
+});
+
 test("Junhang text workflows use GPT-5.6 as their primary provider", async () => {
   const payloads = [];
   const server = http.createServer((req, res) => {

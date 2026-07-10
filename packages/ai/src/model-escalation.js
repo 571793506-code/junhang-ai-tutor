@@ -33,6 +33,7 @@ export function classifySolEscalationError(error = {}) {
     /MODEL_TIMEOUT/i.test(text) ||
     TRANSIENT_STATUS.has(detail.status) ||
     transient429 ||
+    detail.code === "invalid_upstream_response" ||
     TRANSIENT_CODE.test(text);
 
   return transient

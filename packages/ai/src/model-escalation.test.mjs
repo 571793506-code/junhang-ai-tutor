@@ -145,6 +145,27 @@ test("Sol escalation treats account-level 429 limits as configuration failures",
   }
 });
 
+test("Sol escalation only allows explicitly classified upstream parse failures", () => {
+  assert.deepEqual(
+    classifySolEscalationError({
+      status: 200,
+      code: "invalid_upstream_response",
+      message: "Invalid upstream response: unexpected HTML"
+    }),
+    {
+      allowed: true,
+      triggerClass: "availability",
+      triggerCode: "invalid_upstream_response"
+    }
+  );
+
+  assert.deepEqual(classifySolEscalationError(new SyntaxError("Unexpected token '<'")), {
+    allowed: false,
+    triggerClass: "configuration",
+    triggerCode: "configuration"
+  });
+});
+
 test("Sol escalation requires fallback, reasoning effort, and a model", () => {
   const enabled = {
     gpt56SolFallbackEnabled: true,
