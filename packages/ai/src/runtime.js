@@ -1,3 +1,5 @@
+import { buildAssessmentPartitions, mapWithConcurrency } from "./assessment-partitions.js";
+
 export const providerCatalog = [
   {
     id: "deepseek",
@@ -6,7 +8,7 @@ export const providerCatalog = [
     modelKey: "DEEPSEEK_TEXT_MODEL",
     defaultBaseUrl: "https://api.deepseek.com",
     defaultModel: "deepseek-v4-pro",
-    capabilities: ["qa", "vocabulary-text", "task-draft", "report-draft", "assessment-draft", "submission-reference-answer", "submission-grading"]
+    capabilities: ["emergency-text-rollback"]
   },
   {
     id: "minimax",
@@ -15,16 +17,16 @@ export const providerCatalog = [
     modelKey: "MINIMAX_TEXT_MODEL",
     defaultBaseUrl: "https://api.minimaxi.com/v1",
     defaultModel: "MiniMax-M3",
-    capabilities: ["vocabulary-voice", "spoken-practice", "avatar-dialog", "vision-ocr", "model-review", "grading-audit"]
+    capabilities: ["vocabulary-voice", "spoken-practice", "avatar-dialog", "vision-ocr"]
   },
   {
-    id: "gpt55",
-    label: "GPT5.5",
-    baseUrlKey: "GPT55_BASE_URL",
-    modelKey: "GPT55_MODEL",
+    id: "gpt56",
+    label: "GPT-5.6",
+    baseUrlKey: "GPT56_BASE_URL",
+    modelKey: "GPT56_MODEL",
     defaultBaseUrl: "",
-    defaultModel: "gpt-5.5",
-    capabilities: ["premium-grading-review", "archive-gate"]
+    defaultModel: "gpt-5.6",
+    capabilities: ["qa", "vocabulary-text", "task-draft", "report-draft", "assessment-draft", "submission-reference-answer", "submission-grading", "premium-grading-review", "archive-gate"]
   }
 ];
 
@@ -32,31 +34,31 @@ export const capabilityCatalog = [
   {
     id: "qa",
     label: "AI 问答",
-    providerId: "deepseek",
+    providerId: "gpt56",
     appSurface: "AI 问答"
   },
   {
     id: "vocabulary-text",
     label: "英语词汇解释",
-    providerId: "deepseek",
+    providerId: "gpt56",
     appSurface: "英语词汇助手"
   },
   {
     id: "task-draft",
     label: "今日任务草稿",
-    providerId: "deepseek",
+    providerId: "gpt56",
     appSurface: "今日任务"
   },
   {
     id: "report-draft",
     label: "学生档案草稿",
-    providerId: "deepseek",
+    providerId: "gpt56",
     appSurface: "学生主页"
   },
   {
     id: "submission-grading",
     label: "图片批改",
-    providerId: "deepseek",
+    providerId: "gpt56",
     appSurface: "生成与批改"
   },
   {
@@ -72,15 +74,9 @@ export const capabilityCatalog = [
     appSurface: "英语词汇助手"
   },
   {
-    id: "grading-audit",
-    label: "批改二次审计",
-    providerId: "minimax",
-    appSurface: "生成与批改"
-  },
-  {
     id: "premium-grading-review",
     label: "批改高级审查",
-    providerId: "gpt55",
+    providerId: "gpt56",
     appSurface: "生成与批改"
   },
   {
@@ -111,6 +107,10 @@ export function normalizeRuntimeConfig(config = {}) {
       config.DEEPSEEK_ASSESSMENT_FALLBACK_MODEL ||
       config.deepseekAssessmentFallbackModel ||
       "deepseek-v4-pro",
+    deepseekEmergencyFallbackModel:
+      config.DEEPSEEK_EMERGENCY_FALLBACK_MODEL ||
+      config.deepseekEmergencyFallbackModel ||
+      "deepseek-v4-flash",
     minimaxApiKey: config.MINIMAX_API_KEY || config.minimaxApiKey || "",
     minimaxBaseUrl:
       config.MINIMAX_BASE_URL || config.minimaxBaseUrl || "https://api.minimaxi.com/v1",
@@ -130,10 +130,13 @@ export function normalizeRuntimeConfig(config = {}) {
     ocrVisionApiKey: config.OCR_VISION_API_KEY || config.ocrVisionApiKey || "",
     ocrVisionModel: config.OCR_VISION_MODEL || config.ocrVisionModel || "coding_plan/vlm",
     ocrTesseractLang: config.OCR_TESSERACT_LANG || config.ocrTesseractLang || "chi_sim+eng",
-    gpt55ApiKey: config.GPT55_API_KEY || config.gpt55ApiKey || config.OPENAI_API_KEY || config.openaiApiKey || "",
-    gpt55BaseUrl: config.GPT55_BASE_URL || config.gpt55BaseUrl || config.OPENAI_BASE_URL || config.openaiBaseUrl || "https://api.openai.com/v1",
-    gpt55Model: config.GPT55_MODEL || config.gpt55Model || "gpt-5.5",
-    gpt55ReviewTimeoutMs: Number(config.GPT55_REVIEW_TIMEOUT_MS || config.gpt55ReviewTimeoutMs || 240000)
+    gpt56ApiKey: config.GPT56_API_KEY || config.gpt56ApiKey || config.GPT55_API_KEY || config.gpt55ApiKey || config.OPENAI_API_KEY || config.openaiApiKey || "",
+    gpt56BaseUrl: config.GPT56_BASE_URL || config.gpt56BaseUrl || config.GPT55_BASE_URL || config.gpt55BaseUrl || config.OPENAI_BASE_URL || config.openaiBaseUrl || "https://api.openai.com/v1",
+    gpt56Model: config.GPT56_MODEL || config.gpt56Model || config.GPT55_MODEL || config.gpt55Model || "gpt-5.6",
+    gpt56GenerationTimeoutMs: Number(config.GPT56_GENERATION_TIMEOUT_MS || config.gpt56GenerationTimeoutMs || config.GPT56_ASSESSMENT_TIMEOUT_MS || config.gpt56AssessmentTimeoutMs || config.GPT55_ASSESSMENT_TIMEOUT_MS || config.gpt55AssessmentTimeoutMs || 90000),
+    gpt56GradingTimeoutMs: Number(config.GPT56_GRADING_TIMEOUT_MS || config.gpt56GradingTimeoutMs || config.GPT56_ASSESSMENT_TIMEOUT_MS || config.gpt56AssessmentTimeoutMs || config.GPT55_ASSESSMENT_TIMEOUT_MS || config.gpt55AssessmentTimeoutMs || 90000),
+    gpt56ReviewTimeoutMs: Number(config.GPT56_REVIEW_TIMEOUT_MS || config.gpt56ReviewTimeoutMs || config.GPT55_REVIEW_TIMEOUT_MS || config.gpt55ReviewTimeoutMs || 60000),
+    gpt56ReasoningEffortEnabled: String(config.GPT56_REASONING_EFFORT_ENABLED ?? config.gpt56ReasoningEffortEnabled ?? "false").toLowerCase() === "true"
   };
 }
 
@@ -144,7 +147,7 @@ export function buildAiStartupSnapshot(config = {}) {
     Boolean(runtime.minimaxApiKey) &&
     ["restored", "ready", "enabled", "ok"].includes(runtime.minimaxBalanceStatus);
   const minimaxStatus = minimaxReady ? "ready" : runtime.minimaxApiKey ? "blocked" : "unavailable";
-  const gpt55Status = runtime.gpt55ApiKey && runtime.gpt55BaseUrl && runtime.gpt55Model ? "ready" : "unavailable";
+  const gpt56Status = runtime.gpt56ApiKey && runtime.gpt56BaseUrl && runtime.gpt56Model ? "ready" : "unavailable";
   const providerById = new Map(providerCatalog.map((provider) => [provider.id, provider]));
 
   const providers = [
@@ -156,7 +159,7 @@ export function buildAiStartupSnapshot(config = {}) {
       assessmentModel: runtime.deepseekAssessmentModel,
       assessmentFallbackModel: runtime.deepseekAssessmentFallbackModel,
       baseUrl: runtime.deepseekBaseUrl,
-      reason: deepseekStatus === "ready" ? "文本推理、答疑和任务草稿可用" : "缺少 DEEPSEEK_API_KEY",
+      reason: deepseekStatus === "ready" ? "仅供显式紧急回滚，默认文本路由不使用" : "紧急回滚不可用：缺少 DEEPSEEK_API_KEY",
       capabilities: providerById.get("deepseek")?.capabilities || []
     },
     {
@@ -175,13 +178,13 @@ export function buildAiStartupSnapshot(config = {}) {
       capabilities: providerById.get("minimax")?.capabilities || []
     },
     {
-      id: "gpt55",
-      label: "GPT5.5",
-      status: gpt55Status,
-      model: runtime.gpt55Model,
-      baseUrl: runtime.gpt55BaseUrl,
-      reason: gpt55Status === "ready" ? "批改高级审查和归档门禁可用" : "缺少 GPT55_API_KEY 或 GPT55_MODEL",
-      capabilities: providerById.get("gpt55")?.capabilities || []
+      id: "gpt56",
+      label: "GPT-5.6",
+      status: gpt56Status,
+      model: runtime.gpt56Model,
+      baseUrl: runtime.gpt56BaseUrl,
+      reason: gpt56Status === "ready" ? "文本生成、批改和高级审查可用" : "缺少 GPT56_API_KEY 或 GPT56_MODEL",
+      capabilities: providerById.get("gpt56")?.capabilities || []
     }
   ];
 
@@ -207,9 +210,9 @@ export function createDemoAiSnapshot() {
     deepseekApiKey: "demo-deepseek-ready",
     minimaxApiKey: "demo-minimax-present",
     minimaxBalanceStatus: "restored",
-    gpt55ApiKey: "demo-gpt55-ready",
-    gpt55BaseUrl: "https://example.invalid/v1",
-    gpt55Model: "gpt-5.5"
+    gpt56ApiKey: "demo-gpt56-ready",
+    gpt56BaseUrl: "https://example.invalid/v1",
+    gpt56Model: "gpt-5.6"
   });
 }
 
@@ -219,7 +222,7 @@ export function routeCapability(capabilityId, snapshot = createDemoAiSnapshot())
     return {
       id: capabilityId,
       label: capabilityId,
-      providerId: "deepseek",
+      providerId: "gpt56",
       appSurface: "未配置",
       status: "unavailable",
       reason: "未知 AI 能力"
@@ -232,9 +235,8 @@ export function routeCapability(capabilityId, snapshot = createDemoAiSnapshot())
 export function buildModelOrchestrationPlan(config = {}) {
   const runtime = normalizeRuntimeConfig(config);
   const snapshot = buildAiStartupSnapshot(config);
-  const deepseek = snapshot.providers.find((item) => item.id === "deepseek");
   const minimax = snapshot.providers.find((item) => item.id === "minimax");
-  const gpt55 = snapshot.providers.find((item) => item.id === "gpt55");
+  const gpt56 = snapshot.providers.find((item) => item.id === "gpt56");
   return {
     brain: {
       owner: "Codex",
@@ -242,27 +244,27 @@ export function buildModelOrchestrationPlan(config = {}) {
     },
     routes: {
       qa: {
-        providerId: "deepseek",
-        model: runtime.deepseekModel,
-        status: deepseek?.status || "unavailable",
+        providerId: "gpt56",
+        model: runtime.gpt56Model,
+        status: gpt56?.status || "unavailable",
         duty: "学生问答、词汇解释、任务草稿。"
       },
       assessmentDraft: {
-        providerId: "deepseek",
-        model: runtime.deepseekAssessmentModel,
-        status: deepseek?.status || "unavailable",
-        duty: "试卷/小测/练习结构化初稿，必须经过主脑审查与修复。"
+        providerId: "gpt56",
+        model: runtime.gpt56Model,
+        status: gpt56?.status || "unavailable",
+        duty: "按项目题型蓝图分区生成试卷/小测/练习草稿，必须经过服务层审查与修复。"
       },
       multimodalReview: {
         providerId: "minimax",
         model: runtime.minimaxModel,
         status: minimax?.status || "unavailable",
-        duty: "长上下文、多模态/OCR辅助、第二模型复核。"
+        duty: "视觉 OCR、多模态识别和图片证据提取。"
       },
       premiumGradingReview: {
-        providerId: "gpt55",
-        model: runtime.gpt55Model,
-        status: gpt55?.status || "unavailable",
+        providerId: "gpt56",
+        model: runtime.gpt56Model,
+        status: gpt56?.status || "unavailable",
         duty: "批改结果高级审查、异常分数拦截、低置信归档门禁。"
       },
       speech: {
@@ -283,13 +285,15 @@ export async function callOpenAiCompatibleChat({
   temperature = 0.3,
   responseFormat,
   maxTokens,
-  timeoutMs
+  timeoutMs,
+  reasoningEffort
 }) {
   if (!apiKey) throw new Error("Missing API key");
 
   const payload = { model, messages, temperature };
   if (responseFormat) payload.response_format = responseFormat;
   if (maxTokens) payload.max_tokens = maxTokens;
+  if (reasoningEffort) payload.reasoning_effort = reasoningEffort;
   const controller = timeoutMs ? new AbortController() : null;
   const timeout = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
@@ -357,19 +361,24 @@ export async function callMiniMaxChat(config, messages, options = {}) {
 }
 
 export async function callGpt55Chat(config, messages, options = {}) {
+  return callGpt56Chat(config, messages, options);
+}
+
+export async function callGpt56Chat(config, messages, options = {}) {
   const runtime = normalizeRuntimeConfig(config);
-  if (!runtime.gpt55ApiKey || !runtime.gpt55BaseUrl || !runtime.gpt55Model) {
-    throw new Error("GPT5.5 review model is not configured.");
+  if (!runtime.gpt56ApiKey || !runtime.gpt56BaseUrl || !runtime.gpt56Model) {
+    throw new Error("GPT-5.6 model is not configured.");
   }
   return callOpenAiCompatibleChat({
-    baseUrl: runtime.gpt55BaseUrl,
-    apiKey: runtime.gpt55ApiKey,
-    model: options.model || runtime.gpt55Model,
+    baseUrl: runtime.gpt56BaseUrl,
+    apiKey: runtime.gpt56ApiKey,
+    model: options.model || runtime.gpt56Model,
     messages,
     temperature: options.temperature,
     responseFormat: options.responseFormat,
     maxTokens: options.maxTokens,
-    timeoutMs: options.timeoutMs
+    timeoutMs: options.timeoutMs,
+    reasoningEffort: runtime.gpt56ReasoningEffortEnabled ? options.reasoningEffort : undefined
   });
 }
 
@@ -455,15 +464,15 @@ function fallbackUnavailable(providerId, reason, fallback) {
 
 export async function answerStudentQuestion(config, input = {}) {
   const snapshot = buildAiStartupSnapshot(config);
-  const provider = snapshot.providers.find((item) => item.id === "deepseek");
+  const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const mode = input.mode || inferClassroomQaMode(input.question);
 
   if (provider?.status !== "ready") {
-    return fallbackUnavailable("deepseek", provider?.reason || "DeepSeek unavailable", {
+    return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       mode,
       answer: "AI 问答暂时不可用，老师稍后会协助处理。",
       modelRun: {
-        provider: "deepseek",
+        provider: "gpt56",
         model: provider?.model,
         skill: "student-qa",
         inputSummary: input.question,
@@ -495,19 +504,19 @@ export async function answerStudentQuestion(config, input = {}) {
     }
   ];
 
-  const result = await timedCall(() => callDeepSeekChat(config, messages));
+  const result = await timedCall(() => callGpt56Chat(config, messages, { reasoningEffort: "low" }));
   const answer = result.body ? extractChatText(result.body) : "";
 
   return {
     available: result.status === "SUCCESS",
-    providerId: "deepseek",
+    providerId: "gpt56",
     model: provider.model,
     mode,
     answer: answer || "这次问题没有拿到稳定回答，建议老师复核。",
     raw: result.body,
     error: result.error,
     modelRun: {
-      provider: "deepseek",
+      provider: "gpt56",
       model: provider.model,
       skill: "student-qa",
       inputSummary: input.question,
@@ -566,17 +575,17 @@ function normalizeVocabularyCard(input = {}, parsed = {}) {
 
 export async function generateVocabularyCard(config, input = {}) {
   const snapshot = buildAiStartupSnapshot(config);
-  const provider = snapshot.providers.find((item) => item.id === "deepseek");
+  const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const word = String(input.word || input.term || "").trim();
   if (provider?.status !== "ready") {
-    return fallbackUnavailable("deepseek", provider?.reason || "DeepSeek unavailable", {
+    return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       card: normalizeVocabularyCard(input, {
         word,
         meaning: "AI 词汇生成暂时不可用，请稍后重试或交给老师补充。",
         needsTeacherReview: true
       }),
       modelRun: {
-        provider: "deepseek",
+        provider: "gpt56",
         model: provider?.model,
         skill: "vocabulary-card",
         inputSummary: word,
@@ -603,24 +612,25 @@ export async function generateVocabularyCard(config, input = {}) {
     }
   ];
 
-  const result = await timedCall(() => callDeepSeekChat(config, messages, {
+  const result = await timedCall(() => callGpt56Chat(config, messages, {
     temperature: 0.2,
     responseFormat: { type: "json_object" },
     maxTokens: 900,
-    timeoutMs: 30000
+    timeoutMs: 30000,
+    reasoningEffort: "none"
   }));
   const text = result.body ? extractChatText(result.body) : "";
   const parsed = parseJsonObjectText(text) || {};
   const card = normalizeVocabularyCard(input, parsed);
   return {
     available: result.status === "SUCCESS",
-    providerId: "deepseek",
+    providerId: "gpt56",
     model: provider.model,
     card,
     raw: result.body,
     error: result.error,
     modelRun: {
-      provider: "deepseek",
+      provider: "gpt56",
       model: provider.model,
       skill: "vocabulary-card",
       inputSummary: word,
@@ -634,12 +644,12 @@ export async function generateVocabularyCard(config, input = {}) {
 
 export async function draftTeacherTask(config, input = {}) {
   const snapshot = buildAiStartupSnapshot(config);
-  const provider = snapshot.providers.find((item) => item.id === "deepseek");
+  const provider = snapshot.providers.find((item) => item.id === "gpt56");
   if (provider?.status !== "ready") {
-    return fallbackUnavailable("deepseek", provider?.reason || "DeepSeek unavailable", {
+    return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       draft: null,
       modelRun: {
-        provider: "deepseek",
+        provider: "gpt56",
         model: provider?.model,
         skill: "task-draft",
         inputSummary: input.requirement || input.title,
@@ -662,18 +672,18 @@ export async function draftTeacherTask(config, input = {}) {
     }
   ];
 
-  const result = await timedCall(() => callDeepSeekChat(config, messages));
+  const result = await timedCall(() => callGpt56Chat(config, messages, { reasoningEffort: "low" }));
   const text = result.body ? extractChatText(result.body) : "";
 
   return {
     available: result.status === "SUCCESS",
-    providerId: "deepseek",
+    providerId: "gpt56",
     model: provider.model,
     draftText: text,
     raw: result.body,
     error: result.error,
     modelRun: {
-      provider: "deepseek",
+      provider: "gpt56",
       model: provider.model,
       skill: "task-draft",
       inputSummary: input.requirement || input.title || "",
@@ -687,13 +697,13 @@ export async function draftTeacherTask(config, input = {}) {
 
 export async function draftAssessment(config, input = {}) {
   const snapshot = buildAiStartupSnapshot(config);
-  const provider = snapshot.providers.find((item) => item.id === "deepseek");
+  const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const runtime = normalizeRuntimeConfig(config);
   if (provider?.status !== "ready") {
-    return fallbackUnavailable("deepseek", provider?.reason || "DeepSeek unavailable", {
+    return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       draftText: "",
       modelRun: {
-        provider: "deepseek",
+        provider: "gpt56",
         model: provider?.model,
         skill: "assessment-draft",
         inputSummary: input.requirement || input.title,
@@ -762,18 +772,10 @@ export async function draftAssessment(config, input = {}) {
     config.assessmentDraftTotalTimeoutMs
   );
   const assessmentTimeoutMs = firstPositiveNumber(
-    config.DEEPSEEK_ASSESSMENT_DRAFT_TIMEOUT_MS ||
-    config.deepseekAssessmentDraftTimeoutMs ||
-    config.DEEPSEEK_ASSESSMENT_TIMEOUT_MS ||
-    config.deepseekAssessmentTimeoutMs ||
-    assessmentTotalTimeoutMs ||
-    240000
-  );
-  const premiumAssessmentTimeoutMs = firstPositiveNumber(
-    config.GPT55_ASSESSMENT_TIMEOUT_MS ||
-    config.gpt55AssessmentTimeoutMs ||
-    runtime.gpt55ReviewTimeoutMs ||
-    240000
+    config.GPT56_GENERATION_TIMEOUT_MS ||
+    config.gpt56GenerationTimeoutMs ||
+    runtime.gpt56GenerationTimeoutMs ||
+    90000
   );
   const minimaxAssessmentTimeoutMs = firstPositiveNumber(
     config.MINIMAX_ASSESSMENT_TIMEOUT_MS ||
@@ -809,106 +811,147 @@ export async function draftAssessment(config, input = {}) {
       if (remaining != null && remaining <= 5) totalBudgetExhausted = true;
     }
   };
-  const callAssessmentModel = (model) => callDeepSeekChat(config, messages, {
-    model,
-    temperature: 0.2,
-    responseFormat: { type: "json_object" },
-    maxTokens: assessmentMaxTokens,
-    timeoutMs: attemptTimeoutMs(assessmentTimeoutMs)
-  });
+  const partitions = buildAssessmentPartitions({ subject, kind });
+  const basePartitionTokens = Math.floor(assessmentMaxTokens / partitions.length);
+  const extraPartitionTokens = assessmentMaxTokens % partitions.length;
+  const partitionTokenBudget = (index) => {
+    const allocated = basePartitionTokens + (index < extraPartitionTokens ? 1 : 0);
+    return kind === "试卷" ? allocated : Math.min(allocated, 8000);
+  };
   const attempts = [];
-  const recordAttempt = (role, providerId, model, attemptResult) => {
+  const recordAttempt = (role, partition, attemptResult) => {
     markBudgetFromResult(attemptResult);
     attempts.push({
       role,
-      providerId,
-      model,
+      partitionId: partition.id,
+      providerId: "gpt56",
+      model: runtime.gpt56Model,
       status: attemptResult.status,
       latencyMs: attemptResult.latencyMs ?? null,
       error: attemptResult.error || null
     });
   };
-  let usedAssessmentModel = runtime.deepseekAssessmentModel;
-  let usedAssessmentProvider = "deepseek";
-  let result = await timedCall(() => callAssessmentModel(runtime.deepseekAssessmentModel));
-  recordAttempt("primary", "deepseek", runtime.deepseekAssessmentModel, result);
-  if (result.status !== "SUCCESS" && hasBudget() && runtime.deepseekAssessmentFallbackModel && runtime.deepseekAssessmentFallbackModel !== runtime.deepseekAssessmentModel) {
-    const primaryError = result.error;
-    usedAssessmentModel = runtime.deepseekAssessmentFallbackModel;
-    result = await timedCall(() => callAssessmentModel(runtime.deepseekAssessmentFallbackModel));
-    recordAttempt("same-provider-fallback", "deepseek", runtime.deepseekAssessmentFallbackModel, result);
-    if (result.status === "SUCCESS") {
-      result.primaryError = primaryError;
+  const callPartition = async (partition, index, role = "primary") => {
+    const partitionTokens = partitionTokenBudget(index);
+    const partitionMessages = messages.map((message) => message.role !== "user" ? message : {
+      ...message,
+      content: `${message.content}\n\n本次只生成分区：${partition.title}。允许题型：${partition.itemTypes.join(", ")}。不要生成其他分区。顶层仍返回 {title,layout,sections,printNotes}，sections 只包含本分区。请精简输出，避免重复规则和冗长说明；优先保证 JSON 完整，并让每题的答案、解析步骤、考点、易错点和分值字段齐全。`
+    });
+    const result = await timedCall(() => callGpt56Chat(config, partitionMessages, {
+      model: runtime.gpt56Model,
+      temperature: 0.2,
+      responseFormat: { type: "json_object" },
+      maxTokens: partitionTokens,
+      timeoutMs: attemptTimeoutMs(assessmentTimeoutMs),
+      reasoningEffort: kind === "试卷" || input.studentId ? "medium" : "low"
+    }));
+    recordAttempt(role, partition, result);
+    return { partition, index, partitionTokens, result };
+  };
+  let partitionResults = await mapWithConcurrency(partitions, 2, (partition, index) => callPartition(partition, index));
+  const reserveMs = assessmentTotalTimeoutMs ? Math.max(1000, Math.floor(assessmentTotalTimeoutMs * 0.15)) : 0;
+  const retryable = partitionResults.filter((entry) => entry.result.status !== "SUCCESS");
+  if (retryable.length && hasBudget() && (remainingBudgetMs() == null || remainingBudgetMs() > reserveMs)) {
+    const retries = await mapWithConcurrency(retryable, 2, (entry) => callPartition(entry.partition, entry.index, "partition-retry"));
+    const retryByIndex = new Map(retries.map((entry) => [entry.index, entry]));
+    partitionResults = partitionResults.map((entry) => retryByIndex.get(entry.index) || entry);
+  }
+  const parsedPartitions = partitionResults.map((entry) => {
+    const text = entry.result.body ? extractChatText(entry.result.body) : "";
+    return { ...entry, text, parsed: parseJsonObjectText(text) };
+  });
+  let successfulPartitions = parsedPartitions.filter((entry) => entry.result.status === "SUCCESS" && entry.parsed);
+  let usedProvider = "gpt56";
+  let usedModel = runtime.gpt56Model;
+  let fallbackProvider = null;
+  let fallbackBody = null;
+  const emergencyFallbackEnabled = String(config.DEEPSEEK_EMERGENCY_FALLBACK_ENABLED ?? config.deepseekEmergencyFallbackEnabled ?? "false").toLowerCase() === "true";
+  if (!successfulPartitions.length && emergencyFallbackEnabled && runtime.deepseekApiKey && hasBudget()) {
+    const fallbackResult = await timedCall(() => callDeepSeekChat(config, messages, {
+      model: runtime.deepseekEmergencyFallbackModel,
+      temperature: 0.2,
+      responseFormat: { type: "json_object" },
+      maxTokens: assessmentMaxTokens,
+      timeoutMs: attemptTimeoutMs(assessmentTimeoutMs)
+    }));
+    markBudgetFromResult(fallbackResult);
+    attempts.push({
+      role: "emergency-rollback",
+      partitionId: null,
+      providerId: "deepseek",
+      model: runtime.deepseekEmergencyFallbackModel,
+      status: fallbackResult.status,
+      latencyMs: fallbackResult.latencyMs ?? null,
+      error: fallbackResult.error || null
+    });
+    const fallbackText = fallbackResult.body ? extractChatText(fallbackResult.body) : "";
+    const fallbackParsed = parseJsonObjectText(fallbackText);
+    if (fallbackResult.status === "SUCCESS" && fallbackParsed) {
+      usedProvider = "deepseek";
+      usedModel = runtime.deepseekEmergencyFallbackModel;
+      fallbackProvider = "deepseek";
+      fallbackBody = fallbackResult.body;
+      successfulPartitions = [{
+        index: 0,
+        text: fallbackText,
+        parsed: fallbackParsed,
+        result: fallbackResult
+      }];
     }
   }
-  if (result.status !== "SUCCESS" && hasBudget() && runtime.gpt55ApiKey && runtime.gpt55BaseUrl && runtime.gpt55Model) {
-    const deepseekError = result.error;
-    usedAssessmentProvider = "gpt55";
-    usedAssessmentModel = runtime.gpt55Model;
-    result = await timedCall(() => callGpt55Chat(config, messages, {
-      model: runtime.gpt55Model,
-      temperature: 0.2,
-      responseFormat: { type: "json_object" },
-      maxTokens: assessmentMaxTokens,
-      timeoutMs: attemptTimeoutMs(premiumAssessmentTimeoutMs)
-    }));
-    recordAttempt("premium-fallback", "gpt55", runtime.gpt55Model, result);
-    result.primaryError = deepseekError;
-    result.fallbackProvider = "gpt55";
-  }
-  if (result.status !== "SUCCESS" && hasBudget() && runtime.minimaxApiKey && ["restored", "ready", "enabled", "ok"].includes(runtime.minimaxBalanceStatus)) {
-    const previousPrimaryError = result.primaryError || null;
-    const previousError = result.error;
-    usedAssessmentProvider = "minimax";
-    usedAssessmentModel = runtime.minimaxModel;
-    result = await timedCall(() => callMiniMaxChat(config, messages, {
-      model: runtime.minimaxModel,
-      temperature: 0.2,
-      responseFormat: { type: "json_object" },
-      maxTokens: assessmentMaxTokens,
-      timeoutMs: attemptTimeoutMs(minimaxAssessmentTimeoutMs)
-    }));
-    recordAttempt("backup-fallback", "minimax", runtime.minimaxModel, result);
-    result.primaryError = previousPrimaryError || previousError;
-    result.secondaryError = previousPrimaryError ? previousError : null;
-    result.fallbackProvider = "minimax";
-  }
-  const text = result.body ? extractChatText(result.body) : "";
+  const mergedDraft = successfulPartitions.length ? {
+    title: successfulPartitions.find((entry) => entry.parsed?.title)?.parsed.title || `${gradeText}${subject}${kind}`,
+    layout: successfulPartitions.find((entry) => entry.parsed?.layout)?.parsed.layout || { paper: "A4", pages: defaultPages },
+    sections: successfulPartitions.flatMap((entry) => Array.isArray(entry.parsed.sections) ? entry.parsed.sections : []),
+    printNotes: Array.from(new Set(successfulPartitions.flatMap((entry) => Array.isArray(entry.parsed.printNotes) ? entry.parsed.printNotes : [])))
+  } : null;
+  const text = mergedDraft ? JSON.stringify(mergedDraft) : "";
+  const status = successfulPartitions.length ? "SUCCESS" : "ERROR";
+  const failedPartitions = fallbackProvider ? [] : parsedPartitions.filter((entry) => entry.result.status !== "SUCCESS" || !entry.parsed);
+  const latencyMs = Date.now() - totalStartedAt;
+  const primaryError = failedPartitions[0]?.result.error || null;
+  if (!successfulPartitions.length && assessmentTotalTimeoutMs && latencyMs >= assessmentTotalTimeoutMs - 5) totalBudgetExhausted = true;
 
   return {
-    available: result.status === "SUCCESS",
-    providerId: usedAssessmentProvider,
-    model: usedAssessmentModel,
+    available: status === "SUCCESS",
+    providerId: usedProvider,
+    model: usedModel,
     draftText: text,
-    raw: result.body,
-    error: result.error,
+    raw: fallbackBody || successfulPartitions.map((entry) => entry.result.body),
+    error: status === "ERROR" ? primaryError || "ASSESSMENT_PARTITIONS_FAILED" : undefined,
     modelRun: {
-      provider: usedAssessmentProvider,
-      model: usedAssessmentModel,
+      provider: usedProvider,
+      model: usedModel,
       skill: "assessment-draft",
       inputSummary: input.requirement || input.title || "",
       outputSummary: text.slice(0, 240),
-      status: result.status,
-      latencyMs: result.latencyMs,
+      status,
+      latencyMs,
       metadata: {
         kind: input.kind || null,
         subject: input.subject || null,
         defaultPages,
-        primaryAssessmentModel: runtime.deepseekAssessmentModel,
-        fallbackAssessmentModel: runtime.deepseekAssessmentFallbackModel,
-        premiumFallbackModel: runtime.gpt55Model || null,
+        primaryAssessmentModel: runtime.gpt56Model,
+        fallbackAssessmentModel: null,
+        emergencyFallbackEnabled,
         minimaxFallbackModel: runtime.minimaxModel || null,
         assessmentTimeoutMs,
         minimaxAssessmentTimeoutMs,
-        premiumAssessmentTimeoutMs,
         assessmentTotalTimeoutMs: assessmentTotalTimeoutMs || null,
         assessmentMaxTokens,
         generationProfile: input.generationProfile || null,
         totalBudgetExhausted,
-        fallbackProvider: result.fallbackProvider || null,
+        partialGeneration: failedPartitions.length > 0,
+        partitions: partitions.map((partition, index) => ({
+          id: partition.id,
+          title: partition.title,
+          itemTypes: partition.itemTypes,
+          maxTokens: partitionTokenBudget(index)
+        })),
+        fallbackProvider,
         attempts,
-        primaryError: result.primaryError || null,
-        secondaryError: result.secondaryError || null
+        primaryError,
+        secondaryError: null
       }
     }
   };
@@ -916,14 +959,14 @@ export async function draftAssessment(config, input = {}) {
 
 export async function generateSubmissionReferenceAnswers(config, input = {}) {
   const snapshot = buildAiStartupSnapshot(config);
-  const provider = snapshot.providers.find((item) => item.id === "deepseek");
+  const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const runtime = normalizeRuntimeConfig(config);
-  const referenceModel = runtime.deepseekAssessmentModel || runtime.deepseekModel;
+  const referenceModel = runtime.gpt56Model;
   if (provider?.status !== "ready") {
-    return fallbackUnavailable("deepseek", provider?.reason || "DeepSeek unavailable", {
+    return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       referenceText: "",
       modelRun: {
-        provider: "deepseek",
+        provider: "gpt56",
         model: referenceModel,
         skill: "submission-reference-answer",
         inputSummary: input.title || input.subject,
@@ -965,25 +1008,26 @@ export async function generateSubmissionReferenceAnswers(config, input = {}) {
     }
   ];
 
-  const timeoutMs = Number(config.DEEPSEEK_ASSESSMENT_TIMEOUT_MS || config.deepseekAssessmentTimeoutMs || 60000);
-  const result = await timedCall(() => callDeepSeekChat(config, messages, {
+  const timeoutMs = runtime.gpt56GenerationTimeoutMs;
+  const result = await timedCall(() => callGpt56Chat(config, messages, {
     model: referenceModel,
     temperature: 0.1,
     responseFormat: { type: "json_object" },
     maxTokens: 12000,
-    timeoutMs
+    timeoutMs,
+    reasoningEffort: "medium"
   }));
   const text = result.body ? extractChatText(result.body) : "";
 
   return {
     available: result.status === "SUCCESS",
-    providerId: "deepseek",
+    providerId: "gpt56",
     model: referenceModel,
     referenceText: text,
     raw: result.body,
     error: result.error,
     modelRun: {
-      provider: "deepseek",
+      provider: "gpt56",
       model: referenceModel,
       skill: "submission-reference-answer",
       inputSummary: input.title || input.subject || "",
@@ -1001,14 +1045,14 @@ export async function generateSubmissionReferenceAnswers(config, input = {}) {
 
 export async function gradeSubmissionText(config, input = {}) {
   const snapshot = buildAiStartupSnapshot(config);
-  const provider = snapshot.providers.find((item) => item.id === "deepseek");
+  const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const runtime = normalizeRuntimeConfig(config);
-  const gradingModel = runtime.deepseekAssessmentModel || runtime.deepseekModel;
+  const gradingModel = runtime.gpt56Model;
   if (provider?.status !== "ready") {
-    return fallbackUnavailable("deepseek", provider?.reason || "DeepSeek unavailable", {
+    return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       gradingText: "",
       modelRun: {
-        provider: "deepseek",
+        provider: "gpt56",
         model: gradingModel,
         skill: "submission-grading",
         inputSummary: input.title || input.subject,
@@ -1030,25 +1074,26 @@ export async function gradeSubmissionText(config, input = {}) {
     "你是小学作业、练习、小测和试卷批改助手。必须按最高置信链路批改：1）优先使用 answerKey、assignmentItems 和 questionLayoutManifest；其中 questionLayoutManifest 是本系统生成 PDF 的逐题清单，包含题号、题干、答案、解析、分值和页内相对区域，必须作为生成卷批改的权威证据；2）没有老师答案键或生成卷清单时，优先使用 referenceAnswers 作为参考答案；3）referenceAnswers 也不足时，才根据 printedText/ocrText 自行推导正确答案和解题步骤；4）studentAnswerText、manualText 是学生作答的最高优先证据，普通 ocrText 可能混有印刷题干，不能把印刷题干、题目自带答案或示例内容当作学生作答。若输入包含 ocrQuestions，必须优先按 ocrQuestions 逐题批改：使用 printedPrompt 理解题目，使用 studentAnswer/observedWork 判断学生作答，使用 bbox 生成对应题目的相对图片坐标；不要把其他题或印刷题干串到本题作答里。若 questionLayoutManifest 和 ocrQuestions 同时存在，先按题号对齐，再用 ocrQuestions 判定学生作答。不得因为缺少标准答案而直接判定无法确认；只有题干、关键条件、图片内容或学生作答识别不清时，才允许 status=uncertain，并说明是图片/OCR证据不足。必须只返回 JSON，不要解释 JSON 之外的内容。字段必须包含：score, summary, strengths, mistakes, nextPractice, needsTeacherReview, referenceAnswerMode, questionResults。questionResults 是逐题结果数组，每项字段为 questionNo, status(correct|wrong|partial|uncertain), studentAnswer, correctAnswer, studentProcess(数组), errorStep, explanation, knowledgePoint, suggestedPractice, confidence(0-1), bbox。bbox 使用相对图片坐标，字段为 page, x, y, w, h，范围 0-1；正确题说明关键作答过程；错误题指出哪一步导致错误，并给出正确思路。不要输出供应商或模型名称。"
   );
 
-  const timeoutMs = Number(config.DEEPSEEK_ASSESSMENT_TIMEOUT_MS || config.deepseekAssessmentTimeoutMs || 60000);
-  const result = await timedCall(() => callDeepSeekChat(config, messages, {
+  const timeoutMs = runtime.gpt56GradingTimeoutMs;
+  const result = await timedCall(() => callGpt56Chat(config, messages, {
     model: gradingModel,
     temperature: 0.1,
     responseFormat: { type: "json_object" },
     maxTokens: 12000,
-    timeoutMs
+    timeoutMs,
+    reasoningEffort: "medium"
   }));
   const text = result.body ? extractChatText(result.body) : "";
 
   return {
     available: result.status === "SUCCESS",
-    providerId: "deepseek",
+    providerId: "gpt56",
     model: gradingModel,
     gradingText: text,
     raw: result.body,
     error: result.error,
     modelRun: {
-      provider: "deepseek",
+      provider: "gpt56",
       model: gradingModel,
       skill: "submission-grading",
       inputSummary: input.title || input.subject || "",
@@ -1066,12 +1111,12 @@ export async function gradeSubmissionText(config, input = {}) {
 
 export async function draftStudentProfileNarrative(config, input = {}) {
   const snapshot = buildAiStartupSnapshot(config);
-  const provider = snapshot.providers.find((item) => item.id === "deepseek");
+  const provider = snapshot.providers.find((item) => item.id === "gpt56");
   if (provider?.status !== "ready") {
-    return fallbackUnavailable("deepseek", provider?.reason || "DeepSeek unavailable", {
+    return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       narrative: null,
       modelRun: {
-        provider: "deepseek",
+        provider: "gpt56",
         model: provider?.model,
         skill: "student-profile-narrative",
         inputSummary: input.studentName || input.studentId || "",
@@ -1094,18 +1139,18 @@ export async function draftStudentProfileNarrative(config, input = {}) {
     }
   ];
 
-  const result = await timedCall(() => callDeepSeekChat(config, messages));
+  const result = await timedCall(() => callGpt56Chat(config, messages, { reasoningEffort: "low" }));
   const text = result.body ? extractChatText(result.body) : "";
 
   return {
     available: result.status === "SUCCESS",
-    providerId: "deepseek",
+    providerId: "gpt56",
     model: provider.model,
     narrativeText: text,
     raw: result.body,
     error: result.error,
     modelRun: {
-      provider: "deepseek",
+      provider: "gpt56",
       model: provider.model,
       skill: "student-profile-narrative",
       inputSummary: `${input.studentName || input.studentId || "student"} ${input.periodKey || ""}`.trim(),
@@ -1180,17 +1225,17 @@ export async function reviewWithMiniMax(config, input = {}) {
   };
 }
 
-export async function reviewWithGpt55(config, input = {}) {
+export async function reviewWithGpt56(config, input = {}) {
   const snapshot = buildAiStartupSnapshot(config);
-  const provider = snapshot.providers.find((item) => item.id === "gpt55");
+  const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const runtime = normalizeRuntimeConfig(config);
   const isAssessmentDraftAudit = input.reviewTask === "assessment-draft-quality-audit";
   if (provider?.status !== "ready") {
-    return fallbackUnavailable("gpt55", provider?.reason || "GPT5.5 unavailable", {
+    return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       reviewText: "",
       modelRun: {
-        provider: "gpt55",
-        model: runtime.gpt55Model,
+        provider: "gpt56",
+        model: runtime.gpt56Model,
         skill: isAssessmentDraftAudit ? "assessment-draft-quality-audit" : "premium-grading-review",
         inputSummary: input.title || input.kind || "",
         outputSummary: "Provider unavailable",
@@ -1205,28 +1250,29 @@ export async function reviewWithGpt55(config, input = {}) {
       content: withProjectPromptPrinciples(
         isAssessmentDraftAudit
           ? "你是君航 AI 助教生成与打印模块的最高级质量审查器。你不重新出整套题，只审查生成草稿是否适合进入 PDF 草稿给教师复核。重点检查：是否符合年级和科目结构、题量是否支撑目标 A4 页数、是否有重复同质题或明显套用固定题池、是否只是替换数字/人名而没有改变考法、阅读材料是否有上下文、数学图形题是否有 figure 元数据、语文田字格/横线/作文规则是否合理、英语完形/提示词填空和写作是否符合要求、每题是否有答案、分值、解析步骤、考点和易错提醒。教师最终确认是业务流程，不应单独作为审查阻塞原因。返回严格 json 对象：{status,riskLevel,exportReady,issues,suggestions,blockedReasons,qualityScore}。status 只能为 pass 或 needs_review；如果存在会影响打印、作答、解析或家长信任的问题，exportReady=false。不要输出供应商、模型名称或给前端展示用文案。"
-          : "你是君航 AI 助教图片批改模块的最高级质量审查器。你不直接面向学生和家长，只负责内部归档前门禁。请根据 OCR 证据、参考答案、生成卷 questionLayoutManifest、DeepSeek 主批改结果、MiniMax 二次审计结果，判断分数是否可信。必须重点拦截：多页漏识、生成卷题号和 OCR 作答没有对齐、把印刷题干当学生答案、学生作答区域缺失、参考答案明显不可靠、逐题分数和总分不一致、异常低分或异常高分、公式/图形题证据不足。客观题、填空题和简单计算题只要学生答案与参考答案清晰可比，不要因为没有完整解题过程或 bbox 较粗略就直接判为不可信；解答题、图形题和过程题才重点要求过程证据。AI 生成参考答案在题干清楚、答案明显、confidence 较高时可以作为高级审查依据；教师最终确认归档是业务流程，不应单独作为高级审查阻塞原因。archiveAllowed 表示高级审查认为可进入教师确认归档流程，不代表自动入档；不要仅因为仍需教师确认而设置 false。返回严格 json 对象：{status,riskLevel,scoreReliable,archiveAllowed,finalScoreRecommended,issues,suggestions,blockedReasons,questionFlags}。status 只能为 pass 或 needs_review；只要证据不足、模型分歧未解决或分数异常，scoreReliable=false 且 archiveAllowed=false。不要输出供应商、模型名称或给前端展示用文案。"
+          : "你是君航 AI 助教图片批改模块的最高级质量审查器。你不直接面向学生和家长，只负责内部归档前门禁。请根据 OCR 证据、参考答案、生成卷 questionLayoutManifest、服务层客观题比较结果和主观题批改结果，判断分数是否可信。必须重点拦截：多页漏识、生成卷题号和 OCR 作答没有对齐、把印刷题干当学生答案、学生作答区域缺失、参考答案明显不可靠、逐题分数和总分不一致、异常低分或异常高分、公式/图形题证据不足。客观题、填空题和简单计算题只要学生答案与参考答案清晰可比，不要因为没有完整解题过程或 bbox 较粗略就直接判为不可信；解答题、图形题和过程题才重点要求过程证据。AI 生成参考答案在题干清楚、答案明显、confidence 较高时可以作为高级审查依据；教师最终确认归档是业务流程，不应单独作为高级审查阻塞原因。archiveAllowed 表示高级审查认为可进入教师确认归档流程，不代表自动入档；不要仅因为仍需教师确认而设置 false。返回严格 json 对象：{status,riskLevel,scoreReliable,archiveAllowed,finalScoreRecommended,issues,suggestions,blockedReasons,questionFlags}。status 只能为 pass 或 needs_review；只要证据不足、模型分歧未解决或分数异常，scoreReliable=false 且 archiveAllowed=false。不要输出供应商、模型名称或给前端展示用文案。"
       )
     },
     { role: "user", content: `请按 json 对象输出审查结果，不要输出 json 之外内容。\n\n${JSON.stringify(input, null, 2)}` }
   ];
-  const result = await timedCall(() => callGpt55Chat(config, messages, {
+  const result = await timedCall(() => callGpt56Chat(config, messages, {
     temperature: 0,
     responseFormat: { type: "json_object" },
     maxTokens: 5000,
-    timeoutMs: runtime.gpt55ReviewTimeoutMs
+    timeoutMs: runtime.gpt56ReviewTimeoutMs,
+    reasoningEffort: "high"
   }));
   const text = result.body ? extractChatText(result.body) : "";
   return {
     available: result.status === "SUCCESS",
-    providerId: "gpt55",
-    model: runtime.gpt55Model,
+    providerId: "gpt56",
+    model: runtime.gpt56Model,
     reviewText: text,
     raw: result.body,
     error: result.error,
     modelRun: {
-      provider: "gpt55",
-      model: runtime.gpt55Model,
+      provider: "gpt56",
+      model: runtime.gpt56Model,
       skill: isAssessmentDraftAudit ? "assessment-draft-quality-audit" : "premium-grading-review",
       inputSummary: input.title || input.kind || "",
       outputSummary: text.slice(0, 240),
@@ -1239,6 +1285,10 @@ export async function reviewWithGpt55(config, input = {}) {
       }
     }
   };
+}
+
+export async function reviewWithGpt55(config, input = {}) {
+  return reviewWithGpt56(config, input);
 }
 
 export function buildDictationSpeechPlan(input = {}) {

@@ -45,7 +45,7 @@ export function publicConfigSummary(config = loadRuntimeConfig()) {
     providers: {
       deepseek: Boolean(config.DEEPSEEK_API_KEY),
       minimax: Boolean(config.MINIMAX_API_KEY),
-      gpt55: Boolean(config.GPT55_API_KEY || config.OPENAI_API_KEY)
+      gpt56: Boolean(config.GPT56_API_KEY || config.GPT55_API_KEY || config.OPENAI_API_KEY)
     }
   };
 }

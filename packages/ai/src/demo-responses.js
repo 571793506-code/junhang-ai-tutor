@@ -30,7 +30,7 @@ export function composeDemoQaAnswer(question, studentName = "学生") {
 
   if (asksGeometry) {
     return {
-      providerId: "deepseek",
+      providerId: "gpt56",
       headline: "先判断已知角的位置，再分别列情况。",
       steps: [
         "如果 40° 是顶角，两个底角相等，各是 (180° - 40°) ÷ 2 = 70°。",
@@ -44,7 +44,7 @@ export function composeDemoQaAnswer(question, studentName = "学生") {
 
   if (asksPastTense) {
     return {
-      providerId: "deepseek",
+      providerId: "gpt56",
       headline: "看到 yesterday，先把动词切到过去式。",
       steps: [
         "先找时间词：yesterday 表示过去发生的事。",
@@ -57,7 +57,7 @@ export function composeDemoQaAnswer(question, studentName = "学生") {
   }
 
   return {
-    providerId: "deepseek",
+    providerId: "gpt56",
     headline: "先把问题拆成知识点、例子和练习三步。",
     steps: [
       "用自己的话说出题目在问什么。",

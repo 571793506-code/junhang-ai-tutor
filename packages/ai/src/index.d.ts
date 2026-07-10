@@ -1,5 +1,5 @@
 export type ProviderStatus = "ready" | "blocked" | "unavailable";
-export type AiProviderId = "deepseek" | "minimax" | "gpt55";
+export type AiProviderId = "deepseek" | "minimax" | "gpt56";
 
 export interface AiProviderSnapshot {
   id: AiProviderId;
@@ -56,6 +56,7 @@ export declare function normalizeRuntimeConfig(config?: RuntimeConfigLike): {
   deepseekModel: string;
   deepseekAssessmentModel: string;
   deepseekAssessmentFallbackModel: string;
+  deepseekEmergencyFallbackModel: string;
   minimaxApiKey: string;
   minimaxBaseUrl: string;
   minimaxModel: string;
@@ -71,15 +72,19 @@ export declare function normalizeRuntimeConfig(config?: RuntimeConfigLike): {
   ocrVisionApiKey: string;
   ocrVisionModel: string;
   ocrTesseractLang: string;
-  gpt55ApiKey: string;
-  gpt55BaseUrl: string;
-  gpt55Model: string;
-  gpt55ReviewTimeoutMs: number;
+  gpt56ApiKey: string;
+  gpt56BaseUrl: string;
+  gpt56Model: string;
+  gpt56GenerationTimeoutMs: number;
+  gpt56GradingTimeoutMs: number;
+  gpt56ReviewTimeoutMs: number;
+  gpt56ReasoningEffortEnabled: boolean;
 };
 
 export declare function buildAiStartupSnapshot(config?: RuntimeConfigLike): AiStartupSnapshot;
 export declare function createDemoAiSnapshot(): AiStartupSnapshot;
 export declare function routeCapability(capabilityId: string, snapshot?: AiStartupSnapshot): AiFeatureSnapshot;
+export declare function buildModelOrchestrationPlan(config?: RuntimeConfigLike): Record<string, unknown>;
 export declare function callOpenAiCompatibleChat(args: {
   baseUrl: string;
   apiKey: string;
@@ -89,10 +94,12 @@ export declare function callOpenAiCompatibleChat(args: {
   responseFormat?: unknown;
   maxTokens?: number;
   timeoutMs?: number;
+  reasoningEffort?: string;
 }): Promise<unknown>;
 export declare function callDeepSeekChat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>, options?: Record<string, unknown>): Promise<unknown>;
 export declare function callMiniMaxChat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>): Promise<unknown>;
 export declare function callGpt55Chat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>, options?: Record<string, unknown>): Promise<unknown>;
+export declare function callGpt56Chat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>, options?: Record<string, unknown>): Promise<unknown>;
 export declare function extractChatText(body: unknown): string;
 export declare function inferClassroomQaMode(question?: string): "GUIDED_THINKING" | "KNOWLEDGE_EXPLANATION";
 export declare function answerStudentQuestion(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -104,11 +111,12 @@ export declare function gradeSubmissionText(config: RuntimeConfigLike, input?: R
 export declare function draftStudentProfileNarrative(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function reviewWithMiniMax(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function reviewWithGpt55(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
+export declare function reviewWithGpt56(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function buildDictationSpeechPlan(input?: Record<string, unknown>): Record<string, unknown>;
 export declare function createMiniMaxSpeechTask(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 
 export declare function composeDemoQaAnswer(question: string, studentName?: string): {
-  providerId: "deepseek";
+  providerId: "gpt56";
   headline: string;
   steps: string[];
   practice: string;

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   buildAiStartupSnapshot,
-  callDeepSeekChat,
+  callGpt56Chat,
   callMiniMaxChat
 } from "../packages/ai/src/index.js";
 
@@ -37,25 +37,25 @@ async function runSmokeTests() {
   }
 
   const checks = [];
-  const deepseek = snapshot.providers.find((provider) => provider.id === "deepseek");
+  const gpt56 = snapshot.providers.find((provider) => provider.id === "gpt56");
   const minimax = snapshot.providers.find((provider) => provider.id === "minimax");
 
-  if (deepseek?.status === "ready") {
+  if (gpt56?.status === "ready") {
     try {
-      const response = await callDeepSeekChat(env, [
+      const response = await callGpt56Chat(env, [
         { role: "system", content: "You are a concise API health check assistant." },
         { role: "user", content: "Reply with OK." }
       ]);
       checks.push({
-        provider: "deepseek",
+        provider: "gpt56",
         ok: true,
-        model: response?.model || deepseek.model
+        model: response?.model || gpt56.model
       });
     } catch (error) {
-      checks.push({ provider: "deepseek", ok: false, error: error.message });
+      checks.push({ provider: "gpt56", ok: false, error: error.message });
     }
   } else {
-    checks.push({ provider: "deepseek", ok: false, skipped: true, reason: deepseek?.reason });
+    checks.push({ provider: "gpt56", ok: false, skipped: true, reason: gpt56?.reason });
   }
 
   if (minimax?.status === "ready") {

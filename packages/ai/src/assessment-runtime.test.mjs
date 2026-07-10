@@ -31,10 +31,9 @@ test("draftAssessment honors request-level total timeout", { timeout: 2000 }, as
     const startedAt = Date.now();
     const result = await draftAssessment(
       {
-        DEEPSEEK_API_KEY: "test-key",
-        DEEPSEEK_BASE_URL: `http://127.0.0.1:${address.port}`,
-        DEEPSEEK_ASSESSMENT_MODEL: "slow-model",
-        DEEPSEEK_ASSESSMENT_FALLBACK_MODEL: "slow-model"
+        GPT56_API_KEY: "test-key",
+        GPT56_BASE_URL: `http://127.0.0.1:${address.port}`,
+        GPT56_MODEL: "gpt-5.6"
       },
       {
         subject: "数学",
@@ -51,15 +50,16 @@ test("draftAssessment honors request-level total timeout", { timeout: 2000 }, as
     assert.match(result.error || "", /MODEL_TIMEOUT|ASSESSMENT_TOTAL_TIMEOUT/);
     assert.equal(result.modelRun.metadata.assessmentTotalTimeoutMs, 40);
     assert.equal(result.modelRun.metadata.totalBudgetExhausted, true);
-    assert.equal(result.modelRun.metadata.attempts.length, 1);
+    assert.ok(result.modelRun.metadata.attempts.length >= 1);
+    assert.equal(result.modelRun.metadata.attempts.every((item) => item.providerId === "gpt56"), true);
     assert.ok(elapsedMs < 180, `expected request to stop before delayed response, took ${elapsedMs}ms`);
   } finally {
     await close(server);
   }
 });
 
-test("draftAssessment forwards request-level max token budget", async () => {
-  let requestPayload = null;
+test("draftAssessment splits request-level max token budget across project partitions", async () => {
+  const requestPayloads = [];
   const server = http.createServer((req, res) => {
     let body = "";
     req.setEncoding("utf8");
@@ -67,7 +67,7 @@ test("draftAssessment forwards request-level max token budget", async () => {
       body += chunk;
     });
     req.on("end", () => {
-      requestPayload = JSON.parse(body);
+      requestPayloads.push(JSON.parse(body));
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
         choices: [
@@ -100,10 +100,9 @@ test("draftAssessment forwards request-level max token budget", async () => {
   try {
     const result = await draftAssessment(
       {
-        DEEPSEEK_API_KEY: "test-key",
-        DEEPSEEK_BASE_URL: `http://127.0.0.1:${address.port}`,
-        DEEPSEEK_ASSESSMENT_MODEL: "token-model",
-        DEEPSEEK_ASSESSMENT_FALLBACK_MODEL: "token-model"
+        GPT56_API_KEY: "test-key",
+        GPT56_BASE_URL: `http://127.0.0.1:${address.port}`,
+        GPT56_MODEL: "gpt-5.6"
       },
       {
         subject: "数学",
@@ -115,8 +114,43 @@ test("draftAssessment forwards request-level max token budget", async () => {
     );
 
     assert.equal(result.available, true);
-    assert.equal(requestPayload.max_tokens, 20000);
+    assert.equal(result.providerId, "gpt56");
+    assert.equal(requestPayloads.length, 4);
+    assert.equal(requestPayloads.every((payload) => payload.model === "gpt-5.6"), true);
+    assert.equal(requestPayloads.every((payload) => payload.max_tokens <= 5000), true);
+    assert.equal(requestPayloads.reduce((sum, payload) => sum + payload.max_tokens, 0), 20000);
     assert.equal(result.modelRun.metadata.assessmentMaxTokens, 20000);
+    assert.deepEqual(result.modelRun.metadata.partitions.map((item) => item.id), ["foundation", "calculation", "application", "operation"]);
+  } finally {
+    await close(server);
+  }
+});
+
+test("draftAssessment caps compact partition output at 8000 tokens per request", async () => {
+  const requestPayloads = [];
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      requestPayloads.push(JSON.parse(body));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ title: "小测", sections: [{ title: "分区", items: [{ itemType: "fill", prompt: "1+1=?", answer: "2", analysisSteps: ["计算。"], knowledgePoint: "加法" }] }] }) } }]
+      }));
+    });
+  });
+  const address = await listen(server);
+  try {
+    const result = await draftAssessment(
+      { GPT56_API_KEY: "test-key", GPT56_BASE_URL: `http://127.0.0.1:${address.port}`, GPT56_MODEL: "gpt-5.6" },
+      { subject: "数学", kind: "小测", grade: "五年级", requirement: "紧凑分区预算", assessmentMaxTokens: 16000 }
+    );
+
+    assert.equal(result.available, true);
+    assert.equal(requestPayloads.length, 2);
+    assert.equal(requestPayloads.every((payload) => payload.max_tokens === 8000), true);
+    assert.equal(result.modelRun.metadata.partitions.every((item) => item.maxTokens === 8000), true);
   } finally {
     await close(server);
   }
@@ -155,10 +189,9 @@ test("draftAssessment uses expanded default assessment model attempt timeouts", 
   try {
     const result = await draftAssessment(
       {
-        DEEPSEEK_API_KEY: "test-key",
-        DEEPSEEK_BASE_URL: `http://127.0.0.1:${address.port}`,
-        DEEPSEEK_ASSESSMENT_MODEL: "default-timeout-model",
-        DEEPSEEK_ASSESSMENT_FALLBACK_MODEL: "default-timeout-model"
+        GPT56_API_KEY: "test-key",
+        GPT56_BASE_URL: `http://127.0.0.1:${address.port}`,
+        GPT56_MODEL: "gpt-5.6"
       },
       {
         subject: "英语",
@@ -169,15 +202,15 @@ test("draftAssessment uses expanded default assessment model attempt timeouts", 
     );
 
     assert.equal(result.available, true);
-    assert.equal(result.modelRun.metadata.assessmentTimeoutMs, 240000);
-    assert.equal(result.modelRun.metadata.premiumAssessmentTimeoutMs, 240000);
+    assert.equal(result.modelRun.metadata.assessmentTimeoutMs, 90000);
+    assert.equal(result.modelRun.metadata.primaryAssessmentModel, "gpt-5.6");
     assert.equal(result.modelRun.metadata.minimaxAssessmentTimeoutMs, 150000);
   } finally {
     await close(server);
   }
 });
 
-test("draftAssessment lets request-level total budget expand primary assessment timeout", async () => {
+test("draftAssessment reserves request-level total budget instead of giving all time to primary attempts", async () => {
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({
@@ -210,10 +243,9 @@ test("draftAssessment lets request-level total budget expand primary assessment 
   try {
     const result = await draftAssessment(
       {
-        DEEPSEEK_API_KEY: "test-key",
-        DEEPSEEK_BASE_URL: `http://127.0.0.1:${address.port}`,
-        DEEPSEEK_ASSESSMENT_MODEL: "formal-budget-model",
-        DEEPSEEK_ASSESSMENT_FALLBACK_MODEL: "formal-budget-model"
+        GPT56_API_KEY: "test-key",
+        GPT56_BASE_URL: `http://127.0.0.1:${address.port}`,
+        GPT56_MODEL: "gpt-5.6"
       },
       {
         subject: "语文",
@@ -225,9 +257,76 @@ test("draftAssessment lets request-level total budget expand primary assessment 
     );
 
     assert.equal(result.available, true);
-    assert.equal(result.modelRun.metadata.assessmentTimeoutMs, 270000);
+    assert.equal(result.modelRun.metadata.assessmentTimeoutMs, 90000);
     assert.equal(result.modelRun.metadata.assessmentTotalTimeoutMs, 270000);
+    assert.equal(result.modelRun.metadata.emergencyFallbackEnabled, false);
   } finally {
     await close(server);
+  }
+});
+
+test("draftAssessment only uses DeepSeek emergency rollback when explicitly enabled", async () => {
+  let deepseekCalls = 0;
+  const gptServer = http.createServer((_req, res) => {
+    res.writeHead(503, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "intermediary unavailable" } }));
+  });
+  const deepseekServer = http.createServer((_req, res) => {
+    deepseekCalls += 1;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              title: "五年级数学小测",
+              sections: [
+                {
+                  title: "一、计算",
+                  items: [
+                    { itemType: "calculation", prompt: "计算：25×4。", answer: "100", analysisSteps: ["直接计算。"], knowledgePoint: "乘法" }
+                  ]
+                }
+              ]
+            })
+          }
+        }
+      ]
+    }));
+  });
+  const gptAddress = await listen(gptServer);
+  const deepseekAddress = await listen(deepseekServer);
+
+  try {
+    const result = await draftAssessment(
+      {
+        GPT56_API_KEY: "test-key",
+        GPT56_BASE_URL: `http://127.0.0.1:${gptAddress.port}`,
+        GPT56_MODEL: "gpt-5.6",
+        DEEPSEEK_API_KEY: "rollback-key",
+        DEEPSEEK_BASE_URL: `http://127.0.0.1:${deepseekAddress.port}`,
+        DEEPSEEK_ASSESSMENT_MODEL: "deepseek-v4-pro",
+        DEEPSEEK_EMERGENCY_FALLBACK_MODEL: "deepseek-v4-flash",
+        DEEPSEEK_EMERGENCY_FALLBACK_ENABLED: "true"
+      },
+      {
+        subject: "数学",
+        kind: "小测",
+        grade: "五年级",
+        requirement: "中转故障回滚",
+        assessmentTotalTimeoutMs: 1000
+      }
+    );
+
+    assert.equal(deepseekCalls, 1);
+    assert.equal(result.available, true);
+    assert.equal(result.providerId, "deepseek");
+    assert.equal(result.model, "deepseek-v4-flash");
+    assert.equal(result.modelRun.metadata.emergencyFallbackEnabled, true);
+    assert.equal(result.modelRun.metadata.fallbackProvider, "deepseek");
+    assert.equal(result.modelRun.metadata.attempts.at(-1).role, "emergency-rollback");
+  } finally {
+    await close(gptServer);
+    await close(deepseekServer);
   }
 });

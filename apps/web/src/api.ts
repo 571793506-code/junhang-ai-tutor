@@ -101,7 +101,7 @@ export async function getApiStatus() {
       providers: body.ai.providers || [],
       features: body.ai.features.map((feature) => ({
         ...feature,
-        providerId: feature.providerId || (feature.id.includes("voice") || feature.id.includes("spoken") ? "minimax" : "deepseek")
+        providerId: feature.providerId || (feature.id.includes("voice") || feature.id.includes("spoken") ? "minimax" : "gpt56")
       }))
     }
   };

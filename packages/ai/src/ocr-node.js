@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { mapWithConcurrency } from "./assessment-partitions.js";
 import {
   buildAiStartupSnapshot,
   callOpenAiCompatibleChat,
@@ -324,12 +325,7 @@ export async function recognizeImages(config, input = {}) {
     }
     if (vision.provider === "minimax" && String(vision.model).toLowerCase() === "coding_plan/vlm") {
       const result = await timedCall(async () => {
-        const pages = [];
-        const textPages = [];
-        const studentAnswerPages = [];
-        const printedTextPages = [];
-        const confidences = [];
-        for (const [index, image] of images.entries()) {
+        const pages = await mapWithConcurrency(images, 2, async (image, index) => {
           const body = await callMiniMaxCodingPlanVlm({
             baseUrl: vision.baseUrl,
             apiKey: vision.apiKey,
@@ -339,7 +335,7 @@ export async function recognizeImages(config, input = {}) {
           });
           const content = String(body.content || body.output_text || body.text || "").trim();
           const parsed = parseJsonObjectText(content) || {};
-          const page = {
+          return {
             page: index + 1,
             text: String(parsed.text || content || "").trim(),
             studentAnswerText: String(parsed.studentAnswerText || parsed.handwritingText || parsed.answersText || "").trim(),
@@ -348,7 +344,12 @@ export async function recognizeImages(config, input = {}) {
             confidence: Number.isFinite(Number(parsed.confidence)) ? Number(parsed.confidence) : null,
             warnings: Array.isArray(parsed.warnings) ? parsed.warnings : []
           };
-          pages.push(page);
+        });
+        const textPages = [];
+        const studentAnswerPages = [];
+        const printedTextPages = [];
+        const confidences = [];
+        for (const [index, page] of pages.entries()) {
           textPages.push(`第 ${index + 1} 页\n${page.text}`.trim());
           if (page.studentAnswerText) studentAnswerPages.push(`第 ${index + 1} 页学生作答\n${page.studentAnswerText}`.trim());
           if (page.printedText) printedTextPages.push(`第 ${index + 1} 页印刷题干\n${page.printedText}`.trim());

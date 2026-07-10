@@ -66,6 +66,31 @@ test("draftAssessmentService does not run model review by default", async () => 
   assert.equal(result.generationPipeline.gates.modelReviewRequired, false);
 });
 
+test("draftAssessmentService treats partial GPT-5.6 partition output as dynamic repair", async () => {
+  const result = await draftAssessmentService(
+    {},
+    { subject: "英语", kind: "小测", grade: "五年级", requirement: "Unit 4" },
+    {
+      persist: false,
+      assessmentDraftRunner: async () => ({
+        ...fakeAssessmentResult(),
+        providerId: "gpt56",
+        modelRun: {
+          provider: "gpt56",
+          model: "gpt-5.6",
+          skill: "assessment-draft",
+          status: "SUCCESS",
+          metadata: { attempts: [], partialGeneration: true }
+        }
+      })
+    }
+  );
+
+  assert.equal(result.usedDynamicFallback, true);
+  assert.equal(result.generationPipeline.repair.usedDynamicFallback, true);
+  assert.equal(result.generationPipeline.audit.status, "needs_teacher_review");
+});
+
 test("draftAssessmentService can run model review when explicitly requested", async () => {
   let reviewCallCount = 0;
   const reviewer = async () => {
@@ -107,6 +132,46 @@ test("draftAssessmentService can run model review when explicitly requested", as
   assert.equal(result.generationPipeline.modelReview.required, true);
   assert.equal(result.generationPipeline.modelReview.status, "passed");
   assert.equal(result.generationPipeline.gates.modelReviewRequired, true);
+});
+
+test("draftAssessmentService uses one GPT-5.6 review outside the injected legacy double-review path", async () => {
+  let premiumCalls = 0;
+  const result = await draftAssessmentService(
+    {},
+    {
+      subject: "英语",
+      kind: "小测",
+      grade: "五年级",
+      requirement: "Unit 4",
+      runModelReview: true
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async () => fakeAssessmentResult(),
+      assessmentModelReviewers: {
+        premium: async () => {
+          premiumCalls += 1;
+          return {
+            available: true,
+            reviewText: JSON.stringify({
+              status: "pass",
+              riskLevel: "low",
+              exportReady: true,
+              qualityScore: 90,
+              issues: [],
+              suggestions: []
+            }),
+            modelRun: { provider: "gpt56", model: "gpt-5.6", status: "SUCCESS" }
+          };
+        }
+      }
+    }
+  );
+
+  assert.equal(premiumCalls, 1);
+  assert.equal(result.generationPipeline.modelReview.status, "passed");
+  assert.equal(result.modelReviews.minimax, undefined);
+  assert.equal(result.modelReviews.premium.label, "GPT-5.6 生成风险审查");
 });
 
 test("draftAssessmentService forwards assessment timeout budget to runner", async () => {
@@ -153,11 +218,11 @@ test("draftAssessmentService assigns standard quiz generation budget", async () 
   );
 
   assert.equal(runnerInput.generationProfile, "quiz-standard");
-  assert.equal(runnerInput.assessmentTotalTimeoutMs, 210000);
-  assert.equal(runnerInput.assessmentMaxTokens, 20000);
+  assert.equal(runnerInput.assessmentTotalTimeoutMs, 120000);
+  assert.equal(runnerInput.assessmentMaxTokens, 16000);
   assert.equal(runnerInput.generationContext.output.generationProfile, "quiz-standard");
   assert.equal(result.generationPipeline.model.generationProfile, "quiz-standard");
-  assert.equal(result.generationPipeline.model.assessmentMaxTokens, 20000);
+  assert.equal(result.generationPipeline.model.assessmentMaxTokens, 16000);
 });
 
 test("draftAssessmentService fallback English unit quiz reserves enough reading content for two-page layout", async () => {
@@ -258,7 +323,7 @@ test("draftAssessmentService expands all configured generation profile budgets",
     [
       { profile: "e2e-fast", timeout: 105000, maxTokens: 16000 },
       { profile: "fast-check", timeout: 105000, maxTokens: 16000 },
-      { profile: "practice-standard", timeout: 210000, maxTokens: 20000 }
+      { profile: "practice-standard", timeout: 150000, maxTokens: 16000 }
     ]
   );
 });
@@ -293,10 +358,10 @@ test("draftAssessmentService assigns formal budget to exams and personalized pra
   );
 
   assert.equal(runnerInputs[0].generationProfile, "formal-full");
-  assert.equal(runnerInputs[0].assessmentTotalTimeoutMs, 270000);
+  assert.equal(runnerInputs[0].assessmentTotalTimeoutMs, 240000);
   assert.equal(runnerInputs[0].assessmentMaxTokens, 24000);
   assert.equal(runnerInputs[1].generationProfile, "formal-full");
-  assert.equal(runnerInputs[1].assessmentTotalTimeoutMs, 270000);
+  assert.equal(runnerInputs[1].assessmentTotalTimeoutMs, 240000);
   assert.equal(runnerInputs[1].assessmentMaxTokens, 24000);
 });
 

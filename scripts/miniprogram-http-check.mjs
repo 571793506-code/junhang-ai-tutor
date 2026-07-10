@@ -53,7 +53,7 @@ checks.push(assertCheck("teacher bootstrap scoped", teacherBootstrap?.ok && Arra
 }));
 
 const teacherAi = teacherToken ? await request("/api/ai/status", { token: teacherToken }) : null;
-checks.push(assertCheck("teacher can see provider ops", teacherAi?.ok && (teacherAi.body.ai?.providers || []).some((item) => item.id === "deepseek"), {
+checks.push(assertCheck("teacher can see provider ops", teacherAi?.ok && (teacherAi.body.ai?.providers || []).some((item) => item.id === "gpt56"), {
   providers: teacherAi?.body.ai?.providers?.map((item) => `${item.id}:${item.status}`) || []
 }));
 

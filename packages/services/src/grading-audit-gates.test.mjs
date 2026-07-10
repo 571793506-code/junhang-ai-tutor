@@ -165,3 +165,103 @@ test("gradeSubmissionService supplies structured evidence to deep grading audits
   }
   assert.equal(result.structured.gradingAudit.status, "pass");
 });
+
+test("gradeSubmissionService runs one GPT-5.6 risk review for uncertain, low-confidence, or score-mismatch results", async () => {
+  const cases = [
+    { name: "uncertain", score: 0, status: "uncertain", confidence: 0.5, questionScore: 0 },
+    { name: "low-confidence", score: 5, status: "correct", confidence: 0.4, questionScore: 5 },
+    { name: "score-mismatch", score: 5, status: "correct", confidence: 0.95, questionScore: 2 }
+  ];
+
+  for (const sample of cases) {
+    let minimaxCalls = 0;
+    let premiumCalls = 0;
+    const result = await gradeSubmissionService(
+      {},
+      {
+        subject: "英语",
+        totalScore: 5,
+        answerKey: "1=A或B",
+        studentAnswerText: "1. A"
+      },
+      {
+        persist: false,
+        gradingRunner: async () => ({
+          available: true,
+          providerId: "gpt56",
+          gradingText: JSON.stringify({
+            score: sample.score,
+            summary: sample.name,
+            questionResults: [
+              {
+                questionNo: "1",
+                status: sample.status,
+                score: sample.questionScore,
+                maxScore: 5,
+                studentAnswer: "A",
+                correctAnswer: "A或B",
+                confidence: sample.confidence
+              }
+            ]
+          }),
+          modelRun: { provider: "gpt56", model: "gpt-5.6", skill: "submission-grading", status: "SUCCESS" }
+        }),
+        gradingReviewers: {
+          minimax: async () => {
+            minimaxCalls += 1;
+            return { available: true, reviewText: "{}" };
+          },
+          premium: async () => {
+            premiumCalls += 1;
+            return {
+              available: true,
+              reviewText: JSON.stringify({
+                status: "needs_review",
+                riskLevel: "medium",
+                scoreReliable: false,
+                archiveAllowed: false,
+                issues: ["教师需复核。"]
+              }),
+              modelRun: { provider: "gpt56", model: "gpt-5.6", status: "SUCCESS" }
+            };
+          }
+        }
+      }
+    );
+
+    assert.equal(minimaxCalls, 0, sample.name);
+    assert.equal(premiumCalls, 1, sample.name);
+    assert.equal(result.structured.gradingAudit.required, true, sample.name);
+  }
+});
+
+test("gradeSubmissionService does not run risk review for a clean grading result", async () => {
+  let reviewCalls = 0;
+  await gradeSubmissionService(
+    {},
+    { subject: "英语", totalScore: 5, answerKey: "1=A或B", studentAnswerText: "1. A" },
+    {
+      persist: false,
+      gradingRunner: async () => ({
+        available: true,
+        providerId: "gpt56",
+        gradingText: JSON.stringify({
+          score: 5,
+          summary: "证据清晰。",
+          questionResults: [
+            { questionNo: "1", status: "correct", score: 5, maxScore: 5, studentAnswer: "A", correctAnswer: "A或B", confidence: 0.95 }
+          ]
+        }),
+        modelRun: { provider: "gpt56", model: "gpt-5.6", skill: "submission-grading", status: "SUCCESS" }
+      }),
+      gradingReviewers: {
+        premium: async () => {
+          reviewCalls += 1;
+          return { available: true, reviewText: "{}" };
+        }
+      }
+    }
+  );
+
+  assert.equal(reviewCalls, 0);
+});

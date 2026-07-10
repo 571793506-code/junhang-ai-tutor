@@ -60,7 +60,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 - `GET /health`：API、数据库、配置摘要。
 - `GET /api/status`：API + 数据库 + AI provider 状态。
-- `GET /api/ai/status`：DeepSeek / MiniMax 能力状态。
+- `GET /api/ai/status`：GPT-5.6、MiniMax 和可选紧急回滚提供商的教师运维状态。
 
 ## 学生与权限
 
@@ -217,11 +217,11 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 生成小测、练习、试卷草稿。
   - 关键字段：`kind`, `grade`, `subject`, `difficulty`, `requirement`。
   - 可选字段：`generationProfile`, `assessmentTotalTimeoutMs` / `generationTimeoutMs`, `assessmentMaxTokens` / `generationMaxTokens`。其中 timeout 控制最多等待多久，maxTokens 控制模型最大输出长度；预算耗尽后服务层返回可复核动态兜底草稿，不继续等待后续模型 fallback。
-  - 默认生成预算由服务层按场景推导：E2E/联调可显式传短预算；小测使用 `quiz-standard` 中预算，默认 210s / 20000 tokens；普通练习使用 `practice-standard`，默认 210s / 20000 tokens；试卷和个性化练习使用 `formal-full`，默认 270s / 24000 tokens。
+  - 默认生成预算由服务层按场景推导：E2E/联调可显式传短预算；小测使用 `quiz-standard`，默认 120s / 16000 tokens；普通练习使用 `practice-standard`，默认 150s / 16000 tokens；试卷和个性化练习使用 `formal-full`，默认 240s / 24000 tokens。小测/练习的 2 个紧凑分区单区最多 8000 tokens，试卷的 4 个分区按默认预算各 6000 tokens。
   - `check:content-context` 中的低预算 E2E 已降级为 `link-guard`，只验证资料上下文、预算退出、教师复核和 PDF 导出链路，不作为生成内容质量验收。
   - 默认规则：小测/练习两页 A4，试卷四页 A4。
-  - 服务层模型链路：DeepSeek assessment v4 优先生成；超时或不可用时由 GPT5.5 高级生成接管；MiniMax M3 作为备份生成；随后由服务层修复结构并做本地结构审查。
-  - 默认不在草稿主链路同步执行 MiniMax M3 和 GPT5.5 质量审查，避免生成接口被多模型审查拖慢；只有显式传入 `runModelReview=true` 或服务端配置开启时，才执行深度模型审查。
+  - 服务层模型链路：GPT-5.6 按三科和 `kind` 蓝图分区生成，小测/练习为 2 个并行分区、试卷为 4 个分区且最多 2 路并发；失败分区最多重试一次。MiniMax 不承担文本组卷，DeepSeek 不进入默认路由。
+  - 部分分区失败或使用动态修复时必须写入 `usedDynamicFallback=true`，本地审查状态为 `needs_teacher_review`。默认不执行深度模型审查；显式传入 `runModelReview=true` 或服务端配置开启时，正常路径只调用一次 GPT-5.6 风险审查。
   - 返回和落库 `generationPipeline`，记录当前阶段、模型尝试、修复状态、模型审查是否执行、打印闸门和导出资产。Web、小程序、课堂平板只读取该结构，不自行重建生成链路。
 - `POST /api/assessments/:assignmentId/draft-export`
   - 将已生成内容导出为“内容审查 PDF 草稿”，只供教师打开 PDF 审查，不在 Web/小程序内展示完整题面。
@@ -238,14 +238,16 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 - `POST /api/submissions/grade`
   - 支持 `multipart/form-data`，图片字段名为 `images`，不限制上传张数。
   - 关键字段：`assignmentId`, `studentId`, `subject`, `kind`, `title`, `uploadedBy`。
-  - 上传后先返回 `queued=true`，后台执行混合 OCR、参考答案准备和 AI 主批改；第二模型审计和 GPT5.5 高级审查默认不阻塞主链路，仅在显式传入 `runDeepGradingAudit=true` 或服务端 `GRADING_RUN_DEEP_AUDIT=true` 时执行。
-  - 默认 OCR 链路为 `OCR_ENGINE=vision`：MiniMax 视觉识别学生作答、印刷题干、题目区域和批改痕迹。
+  - 上传后先返回 `queued=true`，后台执行混合 OCR、参考答案准备、客观题确定性比较和 GPT-5.6 主观题批改。
+  - 默认 OCR 链路为 `OCR_ENGINE=vision`：MiniMax 视觉最多 2 路并发识别学生作答、印刷题干、题目区域和批改痕迹，并保持页序稳定。
   - 有 `assignmentId` 时优先使用生成记录里的题目和答案；没有答案键时先生成 `referenceAnswers` 再批改。
   - 若关联作业含 `questionLayoutManifest`，服务层必须优先使用该清单进行逐题参考答案、分值、解析和近似图片标注位置对齐，避免把整页 OCR 文本重新猜分题。
-  - DeepSeek assessment v4 负责参考答案生成和主批改；MiniMax M3 / GPT5.5 深度审查作为显式开启的质量门禁，不作为默认同步主链路。
+  - 单一明确答案的选择、短填空和数值题优先在服务层保守比较；混合题只把未解决题目发送给 GPT-5.6。外部材料没有答案键时由 GPT-5.6 生成参考答案和评分点。
+  - `uncertain`、低置信、答案冲突、图形证据不足或模型顶层分数与逐题汇总不一致时，只触发一次 GPT-5.6 风险审查；失败时进入教师复核，不继续串行调用多个模型。
+  - 总分由服务层按逐题得分计算，模型顶层 `score` 不得覆盖逐题结果。
   - API 在 OCR 前执行本地图片质量检查，记录 `imageQuality`；分辨率、亮度、对比度或清晰度不达标时进入教师复核。
   - 视觉 OCR 会尽量生成 `ocrQuestions[]`，每项包含 `questionNo`, `printedPrompt`, `studentAnswer`, `observedWork`, `bbox`, `confidence`，用于逐题批改和图片标注。
-  - 低置信、图片质量需复核、深度审查未通过时只保留 `provisionalScore`，不生成最终分、不写入学生档案；未启用深度审查时仍必须由教师逐题确认后归档。
+  - 低置信、图片质量需复核、风险审查未通过时只保留 `provisionalScore`，不生成最终分、不写入学生档案；所有结果仍必须由教师逐题确认后归档。
 
 - `GET /api/grading/workbench`
   - 教师端批改工作台列表。
@@ -327,7 +329,7 @@ AI 类接口不会因为数据库暂时不可用而失败，会返回：
   - 生成默认写入 `Assignment`，生成和后续批改共享同一个 `assignmentId`。
   - 前端传入 `items`、`layoutTemplate`、`printProfile`、`targetScope`、`targetGrade`、`studentId` 时会保存到 `metadata`，作为 A4 排版、年级/学生归档和后续批改的数据结构。
   - 正式打印前必须经过 `draft-export` 生成 PDF 草稿，以及 `draft-review` 教师确认，避免未复核内容直接进入打印。
-  - `metadata.modelReviews` 只在显式深度模型审查执行时保存 MiniMax M3 和 GPT5.5 审查结论、风险、建议和 `modelRunId`；默认草稿生成只保存服务层本地审查结果，完整模型运行记录只通过 `ModelRun` 查询，避免把内部运行对象直接暴露给多端前端。
+  - `metadata.modelReviews` 只在显式 GPT-5.6 风险审查执行时保存结论、风险、建议和 `modelRunId`；默认草稿生成只保存服务层本地审查结果，完整模型运行记录只通过 `ModelRun` 查询，避免把内部运行对象直接暴露给多端前端。
 - `POST /api/submissions/grade`
   - 如果没有传 `assignmentId`，API 会自动创建一个用于图片提交和批改的 `Assignment`，并写入 `Submission` 与 `GradingResult`。
   - 教师端和学生端都可以走图片上传批改；选择关联生成记录时优先复用该记录的答案键。

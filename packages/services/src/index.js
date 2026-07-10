@@ -80,10 +80,10 @@ function resolveAssessmentGenerationBudget(input = {}, config = {}) {
   const profileDefaults = {
     "e2e-fast": { assessmentTotalTimeoutMs: 105000, assessmentMaxTokens: 16000 },
     "fast-check": { assessmentTotalTimeoutMs: 105000, assessmentMaxTokens: 16000 },
-    "quiz-standard": { assessmentTotalTimeoutMs: 210000, assessmentMaxTokens: 20000 },
-    "practice-standard": { assessmentTotalTimeoutMs: 210000, assessmentMaxTokens: 20000 },
+    "quiz-standard": { assessmentTotalTimeoutMs: 120000, assessmentMaxTokens: 16000 },
+    "practice-standard": { assessmentTotalTimeoutMs: 150000, assessmentMaxTokens: 16000 },
     "formal-full": {
-      assessmentTotalTimeoutMs: 270000,
+      assessmentTotalTimeoutMs: 240000,
       assessmentMaxTokens: 24000
     }
   };
@@ -641,7 +641,7 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
   return {
     mode: "ai_generated_reference",
     available: Boolean(result.available && referenceAnswers.length),
-    source: "deepseek_assessment_reference",
+    source: "gpt56_reference_answer",
     answerKey: null,
     referenceAnswers,
     confidence: Number(averageConfidence.toFixed(3)),
@@ -959,6 +959,141 @@ function normalizeSubmissionOcrQuestion(item, index, total, input = {}, referenc
   };
 }
 
+function compareObjectiveAnswers(reference = {}, question = {}) {
+  const expected = String(reference.correctAnswer || question.correctAnswer || "").normalize("NFKC").trim();
+  const actual = String(question.studentAnswer || "").normalize("NFKC").trim();
+  const prompt = String(question.printedText || reference.prompt || "");
+  if (!expected || !actual || Number(question.confidence ?? 0) < 0.85 || Number(reference.confidence ?? 0) < 0.9) return null;
+  if (/言之有理|合理即可|答案不唯一|多种答案|任意|参考答案|示例|开放题|略|酌情|或/.test(expected)) return null;
+  if (/说明|分析|理由|为什么|简答|作文|写作|解答|证明|过程|结合|谈谈|概括|赏析|造句|翻译/.test(prompt)) return null;
+
+  const clean = (value) => value
+    .toLowerCase()
+    .replace(/^\s*[（(]?\s*/, "")
+    .replace(/\s*[）)]?\s*[。.!！?？,，;；:：]*\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const expectedClean = clean(expected);
+  const actualClean = clean(actual);
+  const numberPattern = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
+  if (numberPattern.test(expectedClean) && numberPattern.test(actualClean)) {
+    return Number(expectedClean) === Number(actualClean);
+  }
+  if (/^[a-z]$/i.test(expectedClean) && /^[a-z]$/i.test(actualClean)) {
+    return expectedClean === actualClean;
+  }
+  const shortExactAnswer = expectedClean.length <= 24 && !/[。！？!?；;]/.test(expectedClean);
+  if (!shortExactAnswer) return null;
+  return expectedClean === actualClean;
+}
+
+function buildDeterministicGradingPlan(input = {}, ocr = {}, referenceAnswers = []) {
+  const references = Array.isArray(referenceAnswers) ? referenceAnswers : [];
+  const questions = Array.isArray(ocr.questions) ? ocr.questions : [];
+  const questionByNo = new Map(questions.map((item) => [String(item.questionNo || ""), item]));
+  const deterministicResults = [];
+  const unresolvedReferences = [];
+  const unresolvedQuestions = [];
+
+  for (const reference of references) {
+    const questionNo = String(reference.questionNo || "");
+    const question = questionByNo.get(questionNo) || normalizeSubmissionOcrQuestion({ questionNo }, 0, 1, input, new Map([[questionNo, reference]]));
+    const comparison = compareObjectiveAnswers(reference, question);
+    if (comparison == null) {
+      unresolvedReferences.push(reference);
+      unresolvedQuestions.push(question);
+      continue;
+    }
+    deterministicResults.push(normalizeQuestionResult({
+      questionNo,
+      status: comparison ? "correct" : "wrong",
+      studentAnswer: question.studentAnswer,
+      correctAnswer: reference.correctAnswer,
+      explanation: comparison ? "学生答案与明确答案一致。" : "学生答案与明确答案不一致。",
+      knowledgePoint: reference.knowledgePoint || input.subject || "",
+      maxScore: reference.score,
+      confidence: Math.min(Number(question.confidence || 0.92), Number(reference.confidence || 1)),
+      bbox: question.bbox
+    }, deterministicResults.length, input, references.length));
+  }
+
+  for (const question of questions) {
+    const questionNo = String(question.questionNo || "");
+    if (references.some((item) => String(item.questionNo || "") === questionNo)) continue;
+    unresolvedQuestions.push(question);
+  }
+
+  return {
+    deterministicResults,
+    unresolvedReferences,
+    unresolvedQuestions,
+    fullyResolved: references.length > 0 && deterministicResults.length === references.length && unresolvedQuestions.length === 0
+  };
+}
+
+function filterQuestionLayoutManifest(manifest = null, questionNos = new Set()) {
+  if (!manifest) return null;
+  const questions = (manifest.questions || []).filter((item, index) => questionNos.has(String(item.questionNo || item.orderIndex || index + 1)));
+  return { ...manifest, questionCount: questions.length, questions };
+}
+
+function buildUnresolvedGradingInput(input = {}, plan = {}) {
+  const questionNos = new Set(plan.unresolvedQuestions.map((item) => String(item.questionNo || "")));
+  const numberedText = (field) => plan.unresolvedQuestions
+    .map((item) => `${item.questionNo}. ${String(item[field] || "").trim()}`.trim())
+    .filter((item) => !/\.\s*$/.test(item))
+    .join(" ");
+  return {
+    ...input,
+    answerKey: null,
+    referenceAnswers: plan.unresolvedReferences,
+    ocrQuestions: plan.unresolvedQuestions,
+    printedText: numberedText("printedText"),
+    ocrText: numberedText("printedText"),
+    studentAnswerText: numberedText("studentAnswer"),
+    questionLayoutManifest: filterQuestionLayoutManifest(input.questionLayoutManifest, questionNos)
+  };
+}
+
+function mergeDeterministicGradingResult(result = {}, deterministicResults = [], input = {}) {
+  const parsed = parseJsonObjectText(result.gradingText) || {};
+  const remoteQuestions = Array.isArray(parsed.questionResults) ? parsed.questionResults : Array.isArray(parsed.questions) ? parsed.questions : [];
+  const referenceByNo = new Map((input.referenceAnswers || []).map((item) => [String(item.questionNo || ""), item]));
+  const questionByNo = new Map((input.ocrQuestions || []).map((item) => [String(item.questionNo || ""), item]));
+  const resultByNo = new Map([
+    ...deterministicResults.map((item) => [String(item.questionNo || ""), item]),
+    ...remoteQuestions.map((item, index) => [String(item.questionNo || item.no || index + 1), item])
+  ]);
+  const order = Array.from(new Set([
+    ...(input.referenceAnswers || []).map((item) => String(item.questionNo || "")),
+    ...(input.ocrQuestions || []).map((item) => String(item.questionNo || "")),
+    ...resultByNo.keys()
+  ])).filter(Boolean);
+  return {
+    ...result,
+    gradingText: JSON.stringify({
+      ...parsed,
+      questionResults: order.map((questionNo) => {
+        const resolved = resultByNo.get(questionNo);
+        if (resolved) return resolved;
+        const reference = referenceByNo.get(questionNo) || {};
+        const question = questionByNo.get(questionNo) || {};
+        return {
+          questionNo,
+          status: "uncertain",
+          studentAnswer: question.studentAnswer || "",
+          correctAnswer: reference.correctAnswer || question.correctAnswer || "",
+          explanation: "模型未返回该题的批改结果，需要教师复核。",
+          knowledgePoint: reference.knowledgePoint || input.subject || "",
+          maxScore: reference.score,
+          confidence: 0,
+          bbox: question.bbox
+        };
+      })
+    })
+  };
+}
+
 function buildStructuredSubmissionOcrQuestions(input = {}, ocr = {}, referenceAnswers = []) {
   const referenceByQuestion = new Map(
     (Array.isArray(referenceAnswers) ? referenceAnswers : []).map((item) => [String(item.questionNo || ""), item])
@@ -1056,7 +1191,12 @@ function normalizeQuestionResult(item, index, input = {}, total = 1) {
   const explanation = String(source.explanation || source.analysis || source.correctProcess || source.reason || "").trim();
   const errorStep = String(source.errorStep || source.wrongStep || source.errorReason || source.cause || "").trim();
   const maxScore = optionalNumber(source.maxScore ?? source.fullScore ?? source.points ?? source.score ?? manifest?.score);
-  const earnedScore = optionalNumber(source.earnedScore ?? source.studentScore ?? source.awardedScore);
+  const earnedScore = optionalNumber(
+    source.earnedScore ??
+    source.studentScore ??
+    source.awardedScore ??
+    (source.maxScore != null || source.fullScore != null || source.points != null ? source.score : null)
+  );
   return {
     id: source.id || `question-${questionNo}`,
     questionNo,
@@ -1184,7 +1324,14 @@ function evaluateGradingQuality({ questionResults = [], score = null, summary = 
   const hasLayoutAnswerKey = Boolean(input.questionLayoutManifest?.questions?.some((item) => item.answer || item.analysisSteps?.length));
   const hasGeneratedReference = Array.isArray(input.referenceAnswers) && input.referenceAnswers.length > 0;
   const hasReferenceEvidence = hasAnswerKey || hasLayoutAnswerKey || hasGeneratedReference;
-  const hasRecognitionEvidence = Boolean(ocr.manualText || ocr.studentAnswerText || ocr.text || input.ocrText || input.printedText);
+  const hasRecognitionEvidence = Boolean(
+    ocr.manualText ||
+    ocr.studentAnswerText ||
+    ocr.text ||
+    input.ocrText ||
+    input.printedText ||
+    ocr.questions?.some((item) => String(item?.studentAnswer || "").trim())
+  );
   const imageQuality = ocr.imageQuality || input.imageQuality || null;
   const imageQualityStatus = String(imageQuality?.status || "").toLowerCase();
   const imageQualityBlocked = ["poor", "needs_review"].includes(imageQualityStatus);
@@ -1265,8 +1412,13 @@ function normalizeGradingResult(result = {}, input = {}, ocr = {}) {
         }, 0, input, 1)];
   const questionResults = applyQuestionScoreTrace(normalizedQuestions, input, score);
   const annotationMarkers = buildAnnotationMarkers(questionResults);
-  const inferredScore = score ?? inferScoreFromQuestionResults(questionResults, input);
-  const quality = evaluateGradingQuality({ questionResults, score: inferredScore, summary, input, ocr, parsed });
+  const questionScore = inferScoreFromQuestionResults(questionResults, input);
+  const inferredScore = questionScore ?? score;
+  const quality = {
+    ...evaluateGradingQuality({ questionResults, score: inferredScore, summary, input, ocr, parsed }),
+    modelScore: score,
+    scoreMismatch: score != null && questionScore != null && Math.abs(Number(score) - Number(questionScore)) > 0.01
+  };
   const displaySummary = quality.lowConfidence
     ? `${quality.reason}${summary ? ` 原始AI初判：${summary}` : ""}`
     : summary;
@@ -1299,6 +1451,13 @@ function normalizeGradingResult(result = {}, input = {}, ocr = {}) {
       imageQuality: ocr.imageQuality || null
     }
   };
+}
+
+function shouldRunGradingRiskReview(structured = {}) {
+  const questions = Array.isArray(structured.questionResults) ? structured.questionResults : [];
+  return structured.quality?.lowConfidence === true ||
+    structured.quality?.scoreMismatch === true ||
+    questions.some((item) => item.status === "uncertain" || Number(item.confidence ?? 1) < 0.62);
 }
 
 function normalizeAssessmentItem(item, index) {
@@ -3243,15 +3402,22 @@ function normalizeAssessmentDraft(result = {}, input = {}) {
       ? parsed.items
       : sectionItems;
   const items = rawItems.map(normalizeAssessmentItem).filter((item) => item.prompt);
-  const usedDynamicFallback = !result.available || !items.length;
+  const usedDynamicFallback = !result.available || !items.length || result.modelRun?.metadata?.partialGeneration === true;
   const review = reviewAndRepairAssessmentItems(items.length ? items : buildFallbackAssessmentItems(input), input);
   const safeItems = review.items;
   const printNotes = [
     ...(Array.isArray(parsed.printNotes) ? parsed.printNotes : Array.isArray(parsed.notes) ? parsed.notes : []),
     ...review.notes,
-    ...(usedDynamicFallback ? ["模型超时、不可用或返回内容未形成标准题目结构，系统已按动态兜底题池和 A4 排版规则生成可打印草稿，教师需复核后使用。"] : [])
+    ...(usedDynamicFallback ? ["模型超时、部分分区不可用或返回内容未形成完整标准题目结构，系统已按动态兜底题池和 A4 排版规则修复草稿，教师需复核后使用。"] : [])
   ];
   const audit = auditAssessmentDraft(safeItems, input, printNotes);
+  if (usedDynamicFallback) {
+    const fallbackIssue = "模型输出不完整，草稿包含动态修复内容，必须由教师复核。";
+    audit.status = "needs_teacher_review";
+    audit.passed = false;
+    audit.issues = [...new Set([...(audit.issues || []), fallbackIssue])];
+    audit.teacherMessage = "草稿包含动态修复内容，请教师检查题目、答案和解析后再使用。";
+  }
   audit.fallbackMode = usedDynamicFallback ? "dynamic-repair" : "provider-reviewed";
   audit.providerStatus = result.modelRun?.status || (result.available ? "SUCCESS" : "ERROR");
   return {
@@ -3582,19 +3748,26 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
   const reviewModelRunIds = {};
   if (modelReviewRequired) {
     const reviewers = options.assessmentModelReviewers || {};
-    const miniMaxReviewer = reviewers.minimax || reviewWithMiniMax;
+    const legacyDoubleReview = typeof reviewers.minimax === "function" && typeof reviewers.premium === "function";
     const premiumReviewer = reviewers.premium || reviewWithGpt55;
-    const miniMaxDraftReview = await miniMaxReviewer(config, reviewPayload);
-    const miniMaxDraftReviewRun = await persistRun(miniMaxDraftReview.modelRun, options);
-    const gptDraftReview = await premiumReviewer(config, {
-      ...reviewPayload,
-      secondModelAudit: parseAssessmentQualityReview(miniMaxDraftReview, "MiniMax M3 生成审查")
-    });
-    const gptDraftReviewRun = await persistRun(gptDraftReview.modelRun, options);
-    modelReviews.minimax = compactAssessmentQualityReview(miniMaxDraftReview, "MiniMax M3 生成审查", miniMaxDraftReviewRun?.id || null);
-    modelReviews.premium = compactAssessmentQualityReview(gptDraftReview, "GPT5.5 生成高级审查", gptDraftReviewRun?.id || null);
-    reviewModelRunIds.minimax = miniMaxDraftReviewRun?.id || null;
-    reviewModelRunIds.premium = gptDraftReviewRun?.id || null;
+    if (legacyDoubleReview) {
+      const miniMaxDraftReview = await reviewers.minimax(config, reviewPayload);
+      const miniMaxDraftReviewRun = await persistRun(miniMaxDraftReview.modelRun, options);
+      const gptDraftReview = await premiumReviewer(config, {
+        ...reviewPayload,
+        secondModelAudit: parseAssessmentQualityReview(miniMaxDraftReview, "MiniMax M3 生成审查")
+      });
+      const gptDraftReviewRun = await persistRun(gptDraftReview.modelRun, options);
+      modelReviews.minimax = compactAssessmentQualityReview(miniMaxDraftReview, "MiniMax M3 生成审查", miniMaxDraftReviewRun?.id || null);
+      modelReviews.premium = compactAssessmentQualityReview(gptDraftReview, "GPT-5.6 生成高级审查", gptDraftReviewRun?.id || null);
+      reviewModelRunIds.minimax = miniMaxDraftReviewRun?.id || null;
+      reviewModelRunIds.premium = gptDraftReviewRun?.id || null;
+    } else {
+      const gptDraftReview = await premiumReviewer(config, reviewPayload);
+      const gptDraftReviewRun = await persistRun(gptDraftReview.modelRun, options);
+      modelReviews.premium = compactAssessmentQualityReview(gptDraftReview, "GPT-5.6 生成风险审查", gptDraftReviewRun?.id || null);
+      reviewModelRunIds.premium = gptDraftReviewRun?.id || null;
+    }
   }
   const generationPipeline = buildAssessmentGenerationPipeline({
     result,
@@ -3703,17 +3876,37 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
       secondModelAuditRequired: deepAuditRequired && String(config.GRADING_REQUIRE_SECOND_MODEL_AUDIT ?? "true").toLowerCase() !== "false"
     }
   };
+  const deterministicPlan = buildDeterministicGradingPlan(gradingInput, ocr, reference.referenceAnswers || []);
   const gradingRunner = options.gradingRunner || gradeSubmissionText;
-  const result = await gradingRunner(config, gradingInput);
+  const remoteGradingInput = buildUnresolvedGradingInput(gradingInput, deterministicPlan);
+  const remoteResult = deterministicPlan.fullyResolved
+    ? {
+        available: true,
+        providerId: "local",
+        gradingText: JSON.stringify({
+          score: inferScoreFromQuestionResults(deterministicPlan.deterministicResults, gradingInput),
+          summary: "明确答案题已完成本地保守比对，等待教师复核。",
+          strengths: [],
+          mistakes: [],
+          nextPractice: "教师确认后再生成针对性练习。",
+          needsTeacherReview: true,
+          questionResults: deterministicPlan.deterministicResults
+        }),
+        modelRun: null
+      }
+    : await gradingRunner(config, remoteGradingInput);
+  const result = mergeDeterministicGradingResult(remoteResult, deterministicPlan.deterministicResults, gradingInput);
   const modelRun = await persistRun(result.modelRun, options);
   const initialStructured = normalizeGradingResult(result, gradingInput, ocr);
   let auditModelRun = null;
   let premiumAuditModelRun = null;
   let combinedAudit = skippedGradingAudit();
-  if (deepAuditRequired) {
-    const reviewers = options.gradingReviewers || {};
-    const miniMaxReviewer = reviewers.minimax || reviewWithMiniMax;
-    const premiumReviewer = reviewers.premium || reviewWithGpt55;
+  const reviewers = options.gradingReviewers || {};
+  const riskReviewRequired = shouldRunGradingRiskReview(initialStructured);
+  const legacyDoubleReview = deepAuditRequired && typeof reviewers.minimax === "function" && typeof reviewers.premium === "function";
+  if (legacyDoubleReview) {
+    const miniMaxReviewer = reviewers.minimax;
+    const premiumReviewer = reviewers.premium;
     const auditResult = await miniMaxReviewer(config, {
       reviewTask: "submission-grading-audit",
       title: input.title || "",
@@ -3769,8 +3962,46 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
     premiumAuditModelRun = await persistRun(premiumAuditResult.modelRun, options);
     combinedAudit = mergeGradingAudits([
       { role: "second-model", label: "MiniMax二次审计", result: auditResult },
-      { role: "premium", label: "GPT5.5高级审查", result: premiumAuditResult }
+      { role: "premium", label: "GPT-5.6高级审查", result: premiumAuditResult }
     ], config);
+    combinedAudit.required = true;
+  } else if (deepAuditRequired || riskReviewRequired) {
+    const premiumReviewer = reviewers.premium || reviewWithGpt55;
+    const premiumAuditResult = await premiumReviewer(config, {
+      reviewTask: "submission-premium-grading-review",
+      title: input.title || "",
+      subject: input.subject || "",
+      kind: input.kind || "",
+      referenceAnswerMode: reference.mode,
+      referenceAnswerConfidence: reference.confidence,
+      referenceAnswers: reference.referenceAnswers || [],
+      questionLayoutManifest: summarizeQuestionLayoutManifestForAudit(questionLayoutManifest),
+      ocr: {
+        status: ocr.status,
+        confidence: ocr.confidence,
+        engine: ocr.engine,
+        reason: ocr.reason,
+        textPreview: String(ocr.text || "").slice(0, 1800),
+        studentAnswerTextPreview: String(ocr.studentAnswerText || "").slice(0, 1800),
+        printedTextPreview: String(ocr.printedText || "").slice(0, 1800),
+        questions: (ocr.questions || []).slice(0, 80)
+      },
+      grading: {
+        score: initialStructured.score ?? initialStructured.provisionalScore,
+        summary: initialStructured.summary,
+        questionResults: initialStructured.questionResults,
+        annotationMarkers: initialStructured.annotationMarkers,
+        quality: initialStructured.quality
+      }
+    });
+    premiumAuditModelRun = await persistRun(premiumAuditResult.modelRun, options);
+    combinedAudit = mergeGradingAudits([
+      { role: "premium", label: "GPT-5.6风险审查", result: premiumAuditResult }
+    ], {
+      ...config,
+      GRADING_REQUIRE_SECOND_MODEL_AUDIT: "false",
+      GRADING_REQUIRE_PREMIUM_JUDGE: "true"
+    });
     combinedAudit.required = true;
   }
   const structured = applyGradingAudit({

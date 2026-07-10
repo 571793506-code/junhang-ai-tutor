@@ -16,10 +16,12 @@
 - 学生卷和解析卷必须分离；解析必须包含答案、步骤、考点和易错提醒。
 - 题目必须原创，优先使用新的材料、数字、情境、词库和表达，不能直接套旧题。
 - 教师确认前不发布、不打印正式卷、不进入学生端或家长端。
-- 默认草稿生成链路只做模型生成、服务层结构修复、本地审查和教师复核门禁；MiniMax/GPT 等深度模型审查必须显式开启，不能阻塞默认草稿返回。
+- 默认草稿生成链路使用 GPT-5.6 按项目蓝图分区生成，最多 2 路并发；随后执行服务层结构修复、本地审查和教师复核门禁。深度模型审查必须显式开启，正常路径只调用一次 GPT-5.6，不能阻塞默认草稿返回。
 - E2E、联调或低延迟入口可以传 `assessmentTotalTimeoutMs` / `generationTimeoutMs` 给服务层；预算耗尽后必须走结构化动态兜底草稿和教师复核，不能让接口长时间等待模型。
 - timeout 预算和 token 上限必须分开处理：timeout 防止生成长时间不收口，`assessmentMaxTokens` / `generationMaxTokens` 给真实模型保留输出空间，不能用提高 token 上限替代超时边界。
-- 生成预算默认由服务层推导：E2E/联调可用短预算；小测走 `quiz-standard` 中预算，默认 210s / 20000 tokens；普通练习走 `practice-standard`，默认 210s / 20000 tokens；试卷和个性化练习走 `formal-full`，默认 270s / 24000 tokens。
+- 生成预算默认由服务层推导：E2E/联调可用短预算；小测走 `quiz-standard`，默认 120s / 16000 tokens；普通练习走 `practice-standard`，默认 150s / 16000 tokens；试卷和个性化练习走 `formal-full`，默认 240s / 24000 tokens。小测/练习的 2 个紧凑分区单区最多 8000 tokens，试卷的 4 个分区按默认预算各 6000 tokens。
+- 分区失败只重试该分区一次；部分分区失败或动态修复必须写入 `usedDynamicFallback=true`，本地审查状态强制为 `needs_teacher_review`。
+- DeepSeek 不进入默认生成链路，只作为受控紧急回滚候选；MiniMax 不承担文本组卷，只保留视觉 OCR 和语音能力。
 - `check:content-context` 低预算 E2E 只作为 `link-guard` 链路守卫，证明资料上下文、预算退出、动态兜底、教师复核和导出链路能收口；不得用它判断题目原创性、教师要求贴合度、个性化程度、解析质量或 PDF 视觉质量。
 - `check:generation:quality:quiz` 和 `check:generation:quality:formal` 才用于真实模型生成内容质量样本；质量样本必须 `modelAvailable=true`、`usedDynamicFallback=false`，否则不能通过。
 
@@ -85,7 +87,7 @@
 
 - 不继续扩大当前复杂 PDF 自动排版主流程。
 - 不把多模型自动审查堆叠作为默认主链路。
-- 不让 `POST /api/assessments/draft` 默认等待 MiniMax/GPT 双模型质量审查；深度审查只在 `runModelReview=true` 或服务端配置开启时执行。
+- 不让 `POST /api/assessments/draft` 默认等待多模型质量审查；深度审查只在 `runModelReview=true` 或服务端配置开启时执行，正常路径只使用 GPT-5.6。
 - 不把模型输出直接导出给学生。
 - 不用大量空白凑页数。
 - 不仅修英语小测，三科和小测/练习/试卷模板都必须遵守类型规则。
@@ -96,6 +98,7 @@
 - 验证小测真实模型内容质量时运行 `cmd /c npm.cmd run check:generation:quality:quiz`；该命令使用中预算样本，不导出 PDF。
 - 验证试卷或个性化练习真实模型内容质量时运行 `cmd /c npm.cmd run check:generation:quality:formal`；该命令使用正式预算样本，不导出 PDF，耗时高于 quiz。
 - 修改生成服务并涉及资料上下文、教师复核或导出边界时，运行 `cmd /c npm.cmd run check:content-context`。
+- 修改 GPT-5.6 中转配置或请求参数时，先运行 `cmd /c npm.cmd run check:gpt56`；该检查只使用合成输入，不得发送学生数据。
 - 同时涉及资料上传、生成草稿、草稿导出、教师确认和正式学生卷/解析卷导出时，才运行 `cmd /c npm.cmd run check:teaching-content:full`。
 - 修改服务层结构时运行 `cmd /c npm.cmd run check --workspace apps/api`。
 - 修改中文提示词、题型规则或文案时运行 `cmd /c npm.cmd run check:encoding`。

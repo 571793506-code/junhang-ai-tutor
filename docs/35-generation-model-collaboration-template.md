@@ -8,31 +8,29 @@
 
 | 场景 | 当前入口 | 主模型 | 辅助模型 | 产物 |
 | --- | --- | --- | --- | --- |
-| 今日任务生成 | `POST /api/teacher/tasks` | DeepSeek V4 | Codex 主脑审查 | `LearningTask`、`ModelRun` |
-| 小测/练习/试卷生成 | `POST /api/assessments/draft` | DeepSeek assessment v4，超时/不可用时 GPT5.5 接管，MiniMax M3 备份 | 服务层结构修复 + 本地规则审查；MiniMax/GPT 深度质量审查仅显式开启 | `Assignment`、`AssignmentItem`、`ModelRun`、`generationPipeline` |
+| 今日任务生成 | `POST /api/teacher/tasks` | GPT-5.6 | 服务层上下文和教师复核 | `LearningTask`、`ModelRun` |
+| 小测/练习/试卷生成 | `POST /api/assessments/draft` | GPT-5.6 按项目蓝图分区生成，最多 2 路并发 | 服务层结构修复 + 本地规则审查；GPT-5.6 风险审查仅显式开启 | `Assignment`、`AssignmentItem`、`ModelRun`、`generationPipeline` |
 | A4 草稿审查 | `POST /api/assessments/:assignmentId/draft-export`、`draft-review` | Codex 主脑审查 + 确定性 HTML/PDF 渲染 | 教师确认 | `GeneratedAsset` 内容审查草稿 |
 | A4 正式导出 | `POST /api/assessments/:assignmentId/print-export` | 确定性 HTML/PDF 渲染 | 无 | `GeneratedAsset` 题目版、解析版 |
-| 图片批改 | `POST /api/submissions/grade` | DeepSeek V4 | MiniMax M3 / OCR-VLM 识别 | `Submission`、`GradingResult`、错题记录 |
+| 图片批改 | `POST /api/submissions/grade` | 服务层客观题比较 + GPT-5.6 主观题批改 | MiniMax / OCR-VLM 识别 | `Submission`、`GradingResult`、错题记录 |
 | 听写/播报语音 | `POST /api/classroom/dictation` | 确定性播报计划 | MiniMax 语音 | `DictationTask`、语音任务、`ModelRun` |
-| 学生档案摘要 | 学生档案聚合/报告生成 | DeepSeek 文本 | 无 | `StudentProfile`、阶段报告、`ModelRun` |
+| 学生档案摘要 | 学生档案聚合/报告生成 | GPT-5.6 | 无 | `StudentProfile`、阶段报告、`ModelRun` |
 
 当前模型连接建议：
+
+当前中转的 `/models` 不提供裸 `gpt-5.6`，项目实测选择 `gpt-5.6-terra`：文本、`json_object`、`reasoning_effort`、JSON Schema 和合成批改 JSON 可用；图片输入未通过，因此视觉 OCR 继续使用 MiniMax。新环境必须先运行 `check:gpt56`，再决定是否开启 `GPT56_REASONING_EFFORT_ENABLED`。
 
 ```json
 {
   "textGeneration": {
-    "provider": "deepseek",
-    "model": "deepseek-v4-pro",
+    "provider": "gpt56",
+    "model": "gpt-5.6-terra",
     "capabilities": ["qa", "task-draft", "assessment-draft", "submission-grading", "student-profile-narrative"]
   },
-  "modelReview": {
-    "provider": "minimax",
-    "model": "MiniMax-M3",
-    "capabilities": ["long-context-review", "vision-ocr", "explicit-second-pass-check"]
-  },
-  "premiumReview": {
-    "provider": "gpt55",
-    "capabilities": ["assessment-fallback-generation", "explicit-premium-quality-gate", "archive-gate"]
+  "riskReview": {
+    "provider": "gpt56",
+    "model": "gpt-5.6-terra",
+    "capabilities": ["assessment-risk-review", "grading-risk-review", "archive-gate"]
   },
   "speechGeneration": {
     "provider": "minimax",
@@ -185,15 +183,12 @@
 ```mermaid
 flowchart LR
   A["教师输入生成需求"] --> B["服务端补齐学生、年级、教材、权限上下文"]
-  B --> C["DeepSeek assessment v4 优先生成"]
-  C -->|超时或不可用| D["GPT5.5 接管生成"]
-  D -->|仍不可用| E["MiniMax M3 备份生成"]
-  C --> F["模型返回严格 JSON 草稿"]
-  D --> F
-  E --> F
+  B --> C["服务层生成三科与 kind 分区蓝图"]
+  C --> D["GPT-5.6 最多 2 路并发生成分区"]
+  D --> F["合并严格 JSON 草稿"]
   F --> G["服务层结构修复与规则校验"]
   G --> H["本地规则审查 + 教师复核门禁"]
-  H -. "显式 runModelReview=true" .-> I["MiniMax/GPT 深度质量审查"]
+  H -. "显式 runModelReview=true" .-> I["GPT-5.6 风险审查"]
   H --> J["保存 Assignment / AssignmentItem / ModelRun / generationPipeline"]
   I --> J
   J --> K["生成 PDF 草稿供教师审查"]
@@ -201,8 +196,9 @@ flowchart LR
   L -->|否| C
   L -->|是| M["A4 题目 PDF + 解析 PDF 导出"]
   M --> N["学生作答 / 上传图片"]
-  N --> O["OCR/VLM 识别 + DeepSeek 批改"]
-  O --> P["错题、批改结果、学生档案归档"]
+  N --> O["MiniMax/OCR-VLM 识别"]
+  O --> P["客观题本地比较 + GPT-5.6 未解决题批改"]
+  P --> Q["教师逐题确认后归档"]
 ```
 
 ## 7. 前端展示模板
@@ -229,7 +225,7 @@ flowchart LR
 3. 题目 JSON 是否必须包含 `analysisSteps`、`commonMistake`、`knowledgePoint`、`score`、`answerSpaceMm`。
 4. 学生端是否永远不显示具体模型名，只显示“AI 生成，教师复核后使用”。
 5. 图片批改是否要求先 OCR 人工校正，再让模型批改；还是允许一键识别并自动给出待复核结果。
-6. MiniMax 是否只承担语音播报/跟读，文本生成统一走 DeepSeek。
+6. MiniMax 是否只承担视觉 OCR、语音播报和跟读，文本生成与批改统一走 GPT-5.6。
 7. 生成记录是否需要版本号，例如同一份试卷多次修改保存 `draftVersion`。
 8. 是否需要增加“模板市场”，让老师选择“英语小测 2 页 1 栏”“数学试卷 4 页 2 栏”等固定模板。
 

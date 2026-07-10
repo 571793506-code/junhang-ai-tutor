@@ -6,7 +6,7 @@ import {
   evaluateGenerationQualityResult
 } from "./generation-quality-check.mjs";
 
-test("quiz quality samples use medium budget for three subject quizzes", () => {
+test("quiz quality samples use expanded budget for three subject quizzes", () => {
   const cases = buildGenerationQualityCases("quiz");
 
   assert.equal(cases.length, 3);
@@ -16,8 +16,8 @@ test("quiz quality samples use medium budget for three subject quizzes", () => {
     "英语-小测"
   ]);
   assert.equal(cases.every((item) => item.generationProfile === "quiz-standard"), true);
-  assert.equal(cases.every((item) => item.assessmentTotalTimeoutMs === 210000), true);
-  assert.equal(cases.every((item) => item.assessmentMaxTokens === 20000), true);
+  assert.equal(cases.every((item) => item.assessmentTotalTimeoutMs === 120000), true);
+  assert.equal(cases.every((item) => item.assessmentMaxTokens === 16000), true);
 });
 
 test("formal quality samples use formal budget for exams and personalized practice", () => {
@@ -31,9 +31,9 @@ test("formal quality samples use formal budget for exams and personalized practi
   ]);
   assert.equal(cases.every((item) => item.generationProfile === "formal-full"), true);
   assert.equal(cases.every((item) => item.assessmentMaxTokens === 24000), true);
-  assert.equal(cases[0].assessmentTotalTimeoutMs, 270000);
-  assert.equal(cases[1].assessmentTotalTimeoutMs, 270000);
-  assert.equal(cases[2].assessmentTotalTimeoutMs, 270000);
+  assert.equal(cases[0].assessmentTotalTimeoutMs, 240000);
+  assert.equal(cases[1].assessmentTotalTimeoutMs, 240000);
+  assert.equal(cases[2].assessmentTotalTimeoutMs, 240000);
 });
 
 test("generation quality verification rejects dynamic fallback samples", () => {
@@ -47,17 +47,17 @@ test("generation quality verification rejects dynamic fallback samples", () => {
     generationPipeline: {
       model: {
         generationProfile: "quiz-standard",
-        assessmentTotalTimeoutMs: 210000,
-        assessmentMaxTokens: 20000,
-        primaryError: "MODEL_TIMEOUT after 210000ms",
+        assessmentTotalTimeoutMs: 60000,
+        assessmentMaxTokens: 12000,
+        primaryError: "MODEL_TIMEOUT after 60000ms",
         attempts: [
           {
             role: "primary",
-            providerId: "deepseek",
-            model: "deepseek-v4-pro",
+            providerId: "gpt56",
+            model: "gpt-5.6",
             status: "ERROR",
-            latencyMs: 210000,
-            error: "MODEL_TIMEOUT after 210000ms"
+            latencyMs: 60000,
+            error: "MODEL_TIMEOUT after 60000ms"
           }
         ]
       },
@@ -78,9 +78,9 @@ test("generation quality verification rejects dynamic fallback samples", () => {
   assert.equal(check.ok, false);
   assert.ok(check.detail.issues.includes("质量样本必须来自真实模型生成，不能使用动态兜底。"));
   assert.equal(check.detail.issues.some((issue) => issue.includes("数学质量样本必须包含")), false);
-  assert.equal(check.detail.primaryError, "MODEL_TIMEOUT after 210000ms");
+  assert.equal(check.detail.primaryError, "MODEL_TIMEOUT after 60000ms");
   assert.equal(check.detail.attempts.length, 1);
-  assert.equal(check.detail.attempts[0].providerId, "deepseek");
+  assert.equal(check.detail.attempts[0].providerId, "gpt56");
 });
 
 test("english quiz quality sample rejects full exam writing patterns", () => {
