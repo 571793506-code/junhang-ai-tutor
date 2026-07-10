@@ -200,7 +200,16 @@ test("Junhang text workflows use GPT-5.6 as their primary provider", async () =>
     assert.equal(results.every((result) => result.modelRun?.model === "gpt-5.6"), true);
     assert.equal(payloads.length, 7);
     assert.equal(payloads.every((payload) => payload.model === "gpt-5.6"), true);
-    assert.equal(payloads.some((payload) => payload.reasoning_effort === "medium"), true);
+    const effortForSystem = (marker) => payloads.find((payload) =>
+      String(payload.messages?.[0]?.content || "").includes(marker)
+    )?.reasoning_effort;
+    assert.equal(effortForSystem("课后辅导助教"), "low");
+    assert.equal(effortForSystem("词汇助教"), "none");
+    assert.equal(effortForSystem("教师助手"), "low");
+    assert.equal(effortForSystem("学情分析助手"), "low");
+    assert.equal(effortForSystem("标准答案生成助手"), "high");
+    assert.equal(effortForSystem("作业、练习、小测和试卷批改助手"), "high");
+    assert.equal(effortForSystem("最高级质量审查器"), "high");
   } finally {
     await close(server);
   }

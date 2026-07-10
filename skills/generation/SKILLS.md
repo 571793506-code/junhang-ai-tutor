@@ -17,6 +17,7 @@
 - 题目必须原创，优先使用新的材料、数字、情境、词库和表达，不能直接套旧题。
 - 教师确认前不发布、不打印正式卷、不进入学生端或家长端。
 - 默认草稿生成链路使用 GPT-5.6 按项目蓝图分区生成，最多 2 路并发；随后执行服务层结构修复、本地审查和教师复核门禁。深度模型审查必须显式开启，正常路径只调用一次 GPT-5.6，不能阻塞默认草稿返回。
+- `gpt-5.6-terra` 推理档位按任务固定：小测、普通练习和个性化练习使用 `medium`，正式试卷使用 `high`；问答、今日任务和档案草稿继续使用 `low`，词汇卡继续使用 `none`。
 - E2E、联调或低延迟入口可以传 `assessmentTotalTimeoutMs` / `generationTimeoutMs` 给服务层；预算耗尽后必须走结构化动态兜底草稿和教师复核，不能让接口长时间等待模型。
 - timeout 预算和 token 上限必须分开处理：timeout 防止生成长时间不收口，`assessmentMaxTokens` / `generationMaxTokens` 给真实模型保留输出空间，不能用提高 token 上限替代超时边界。
 - 生成预算默认由服务层推导：E2E/联调可用短预算；小测走 `quiz-standard`，默认 120s / 16000 tokens；普通练习走 `practice-standard`，默认 150s / 16000 tokens；试卷和个性化练习走 `formal-full`，默认 240s / 24000 tokens。小测/练习的 2 个紧凑分区单区最多 8000 tokens，试卷的 4 个分区按默认预算各 6000 tokens。

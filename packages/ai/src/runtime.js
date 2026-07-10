@@ -843,7 +843,7 @@ export async function draftAssessment(config, input = {}) {
       responseFormat: { type: "json_object" },
       maxTokens: partitionTokens,
       timeoutMs: attemptTimeoutMs(assessmentTimeoutMs),
-      reasoningEffort: kind === "试卷" || input.studentId ? "medium" : "low"
+      reasoningEffort: kind === "试卷" ? "high" : "medium"
     }));
     recordAttempt(role, partition, result);
     return { partition, index, partitionTokens, result };
@@ -1015,7 +1015,7 @@ export async function generateSubmissionReferenceAnswers(config, input = {}) {
     responseFormat: { type: "json_object" },
     maxTokens: 12000,
     timeoutMs,
-    reasoningEffort: "medium"
+    reasoningEffort: "high"
   }));
   const text = result.body ? extractChatText(result.body) : "";
 
@@ -1081,7 +1081,7 @@ export async function gradeSubmissionText(config, input = {}) {
     responseFormat: { type: "json_object" },
     maxTokens: 12000,
     timeoutMs,
-    reasoningEffort: "medium"
+    reasoningEffort: "high"
   }));
   const text = result.body ? extractChatText(result.body) : "";
 

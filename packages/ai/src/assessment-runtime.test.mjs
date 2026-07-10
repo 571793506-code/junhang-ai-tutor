@@ -156,6 +156,57 @@ test("draftAssessment caps compact partition output at 8000 tokens per request",
   }
 });
 
+test("draftAssessment uses medium reasoning for quiz and practice and high for exams", async () => {
+  const requestPayloads = [];
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      requestPayloads.push(JSON.parse(body));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ title: "档位检查", sections: [{ title: "分区", items: [{ itemType: "fill", prompt: "1+1=?", answer: "2", analysisSteps: ["计算。"], knowledgePoint: "加法" }] }] }) } }]
+      }));
+    });
+  });
+  const address = await listen(server);
+  const config = {
+    GPT56_API_KEY: "test-key",
+    GPT56_BASE_URL: `http://127.0.0.1:${address.port}`,
+    GPT56_MODEL: "gpt-5.6-terra",
+    GPT56_REASONING_EFFORT_ENABLED: "true"
+  };
+  const input = {
+    subject: "数学",
+    grade: "五年级",
+    requirement: "推理档位检查"
+  };
+
+  try {
+    const quizStart = requestPayloads.length;
+    await draftAssessment(config, { ...input, kind: "小测" });
+    const quizPayloads = requestPayloads.slice(quizStart);
+
+    const practiceStart = requestPayloads.length;
+    await draftAssessment(config, { ...input, kind: "练习" });
+    const practicePayloads = requestPayloads.slice(practiceStart);
+
+    const examStart = requestPayloads.length;
+    await draftAssessment(config, { ...input, kind: "试卷" });
+    const examPayloads = requestPayloads.slice(examStart);
+
+    assert.equal(quizPayloads.length, 2);
+    assert.equal(practicePayloads.length, 2);
+    assert.equal(examPayloads.length, 4);
+    assert.equal(quizPayloads.every((payload) => payload.reasoning_effort === "medium"), true);
+    assert.equal(practicePayloads.every((payload) => payload.reasoning_effort === "medium"), true);
+    assert.equal(examPayloads.every((payload) => payload.reasoning_effort === "high"), true);
+  } finally {
+    await close(server);
+  }
+});
+
 test("draftAssessment uses expanded default assessment model attempt timeouts", async () => {
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
