@@ -320,10 +320,17 @@ export async function callOpenAiCompatibleChat({
   } finally {
     if (timeout) clearTimeout(timeout);
   }
-  const body = text ? JSON.parse(text) : {};
+  let body = {};
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch (error) {
+      if (response.ok) throw error;
+    }
+  }
 
   if (!response.ok) {
-    const message = body?.error?.message || body?.message || response.statusText;
+    const message = body?.error?.message || body?.message || text.trim() || response.statusText;
     const requestError = new Error(`${response.status} ${message}`);
     requestError.status = response.status;
     requestError.code = body?.error?.code || body?.code || null;
