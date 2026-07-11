@@ -6,6 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import * as syncLib from "./miniprogram-sync-lib.mjs";
+
 import {
   DIRECTORY_EXCLUDES,
   ROOT_EXCLUDES,
@@ -32,6 +34,15 @@ function writeFile(root, relativePath, contents) {
   const filePath = path.join(root, ...relativePath.split("/"));
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, contents);
+}
+
+function writeValidSourceIdentity(root, overrides = {}) {
+  writeFile(root, "project.config.json", `${JSON.stringify({
+    projectArchitecture: "multiPlatform",
+    compileType: "miniprogram",
+    ...overrides
+  })}\n`);
+  writeFile(root, "app.json", "{}\n");
 }
 
 test("exports the required root and directory exclusions", () => {
@@ -113,13 +124,32 @@ test("write preserves an existing empty directory for a stale deleted path", () 
   const existingEmptyDirectory = path.join(targetRoot, "already-empty");
   fs.mkdirSync(existingEmptyDirectory, { recursive: true });
 
-  applyMiniprogramSync(sourceRoot, targetRoot, {
-    added: [],
-    changed: [],
-    deleted: ["already-empty/missing.js"]
-  });
+  assert.throws(
+    () => applyMiniprogramSync(sourceRoot, targetRoot, {
+      added: [],
+      changed: [],
+      deleted: ["already-empty/missing.js"]
+    }),
+    /stale sync differences/i
+  );
 
   assert.equal(fs.existsSync(existingEmptyDirectory), true);
+});
+
+test("write rejects stale deleted paths when source and target still contain the file", () => {
+  const { sourceRoot, targetRoot } = createWorkspace();
+  writeFile(sourceRoot, "keep.js", "keep\n");
+  writeFile(targetRoot, "keep.js", "keep\n");
+
+  assert.throws(
+    () => applyMiniprogramSync(sourceRoot, targetRoot, {
+      added: [],
+      changed: [],
+      deleted: ["keep.js"]
+    }),
+    /stale sync differences/i
+  );
+  assert.equal(fs.readFileSync(path.join(targetRoot, "keep.js"), "utf8"), "keep\n");
 });
 
 test("listSyncFiles excludes private root files and generated directories", () => {
@@ -131,6 +161,141 @@ test("listSyncFiles excludes private root files and generated directories", () =
   }
 
   assert.deepEqual(listSyncFiles(sourceRoot), ["app.js"]);
+});
+
+test("case-folded protected files and directories are excluded across list, compare, and apply", () => {
+  const { sourceRoot, targetRoot } = createWorkspace();
+  writeFile(sourceRoot, "PROJECT.CONFIG.JSON", "source protected\n");
+  writeFile(sourceRoot, ".CACHE/tool-state.json", "cache\n");
+  writeFile(sourceRoot, "MINIPROGRAM_NPM/x.js", "generated\n");
+  writeFile(targetRoot, "PROJECT.CONFIG.JSON", "target protected\n");
+
+  assert.deepEqual(listSyncFiles(sourceRoot), []);
+  assert.deepEqual(compareMiniprogramTrees(sourceRoot, targetRoot), {
+    added: [],
+    changed: [],
+    deleted: []
+  });
+  assert.throws(
+    () => applyMiniprogramSync(sourceRoot, targetRoot, {
+      added: [],
+      changed: ["PROJECT.CONFIG.JSON"],
+      deleted: []
+    }),
+    /excluded root file/i
+  );
+  assert.equal(
+    fs.readFileSync(path.join(targetRoot, "PROJECT.CONFIG.JSON"), "utf8"),
+    "target protected\n"
+  );
+
+  const fileRoot = fs.mkdtempSync(path.join(os.tmpdir(), "miniprogram-cache-file-"));
+  writeFile(fileRoot, ".cache", "ordinary file\n");
+  assert.deepEqual(listSyncFiles(fileRoot), []);
+});
+
+test("write replaces a target hardlink without changing the outside inode", () => {
+  const { root, sourceRoot, targetRoot } = createWorkspace();
+  const outsidePath = path.join(root, "outside.txt");
+  const targetPath = path.join(targetRoot, "app.js");
+  writeFile(sourceRoot, "app.js", "source bytes\n");
+  fs.writeFileSync(outsidePath, "outside bytes\n");
+  fs.linkSync(outsidePath, targetPath);
+
+  const differences = compareMiniprogramTrees(sourceRoot, targetRoot);
+  applyMiniprogramSync(sourceRoot, targetRoot, differences);
+
+  assert.equal(fs.readFileSync(targetPath, "utf8"), "source bytes\n");
+  assert.equal(fs.readFileSync(outsidePath, "utf8"), "outside bytes\n");
+});
+
+test("validateSourceIdentity accepts a real multiPlatform miniprogram source", () => {
+  const { sourceRoot } = createWorkspace();
+  writeValidSourceIdentity(sourceRoot);
+
+  assert.doesNotThrow(() => syncLib.validateSourceIdentity(sourceRoot));
+});
+
+test("validateSourceIdentity rejects empty sources and missing project.config.json", () => {
+  const { sourceRoot } = createWorkspace();
+  assert.throws(() => syncLib.validateSourceIdentity(sourceRoot), /project\.config\.json/i);
+  writeFile(sourceRoot, "app.json", "{}\n");
+  assert.throws(() => syncLib.validateSourceIdentity(sourceRoot), /project\.config\.json/i);
+});
+
+test("validateSourceIdentity rejects invalid project config JSON", () => {
+  const { sourceRoot } = createWorkspace();
+  writeFile(sourceRoot, "project.config.json", "not json\n");
+  writeFile(sourceRoot, "app.json", "{}\n");
+
+  assert.throws(() => syncLib.validateSourceIdentity(sourceRoot), /invalid.*project\.config\.json/i);
+});
+
+test("validateSourceIdentity rejects non-multiPlatform projects", () => {
+  const { sourceRoot } = createWorkspace();
+  writeValidSourceIdentity(sourceRoot, { projectArchitecture: "traditional" });
+
+  assert.throws(() => syncLib.validateSourceIdentity(sourceRoot), /multiPlatform/i);
+});
+
+test("validateSourceIdentity rejects non-miniprogram compile types", () => {
+  const { sourceRoot } = createWorkspace();
+  writeValidSourceIdentity(sourceRoot, { compileType: "plugin" });
+
+  assert.throws(() => syncLib.validateSourceIdentity(sourceRoot), /compileType.*miniprogram/i);
+});
+
+test("validateSourceIdentity requires app.json to be a regular file", () => {
+  const { sourceRoot } = createWorkspace();
+  writeFile(sourceRoot, "project.config.json", `${JSON.stringify({
+    projectArchitecture: "multiPlatform",
+    compileType: "miniprogram"
+  })}\n`);
+  fs.mkdirSync(path.join(sourceRoot, "app.json"));
+
+  assert.throws(() => syncLib.validateSourceIdentity(sourceRoot), /app\.json.*regular file/i);
+});
+
+test("validateMiniprogramRoots rejects equal and overlapping trees", () => {
+  const { root, sourceRoot, targetRoot } = createWorkspace();
+  assert.throws(
+    () => syncLib.validateMiniprogramRoots(sourceRoot, sourceRoot),
+    /same|overlap/i
+  );
+
+  const nestedTarget = path.join(sourceRoot, "nested-target");
+  fs.mkdirSync(nestedTarget);
+  assert.throws(
+    () => syncLib.validateMiniprogramRoots(sourceRoot, nestedTarget),
+    /overlap/i
+  );
+
+  const nestedSource = path.join(targetRoot, "nested-source");
+  fs.mkdirSync(nestedSource);
+  assert.throws(
+    () => syncLib.validateMiniprogramRoots(nestedSource, targetRoot),
+    /overlap/i
+  );
+  assert.equal(fs.existsSync(root), true);
+});
+
+test("validateMiniprogramRoots rejects a symlink or reparse root", (t) => {
+  const { root, sourceRoot, targetRoot } = createWorkspace();
+  const linkedSource = path.join(root, "linked-source");
+  try {
+    fs.symlinkSync(sourceRoot, linkedSource, "junction");
+  } catch (error) {
+    if (error?.code === "EPERM") {
+      t.skip("Creating a Windows junction is not permitted in this environment.");
+      return;
+    }
+    throw error;
+  }
+
+  assert.throws(
+    () => syncLib.validateMiniprogramRoots(linkedSource, targetRoot),
+    /symbolic link|reparse/i
+  );
 });
 
 test("repository mirror guard refuses write when apps/miniprogram is dirty", async () => {
@@ -235,6 +400,37 @@ test("CLI check reports concrete drift arrays and does not write the repository 
   assert.deepEqual(fs.readFileSync(path.join(targetRoot, "app.js")), targetAppBefore);
   assert.equal(fs.existsSync(path.join(targetRoot, "pages", "task5-sync-added.js")), false);
   assert.equal(fs.existsSync(path.join(targetRoot, "utils", "api.js")), true);
+});
+
+test("CLI rejects invalid source identity before reporting deletion arrays", () => {
+  const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "miniapp-invalid-source-"));
+  writeFile(sourceRoot, "orphan.js", "not a miniprogram project\n");
+  const targetAppPath = path.join(repoRoot, "apps", "miniprogram", "app.js");
+  const targetAppBefore = fs.readFileSync(targetAppPath);
+
+  const result = spawnSync(process.execPath, [cliPath, "--check"], {
+    cwd: repoRoot,
+    env: { ...process.env, JH_MINIAPP_TARGET: sourceRoot },
+    encoding: "utf8"
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /project\.config\.json/i);
+  assert.doesNotMatch(result.stdout, /"deleted"/);
+  assert.deepEqual(fs.readFileSync(targetAppPath), targetAppBefore);
+});
+
+test("CLI rejects source and target overlap before compare", () => {
+  const targetRoot = path.join(repoRoot, "apps", "miniprogram");
+  const result = spawnSync(process.execPath, [cliPath, "--check"], {
+    cwd: repoRoot,
+    env: { ...process.env, JH_MINIAPP_TARGET: targetRoot },
+    encoding: "utf8"
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /same|overlap/i);
+  assert.doesNotMatch(result.stdout, /"deleted"/);
 });
 
 test("CLI rejects unknown modes", () => {

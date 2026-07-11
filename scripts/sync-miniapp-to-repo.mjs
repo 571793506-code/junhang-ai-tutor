@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import {
   applyMiniprogramSync,
   assertRepositoryMirrorClean,
-  compareMiniprogramTrees
+  compareMiniprogramTrees,
+  validateMiniprogramRoots,
+  validateSourceIdentity
 } from "./miniprogram-sync-lib.mjs";
 
 const mode = process.argv[2];
@@ -32,6 +34,8 @@ if (process.argv.length !== 3 || !["--check", "--write"].includes(mode)) {
   });
 
   try {
+    validateMiniprogramRoots(sourceRoot, targetRoot);
+    validateSourceIdentity(sourceRoot);
     if (mode === "--write") {
       await assertRepositoryMirrorClean(repoRoot, runGit);
     }

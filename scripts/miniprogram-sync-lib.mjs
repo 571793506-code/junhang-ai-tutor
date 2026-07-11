@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 export const ROOT_EXCLUDES = new Set([
   "project.config.json",
@@ -18,8 +19,20 @@ export const DIRECTORY_EXCLUDES = new Set([
   "miniprogram_npm"
 ]);
 
+const ROOT_EXCLUDE_KEYS = new Set([...ROOT_EXCLUDES].map((item) => item.toLowerCase()));
+const DIRECTORY_EXCLUDE_KEYS = new Set([...DIRECTORY_EXCLUDES].map((item) => item.toLowerCase()));
+
 function toPosixPath(relativePath) {
   return relativePath.split(path.sep).join("/");
+}
+
+export function isSyncPathExcluded(relativePath) {
+  const parts = relativePath.split(/[\\/]/).filter(Boolean);
+  const lowerParts = parts.map((part) => part.toLowerCase());
+  return (
+    (lowerParts.length === 1 && ROOT_EXCLUDE_KEYS.has(lowerParts[0])) ||
+    lowerParts.some((part) => DIRECTORY_EXCLUDE_KEYS.has(part))
+  );
 }
 
 function validateRelativeSyncPath(relativePath) {
@@ -34,10 +47,10 @@ function validateRelativeSyncPath(relativePath) {
   if (parts.some((part) => part === "" || part === "." || part === "..")) {
     throw new Error(`Sync path must not escape with relative segments: ${relativePath}`);
   }
-  if (parts.length === 1 && ROOT_EXCLUDES.has(parts[0])) {
+  if (parts.length === 1 && ROOT_EXCLUDE_KEYS.has(parts[0].toLowerCase())) {
     throw new Error(`Sync path is an excluded root file: ${relativePath}`);
   }
-  if (parts.some((part) => DIRECTORY_EXCLUDES.has(part))) {
+  if (parts.some((part) => DIRECTORY_EXCLUDE_KEYS.has(part.toLowerCase()))) {
     throw new Error(`Sync path is inside an excluded directory: ${relativePath}`);
   }
 
@@ -75,11 +88,78 @@ function assertNoSymbolicLinkPath(root, candidate) {
   }
 }
 
-export function listSyncFiles(root) {
+function assertDirectoryRoot(root, label) {
   const resolvedRoot = path.resolve(root);
-  if (!fs.existsSync(resolvedRoot) || !fs.statSync(resolvedRoot).isDirectory()) {
-    throw new Error(`Miniprogram sync root not found: ${resolvedRoot}`);
+  if (!fs.existsSync(resolvedRoot)) {
+    throw new Error(`${label} root not found: ${resolvedRoot}`);
   }
+  const stat = fs.lstatSync(resolvedRoot);
+  if (stat.isSymbolicLink()) {
+    throw new Error(`Symbolic link or reparse point is not allowed: ${resolvedRoot}`);
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`${label} root must be a directory: ${resolvedRoot}`);
+  }
+  return resolvedRoot;
+}
+
+function caseFoldedRealPath(root) {
+  return fs.realpathSync.native(root).replace(/[\\/]+/g, path.sep).toLowerCase();
+}
+
+export function validateMiniprogramRoots(sourceRoot, targetRoot) {
+  const resolvedSourceRoot = assertDirectoryRoot(sourceRoot, "Source");
+  const resolvedTargetRoot = assertDirectoryRoot(targetRoot, "Target");
+  const sourceKey = caseFoldedRealPath(resolvedSourceRoot);
+  const targetKey = caseFoldedRealPath(resolvedTargetRoot);
+  const sourcePrefix = `${sourceKey}${path.sep}`;
+  const targetPrefix = `${targetKey}${path.sep}`;
+
+  if (sourceKey === targetKey) {
+    throw new Error("Source and target roots must not be the same directory.");
+  }
+  if (sourceKey.startsWith(targetPrefix) || targetKey.startsWith(sourcePrefix)) {
+    throw new Error("Source and target roots must not overlap.");
+  }
+
+  return { sourceRoot: resolvedSourceRoot, targetRoot: resolvedTargetRoot };
+}
+
+function assertRegularFile(filePath, label) {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`${label} not found: ${filePath}`);
+  }
+  const stat = fs.lstatSync(filePath);
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error(`${label} must be a regular file: ${filePath}`);
+  }
+}
+
+export function validateSourceIdentity(sourceRoot) {
+  const resolvedSourceRoot = assertDirectoryRoot(sourceRoot, "Source");
+  const projectConfigPath = path.join(resolvedSourceRoot, "project.config.json");
+  const appJsonPath = path.join(resolvedSourceRoot, "app.json");
+  assertRegularFile(projectConfigPath, "project.config.json");
+  assertRegularFile(appJsonPath, "app.json");
+
+  let projectConfig;
+  try {
+    projectConfig = JSON.parse(fs.readFileSync(projectConfigPath, "utf8"));
+  } catch (error) {
+    throw new Error(`Invalid project.config.json: ${error.message}`);
+  }
+  if (projectConfig.projectArchitecture !== "multiPlatform") {
+    throw new Error("project.config.json projectArchitecture must be multiPlatform.");
+  }
+  if (projectConfig.compileType !== "miniprogram") {
+    throw new Error("project.config.json compileType must be miniprogram.");
+  }
+
+  return projectConfig;
+}
+
+export function listSyncFiles(root) {
+  const resolvedRoot = assertDirectoryRoot(root, "Miniprogram sync");
   assertNoSymbolicLinkPath(resolvedRoot, resolvedRoot);
 
   const realRoot = fs.realpathSync.native(resolvedRoot);
@@ -88,8 +168,7 @@ export function listSyncFiles(root) {
   function walk(directory, relativeDirectory = "") {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
-      if (!relativeDirectory && ROOT_EXCLUDES.has(entry.name)) continue;
-      if (DIRECTORY_EXCLUDES.has(entry.name) && entry.isDirectory()) continue;
+      if (isSyncPathExcluded(relativePath)) continue;
 
       const fullPath = path.join(directory, entry.name);
       if (entry.isSymbolicLink() || fs.lstatSync(fullPath).isSymbolicLink()) {
@@ -119,6 +198,7 @@ function filePath(root, relativePath) {
 }
 
 export function compareMiniprogramTrees(sourceRoot, targetRoot) {
+  validateMiniprogramRoots(sourceRoot, targetRoot);
   const sourceFiles = listSyncFiles(sourceRoot);
   const targetFiles = listSyncFiles(targetRoot);
   const sourceSet = new Set(sourceFiles);
@@ -138,6 +218,24 @@ export function compareMiniprogramTrees(sourceRoot, targetRoot) {
     changed: changed.sort(),
     deleted: deleted.sort()
   };
+}
+
+function validateDifferences(differences) {
+  const validated = {};
+  for (const key of ["added", "changed", "deleted"]) {
+    if (!Array.isArray(differences?.[key])) {
+      throw new Error(`Sync differences ${key} must be an array.`);
+    }
+    validated[key] = differences[key].map(validateRelativeSyncPath);
+  }
+  return validated;
+}
+
+function differencesMatch(left, right) {
+  return ["added", "changed", "deleted"].every((key) => (
+    left[key].length === right[key].length &&
+    left[key].every((item, index) => item === right[key][index])
+  ));
 }
 
 function removeEmptyParentDirectories(targetRoot, deletedPaths) {
@@ -168,13 +266,79 @@ function removeEmptyParentDirectories(targetRoot, deletedPaths) {
   }
 }
 
+function replaceTargetFile(sourceRoot, targetRoot, relativePath, targetExists) {
+  const sourcePath = filePath(sourceRoot, relativePath);
+  const targetPath = filePath(targetRoot, relativePath);
+  const targetDirectory = path.dirname(targetPath);
+  assertPathInside(sourceRoot, sourcePath);
+  assertPathInside(targetRoot, targetPath);
+  assertNoSymbolicLinkPath(sourceRoot, sourcePath);
+  assertNoSymbolicLinkPath(targetRoot, targetPath);
+  if (!fs.existsSync(sourcePath) || !fs.lstatSync(sourcePath).isFile()) {
+    throw new Error(`Sync source file not found: ${relativePath}`);
+  }
+
+  fs.mkdirSync(targetDirectory, { recursive: true });
+  assertNoSymbolicLinkPath(targetRoot, targetDirectory);
+  const temporaryPath = assertPathInside(
+    targetRoot,
+    path.join(targetDirectory, `.miniprogram-sync-${randomUUID()}.tmp`)
+  );
+  let temporaryExists = false;
+
+  try {
+    fs.copyFileSync(sourcePath, temporaryPath, fs.constants.COPYFILE_EXCL);
+    temporaryExists = true;
+    assertPathInside(targetRoot, temporaryPath);
+    assertNoSymbolicLinkPath(targetRoot, temporaryPath);
+    if (!fs.lstatSync(temporaryPath).isFile()) {
+      throw new Error(`Temporary sync entry is not a regular file: ${temporaryPath}`);
+    }
+
+    if (targetExists) {
+      assertPathInside(targetRoot, targetPath);
+      assertNoSymbolicLinkPath(targetRoot, targetPath);
+      if (!fs.existsSync(targetPath) || !fs.lstatSync(targetPath).isFile()) {
+        throw new Error(`Target changed during sync: ${relativePath}`);
+      }
+      fs.unlinkSync(targetPath);
+    } else if (fs.existsSync(targetPath)) {
+      throw new Error(`Target changed during sync: ${relativePath}`);
+    }
+
+    assertPathInside(targetRoot, temporaryPath);
+    assertPathInside(targetRoot, targetPath);
+    assertNoSymbolicLinkPath(targetRoot, targetDirectory);
+    fs.renameSync(temporaryPath, targetPath);
+    temporaryExists = false;
+  } finally {
+    if (temporaryExists && fs.existsSync(temporaryPath)) {
+      assertPathInside(targetRoot, temporaryPath);
+      fs.unlinkSync(temporaryPath);
+    }
+  }
+}
+
 export function applyMiniprogramSync(sourceRoot, targetRoot, differences) {
-  const resolvedSourceRoot = path.resolve(sourceRoot);
-  const resolvedTargetRoot = path.resolve(targetRoot);
-  listSyncFiles(resolvedSourceRoot);
+  const { sourceRoot: resolvedSourceRoot, targetRoot: resolvedTargetRoot } = validateMiniprogramRoots(
+    sourceRoot,
+    targetRoot
+  );
+  const validatedDifferences = validateDifferences(differences);
+  const freshDifferences = compareMiniprogramTrees(resolvedSourceRoot, resolvedTargetRoot);
+  if (!differencesMatch(validatedDifferences, freshDifferences)) {
+    throw new Error("stale sync differences");
+  }
+
+  const allowedSourceFiles = new Set(listSyncFiles(resolvedSourceRoot));
+  for (const relativePath of [...validatedDifferences.added, ...validatedDifferences.changed]) {
+    if (!allowedSourceFiles.has(relativePath)) {
+      throw new Error(`Sync source path is not allowed: ${relativePath}`);
+    }
+  }
   const allowedTargetFiles = new Set(listSyncFiles(resolvedTargetRoot));
 
-  const deletedPaths = differences.deleted.map(validateRelativeSyncPath);
+  const deletedPaths = validatedDifferences.deleted;
   const actuallyDeletedPaths = [];
   for (const relativePath of deletedPaths) {
     const targetPath = filePath(resolvedTargetRoot, relativePath);
@@ -189,19 +353,14 @@ export function applyMiniprogramSync(sourceRoot, targetRoot, differences) {
   }
   removeEmptyParentDirectories(resolvedTargetRoot, actuallyDeletedPaths);
 
-  for (const relativePath of [...differences.added, ...differences.changed].map(validateRelativeSyncPath)) {
-    const sourcePath = filePath(resolvedSourceRoot, relativePath);
-    const targetPath = filePath(resolvedTargetRoot, relativePath);
-    assertPathInside(resolvedSourceRoot, sourcePath);
-    assertPathInside(resolvedTargetRoot, targetPath);
-    assertNoSymbolicLinkPath(resolvedSourceRoot, sourcePath);
-    assertNoSymbolicLinkPath(resolvedTargetRoot, targetPath);
-    if (!fs.existsSync(sourcePath) || !fs.lstatSync(sourcePath).isFile()) {
-      throw new Error(`Sync source file not found: ${relativePath}`);
+  for (const relativePath of validatedDifferences.added) {
+    replaceTargetFile(resolvedSourceRoot, resolvedTargetRoot, relativePath, false);
+  }
+  for (const relativePath of validatedDifferences.changed) {
+    if (!allowedTargetFiles.has(relativePath)) {
+      throw new Error(`Sync target path is not allowed: ${relativePath}`);
     }
-    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-    assertNoSymbolicLinkPath(resolvedTargetRoot, path.dirname(targetPath));
-    fs.copyFileSync(sourcePath, targetPath);
+    replaceTargetFile(resolvedSourceRoot, resolvedTargetRoot, relativePath, true);
   }
 }
 
