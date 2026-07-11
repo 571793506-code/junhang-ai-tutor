@@ -21,8 +21,10 @@
 
 - 微信开发者工具运行目录：优先读取 `JH_MINIAPP_TARGET`，未设置时使用 `%USERPROFILE%\WeChatProjects\miniapp-1`。
 - 仓库内可追踪源码目录：`apps/miniprogram`。
-- `miniapp-1` 的页面、组件、`utils/`、`styles/`、`assets/` 等非配置源码修改后，需要同步回 `apps/miniprogram` 同路径。
+- 从仓库恢复或更新运行目录时，使用 `cmd /c npm.cmd run sync:miniapp1`，方向固定为 `apps/miniprogram -> miniapp-1`。
+- 在 `miniapp-1` 修改页面、组件、`utils/`、`styles/`、`assets/` 等非配置源码后，先运行 `cmd /c npm.cmd run check:miniprogram-sync` 查看差异；人工确认后再显式运行 `cmd /c npm.cmd run sync:miniprogram-from-miniapp`，方向固定为 `miniapp-1 -> apps/miniprogram`。
 - 不要用 `apps/miniprogram` 覆盖 `miniapp-1` 的 `project.config.json`、`project.private.config.json`、`project.miniapp.json`、`app.miniapp.json`。
+- 普通验证命令只能检查，不得隐式调用 `sync:miniprogram-from-miniapp` 或 `--write`。
 
 ## 外部参考的本地化用法
 
@@ -50,6 +52,7 @@
 
 ## 验证
 
+- 检查运行目录是否需要回写仓库时运行 `cmd /c npm.cmd run check:miniprogram-sync`；差异状态会返回非零退出码，但不会写文件。
 - 修改小程序源码后运行 `cmd /c npm.cmd run check:miniprogram-js`。
 - 修改 `miniapp-1` 运行目录后运行 `cmd.exe /c .\jh.cmd check:miniapp1`。
 - 修改中文文案、提示词或可见状态后运行 `cmd /c npm.cmd run check:encoding`。

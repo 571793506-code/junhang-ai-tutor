@@ -56,6 +56,8 @@
     "open:wechat-devtools": "scripts\\wechat-devtools-open.cmd",
     "cleanup:selfcheck": "node scripts/run-with-env.mjs node scripts/cleanup-selfcheck-records.mjs",
     "sync:miniapp1": "node scripts/sync-miniprogram-to-miniapp.mjs",
+    "check:miniprogram-sync": "node scripts/sync-miniapp-to-repo.mjs --check",
+    "sync:miniprogram-from-miniapp": "node scripts/sync-miniapp-to-repo.mjs --write",
     "check:flow": "node scripts/system-flow-check.mjs",
     "check:encoding": "node scripts/encoding-guard-check.mjs",
     "check:encoding:generated": "node scripts/encoding-guard-check.mjs --include-generated",

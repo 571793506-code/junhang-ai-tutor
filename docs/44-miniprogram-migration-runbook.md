@@ -40,14 +40,14 @@
 
 - 小程序 AppID：`wxfffcd1d4636b8bc7`。
 - `apps/miniprogram/project.config.json` 已配置该 AppID。
-- 当前微信开发者工具运行项目是 `C:\Users\86188\WeChatProjects\miniapp-1`，该项目是 `multiPlatform` 多端项目。
-- 2026-06-05 已按最新要求切换为单一小程序工作项目：后续小程序开发、测试和修复都直接在 `C:\Users\86188\WeChatProjects\miniapp-1` 中进行。
+- 当前微信开发者工具运行项目优先读取 `JH_MINIAPP_TARGET`，未设置时使用 `%USERPROFILE%\WeChatProjects\miniapp-1`；该项目是 `multiPlatform` 多端项目。
+- 2026-06-05 已按最新要求切换为单一小程序工作项目：后续小程序开发、测试和修复都直接在上述运行目录中进行。
 - `apps/miniprogram` 只作为本次源代码转入来源，不再作为后续小程序开发入口。
 - 同步时必须保留 `miniapp-1` 自己的 `project.config.json`、`project.private.config.json`、`project.miniapp.json` 和 `app.miniapp.json`，不能用普通导出包覆盖。
 
 ### Git 可追踪边界
 
-`C:\Users\86188\WeChatProjects\miniapp-1` 是微信开发者工具的实际运行目录，但当前不是 Git 仓库。后续在 `miniapp-1` 中修改非配置源码后，必须把同路径源码同步回 `apps/miniprogram`，让小程序页面、样式、工具函数和共享文案进入本仓库 Git 管理。
+`JH_MINIAPP_TARGET` 或默认的 `%USERPROFILE%\WeChatProjects\miniapp-1` 是微信开发者工具的实际运行目录，但当前不是 Git 仓库。后续在 `miniapp-1` 中修改非配置源码后，必须把同路径源码同步回 `apps/miniprogram`，让小程序页面、样式、工具函数和共享文案进入本仓库 Git 管理。
 
 同步规则：
 
@@ -55,6 +55,13 @@
 - 页面、组件、`utils/`、`styles/`、`assets/` 等非配置源码改动，完成验证后同步到 `apps/miniprogram` 同路径。
 - 如果 `miniapp-1` 与 `apps/miniprogram` 路由不同，先用人工 diff 判断差异来源，不直接全量覆盖。
 - 每次同步后至少运行 `cmd.exe /c .\jh.cmd check:miniapp1`、`cmd.exe /c .\jh.cmd check:miniprogram-js` 和 `cmd.exe /c .\jh.cmd check:encoding`。
+
+双向同步命令必须明确方向：
+
+- `cmd /c npm.cmd run sync:miniapp1`：从 `apps/miniprogram` 恢复或更新 `miniapp-1` 运行目录。
+- `cmd /c npm.cmd run check:miniprogram-sync`：只读检查 `miniapp-1 -> apps/miniprogram` 的 `added`、`changed`、`deleted` 差异；有差异时退出码为 1，不写文件。
+- `cmd /c npm.cmd run sync:miniprogram-from-miniapp`：人工审查只读差异后，显式把 `miniapp-1` 的允许源码镜像回 `apps/miniprogram`；如果仓库 mirror 已 dirty，命令拒绝写入。
+- 普通 validation 不得自动调用 `sync:miniprogram-from-miniapp` 或任何 `--write` 模式。
 
 已收口差异：
 
@@ -134,7 +141,7 @@
 
 2026-06-07 已完成第一版迁移准备：
 
-- `C:\Users\86188\WeChatProjects\miniapp-1\pages\teacher\content\index.*` 已新增教师端“资料上下文”页面。
+- `%USERPROFILE%\WeChatProjects\miniapp-1\pages\teacher\content\index.*` 已新增教师端“资料上下文”页面；设置 `JH_MINIAPP_TARGET` 时以该目录为准。
 - 教师工作台已新增“资料上下文”入口。
 - 小程序 API 工具已接入 `GET /api/content/index`、`GET /api/knowledge/sources`、`POST /api/knowledge/sources/sync-content-index`、`POST /api/knowledge/sources`、`PATCH /api/knowledge/sources/:sourceId/review`。
 - 小程序端只展示资料索引摘要、资料来源、同步和教师复核状态，不展示完整 Markdown chunk，不重新实现 Markdown 转换、索引构建或路径守卫。
@@ -166,7 +173,7 @@ cmd.exe /c npm.cmd run typecheck --workspace apps/web
 
 ## 后续迁移顺序
 
-1. 直接在 `C:\Users\86188\WeChatProjects\miniapp-1` 修改小程序源码。
+1. 直接在 `JH_MINIAPP_TARGET` 或默认的 `%USERPROFILE%\WeChatProjects\miniapp-1` 修改小程序源码。
 2. 在微信开发者工具打开 `miniapp-1`，不要重新导入普通导出项目。
 3. 检查统一入口和三类登录页。
 4. 检查学生端五个真实模块和互动扩展入口。
@@ -177,7 +184,7 @@ cmd.exe /c npm.cmd run typecheck --workspace apps/web
 ## 打开当前多端项目
 
 ```bat
-cmd.exe /c call "C:\Program Files (x86)\Tencent\微信web开发者工具\cli.bat" open --project "C:\Users\86188\WeChatProjects\miniapp-1" --port 51197 --lang zh
+cmd.exe /c call "C:\Program Files (x86)\Tencent\微信web开发者工具\cli.bat" open --project "%USERPROFILE%\WeChatProjects\miniapp-1" --port 51197 --lang zh
 ```
 
-如果微信开发者工具仍显示旧界面，优先在开发者工具中点击“编译/刷新”。不要改用 `exports/.../wechat-importable-project`，否则会再次形成两个项目。
+如果设置了 `JH_MINIAPP_TARGET`，打开命令中的 `--project` 应使用该目录。微信开发者工具仍显示旧界面时，优先在开发者工具中点击“编译/刷新”。不要改用 `exports/.../wechat-importable-project`，否则会再次形成两个项目。
