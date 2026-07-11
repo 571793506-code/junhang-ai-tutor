@@ -239,6 +239,44 @@ test("normalizeQaModelOutput rejects encoded structured JSON strings", () => {
   }
 });
 
+test("normalizeQaModelOutput rejects nested structures inside a valid outer studentAnswer", () => {
+  const answers = [
+    "{\"learningSignal\":{\"confidence\":\"nested-secret\"}}",
+    "{\"answer\":\"alias-secret\"}",
+    "{\"studentAnswer\":42,\"note\":\"wrong-type-secret\"}"
+  ];
+
+  for (const studentAnswer of answers) {
+    const result = normalizeQaModelOutput(JSON.stringify({
+      studentAnswer,
+      learningSignal: validPayload.learningSignal
+    }));
+    assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+    assert.equal(result.structureValid, true);
+    assert.notEqual(result.learningSignal, null);
+    assert.equal(result.learningSignal.profileEligibility, false);
+    assert.equal(JSON.stringify(result).includes("secret"), false);
+  }
+});
+
+test("normalizeQaModelOutput drops restricted array items containing nested structures", () => {
+  const result = normalizeQaModelOutput(JSON.stringify({
+    studentAnswer: validPayload.studentAnswer,
+    learningSignal: {
+      ...validPayload.learningSignal,
+      knowledgePoints: ["{\"answer\":\"knowledge-secret\"}", "小数意义"],
+      misconceptionHypotheses: [
+        "prefix \"{\\\"learningSignal\\\":\\\"hypothesis-secret\\\"}\" suffix",
+        "需要继续观察"
+      ]
+    }
+  }));
+
+  assert.deepEqual(result.learningSignal.knowledgePoints, ["小数意义"]);
+  assert.deepEqual(result.learningSignal.misconceptionHypotheses, ["需要继续观察"]);
+  assert.equal(JSON.stringify(result).includes("secret"), false);
+});
+
 test("normalizeQaModelOutput fails closed when embedded scanning exceeds its work budget", () => {
   for (const size of [100 * 1024, 500 * 1024]) {
     const value = `${"{".repeat(256)}${"x".repeat(size - 256)}`;

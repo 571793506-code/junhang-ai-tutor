@@ -453,6 +453,33 @@ test("answerStudentQuestion separates HTTP success from unavailable content", as
   }
 });
 
+test("answerStudentQuestion marks valid outer responses with restricted nested answers unavailable", async () => {
+  const answers = [
+    "{\"learningSignal\":{\"confidence\":\"runtime-secret\"}}",
+    "{\"answer\":\"runtime-secret\"}",
+    "{\"studentAnswer\":42,\"note\":\"runtime-secret\"}"
+  ];
+
+  for (const studentAnswer of answers) {
+    const content = JSON.stringify({ studentAnswer, learningSignal: qaLearningSignal });
+    const { payloads, result } = await runQaCase({
+      body: JSON.stringify({ choices: [{ message: { content } }] })
+    });
+    assert.equal(payloads.length, 1);
+    assert.equal(result.available, false);
+    assert.equal(result.status, "unavailable");
+    assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+    assert.equal(result.answer, QA_UNAVAILABLE_ANSWER);
+    assert.equal(result.structureValid, true);
+    assert.equal(result.learningSignal.profileEligibility, false);
+    assert.equal(result.modelRun.status, "SUCCESS");
+    assert.equal(JSON.stringify({
+      studentAnswer: result.studentAnswer,
+      learningSignal: result.learningSignal
+    }).includes("runtime-secret"), false);
+  }
+});
+
 test("answerStudentQuestion does not escalate a Terra transport failure to Sol", async () => {
   const { payloads, result } = await runQaCase({
     status: 524,

@@ -122,13 +122,7 @@ function hasEncodedStructuredString(value, work) {
     if (character !== '"') continue;
     try {
       const decoded = JSON.parse(value.slice(start, index + 1));
-      if (typeof decoded === "string" && (
-        isJsonValue(decoded)
-        || hasEmbeddedJsonContainer(decoded, work)
-        || JSON_CODE_FENCE.test(decoded)
-        || KNOWN_SCHEMA_LABEL.test(decoded)
-        || OLD_ANSWER_ALIAS_LABEL.test(decoded)
-      )) return true;
+      if (typeof decoded === "string" && containsRestrictedStructure(decoded, work, false)) return true;
     } catch {
       // Invalid JSON string literals are not decoded or inspected as structured output.
     }
@@ -138,15 +132,31 @@ function hasEncodedStructuredString(value, work) {
   return false;
 }
 
+function containsRestrictedStructure(value, work = { used: 0 }, includeEncoded = true) {
+  const source = stripCodeFences(value).trim();
+  return isJsonValue(source)
+    || hasEmbeddedJsonContainer(source, work)
+    || (includeEncoded && hasEncodedStructuredString(source, work))
+    || JSON_CODE_FENCE.test(source)
+    || KNOWN_SCHEMA_LABEL.test(source)
+    || OLD_ANSWER_ALIAS_LABEL.test(source)
+    || UNQUOTED_INTERNAL_LABEL.test(source)
+    || QUOTED_ALWAYS_INTERNAL_FRAGMENT.test(source)
+    || QUOTED_ROUTE_INTERNAL_FRAGMENT.test(source);
+}
+
 function sanitizeRestrictedText(value, maxLength) {
   if (typeof value !== "string") return "";
-  const text = stripCodeFences(value)
+  const source = stripCodeFences(value);
+  const restricted = containsRestrictedStructure(source);
+  const text = source
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/<\/?(?:studentAnswer|learningSignal)>/gi, "")
     .replace(QUOTED_ALWAYS_INTERNAL_FRAGMENT, "")
     .replace(QUOTED_ROUTE_INTERNAL_FRAGMENT, "")
     .replace(INTERNAL_FIELD_FRAGMENT, "")
     .trim();
+  if (restricted && containsRestrictedStructure(text)) return "";
   return trimAndCap(text, maxLength);
 }
 
@@ -162,6 +172,7 @@ function extractMalformedStudentAnswer(source) {
 
 function sanitizeStudentAnswer(value) {
   const source = stripCodeFences(value).trim();
+  const restricted = containsRestrictedStructure(source);
   const extracted = extractMalformedStudentAnswer(source);
   const candidate = extracted || source;
   const lines = candidate
@@ -179,6 +190,7 @@ function sanitizeStudentAnswer(value) {
       .trim())
     .filter(Boolean);
   const answer = trimAndCap(lines.join("\n"), 2000);
+  if (restricted && containsRestrictedStructure(answer)) return "";
   return /[\p{L}\p{N}]/u.test(answer) ? answer : "";
 }
 
@@ -212,16 +224,7 @@ export function unavailableQaOutput(_reason) {
 export function normalizeQaModelOutput(text) {
   const source = toWellFormedText(text);
   const parsed = parseJsonObject(source);
-  const strippedSource = stripCodeFences(source).trim();
-  const scanWork = { used: 0 };
-  const structuredSource = isJsonValue(strippedSource)
-    || hasEmbeddedJsonContainer(strippedSource, scanWork)
-    || hasEncodedStructuredString(strippedSource, scanWork)
-    || JSON_CODE_FENCE.test(source)
-    || KNOWN_SCHEMA_LABEL.test(source)
-    || UNQUOTED_INTERNAL_LABEL.test(source)
-    || QUOTED_ALWAYS_INTERNAL_FRAGMENT.test(source)
-    || QUOTED_ROUTE_INTERNAL_FRAGMENT.test(source);
+  const structuredSource = containsRestrictedStructure(source);
   const signal = parsed?.learningSignal;
   const structureValid = typeof parsed?.studentAnswer === "string"
     && signal
