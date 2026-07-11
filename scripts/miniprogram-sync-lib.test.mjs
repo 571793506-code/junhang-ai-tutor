@@ -119,7 +119,7 @@ test("write mirrors allowed files and leaves the next check clean", () => {
   });
 });
 
-test("write preserves an existing empty directory for a stale deleted path", () => {
+test("write rejects an untrusted stale deleted plan and preserves an existing empty directory", () => {
   const { sourceRoot, targetRoot } = createWorkspace();
   const existingEmptyDirectory = path.join(targetRoot, "already-empty");
   fs.mkdirSync(existingEmptyDirectory, { recursive: true });
@@ -130,13 +130,13 @@ test("write preserves an existing empty directory for a stale deleted path", () 
       changed: [],
       deleted: ["already-empty/missing.js"]
     }),
-    /stale sync differences/i
+    /untrusted sync plan/i
   );
 
   assert.equal(fs.existsSync(existingEmptyDirectory), true);
 });
 
-test("write rejects stale deleted paths when source and target still contain the file", () => {
+test("write rejects a manually constructed stale deleted plan and preserves the target", () => {
   const { sourceRoot, targetRoot } = createWorkspace();
   writeFile(sourceRoot, "keep.js", "keep\n");
   writeFile(targetRoot, "keep.js", "keep\n");
@@ -147,7 +147,7 @@ test("write rejects stale deleted paths when source and target still contain the
       changed: [],
       deleted: ["keep.js"]
     }),
-    /stale sync differences/i
+    /untrusted sync plan/i
   );
   assert.equal(fs.readFileSync(path.join(targetRoot, "keep.js"), "utf8"), "keep\n");
 });
@@ -207,6 +207,90 @@ test("write replaces a target hardlink without changing the outside inode", () =
 
   assert.equal(fs.readFileSync(targetPath, "utf8"), "source bytes\n");
   assert.equal(fs.readFileSync(outsidePath, "utf8"), "outside bytes\n");
+});
+
+test("write rejects a plan when changed target content changed after compare", () => {
+  const { sourceRoot, targetRoot } = createWorkspace();
+  writeFile(sourceRoot, "app.js", "planned source\n");
+  writeFile(targetRoot, "app.js", "planned target\n");
+  const plan = compareMiniprogramTrees(sourceRoot, targetRoot);
+  writeFile(targetRoot, "app.js", "concurrent target\n");
+
+  assert.throws(
+    () => applyMiniprogramSync(sourceRoot, targetRoot, plan),
+    /stale (sync )?(content|plan)/i
+  );
+  assert.equal(fs.readFileSync(path.join(targetRoot, "app.js"), "utf8"), "concurrent target\n");
+});
+
+test("write rejects a plan when deleted target content changed after compare", () => {
+  const { sourceRoot, targetRoot } = createWorkspace();
+  writeFile(targetRoot, "obsolete.js", "planned delete\n");
+  const plan = compareMiniprogramTrees(sourceRoot, targetRoot);
+  writeFile(targetRoot, "obsolete.js", "concurrent target\n");
+
+  assert.throws(
+    () => applyMiniprogramSync(sourceRoot, targetRoot, plan),
+    /stale (sync )?(content|plan)/i
+  );
+  assert.equal(fs.readFileSync(path.join(targetRoot, "obsolete.js"), "utf8"), "concurrent target\n");
+});
+
+test("write rejects a plan when added source content changed after compare", () => {
+  const { sourceRoot, targetRoot } = createWorkspace();
+  writeFile(sourceRoot, "added.js", "planned source\n");
+  const plan = compareMiniprogramTrees(sourceRoot, targetRoot);
+  writeFile(sourceRoot, "added.js", "concurrent source\n");
+
+  assert.throws(
+    () => applyMiniprogramSync(sourceRoot, targetRoot, plan),
+    /stale (sync )?(content|plan)/i
+  );
+  assert.equal(fs.existsSync(path.join(targetRoot, "added.js")), false);
+});
+
+test("write rejects a plan when changed source content changed after compare", () => {
+  const { sourceRoot, targetRoot } = createWorkspace();
+  writeFile(sourceRoot, "app.js", "planned source\n");
+  writeFile(targetRoot, "app.js", "planned target\n");
+  const plan = compareMiniprogramTrees(sourceRoot, targetRoot);
+  writeFile(sourceRoot, "app.js", "concurrent source\n");
+
+  assert.throws(
+    () => applyMiniprogramSync(sourceRoot, targetRoot, plan),
+    /stale (sync )?(content|plan)/i
+  );
+  assert.equal(fs.readFileSync(path.join(targetRoot, "app.js"), "utf8"), "planned target\n");
+});
+
+test("write rejects a JSON-cloned plan without a trusted snapshot", () => {
+  const { sourceRoot, targetRoot } = createWorkspace();
+  writeFile(sourceRoot, "app.js", "planned source\n");
+  writeFile(targetRoot, "app.js", "planned target\n");
+  const plan = compareMiniprogramTrees(sourceRoot, targetRoot);
+  const clonedPlan = JSON.parse(JSON.stringify(plan));
+
+  assert.throws(
+    () => applyMiniprogramSync(sourceRoot, targetRoot, clonedPlan),
+    /untrusted sync plan/i
+  );
+  assert.equal(fs.readFileSync(path.join(targetRoot, "app.js"), "utf8"), "planned target\n");
+});
+
+test("write rejects a trusted plan used with different roots", () => {
+  const first = createWorkspace();
+  const second = createWorkspace();
+  writeFile(first.sourceRoot, "app.js", "planned source\n");
+  writeFile(first.targetRoot, "app.js", "planned target\n");
+  writeFile(second.sourceRoot, "app.js", "planned source\n");
+  writeFile(second.targetRoot, "app.js", "planned target\n");
+  const plan = compareMiniprogramTrees(first.sourceRoot, first.targetRoot);
+
+  assert.throws(
+    () => applyMiniprogramSync(second.sourceRoot, second.targetRoot, plan),
+    /stale sync plan.*roots|roots.*stale sync plan/i
+  );
+  assert.equal(fs.readFileSync(path.join(second.targetRoot, "app.js"), "utf8"), "planned target\n");
 });
 
 test("validateSourceIdentity accepts a real multiPlatform miniprogram source", () => {

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 export const ROOT_EXCLUDES = new Set([
   "project.config.json",
@@ -21,6 +21,7 @@ export const DIRECTORY_EXCLUDES = new Set([
 
 const ROOT_EXCLUDE_KEYS = new Set([...ROOT_EXCLUDES].map((item) => item.toLowerCase()));
 const DIRECTORY_EXCLUDE_KEYS = new Set([...DIRECTORY_EXCLUDES].map((item) => item.toLowerCase()));
+const SYNC_PLAN_SNAPSHOTS = new WeakMap();
 
 function toPosixPath(relativePath) {
   return relativePath.split(path.sep).join("/");
@@ -197,27 +198,95 @@ function filePath(root, relativePath) {
   return assertPathInside(root, path.resolve(root, ...normalized.split("/")));
 }
 
-export function compareMiniprogramTrees(sourceRoot, targetRoot) {
-  validateMiniprogramRoots(sourceRoot, targetRoot);
-  const sourceFiles = listSyncFiles(sourceRoot);
-  const targetFiles = listSyncFiles(targetRoot);
-  const sourceSet = new Set(sourceFiles);
-  const targetSet = new Set(targetFiles);
+function digestBytes(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
 
-  const added = sourceFiles.filter((relativePath) => !targetSet.has(relativePath));
-  const deleted = targetFiles.filter((relativePath) => !sourceSet.has(relativePath));
-  const changed = sourceFiles.filter((relativePath) => {
-    if (!targetSet.has(relativePath)) return false;
-    const sourceBytes = fs.readFileSync(filePath(sourceRoot, relativePath));
-    const targetBytes = fs.readFileSync(filePath(targetRoot, relativePath));
-    return !sourceBytes.equals(targetBytes);
-  });
+function captureFileState(root, relativePath) {
+  const absolutePath = filePath(root, relativePath);
+  assertNoSymbolicLinkPath(root, absolutePath);
 
+  let stat;
+  try {
+    stat = fs.lstatSync(absolutePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return { status: "absent" };
+    throw error;
+  }
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error(`Sync entry must be a regular file: ${relativePath}`);
+  }
+
+  const bytes = fs.readFileSync(absolutePath);
   return {
-    added: added.sort(),
-    changed: changed.sort(),
-    deleted: deleted.sort()
+    status: "present",
+    size: bytes.length,
+    digest: digestBytes(bytes),
+    bytes
   };
+}
+
+function snapshotFileState(state) {
+  if (state.status === "absent") return { status: "absent" };
+  return { status: "present", size: state.size, digest: state.digest };
+}
+
+function fileStatesMatch(left, right) {
+  if (left.status !== right.status) return false;
+  if (left.status === "absent") return true;
+  return left.size === right.size && left.digest === right.digest;
+}
+
+export function compareMiniprogramTrees(sourceRoot, targetRoot) {
+  const { sourceRoot: resolvedSourceRoot, targetRoot: resolvedTargetRoot } = validateMiniprogramRoots(
+    sourceRoot,
+    targetRoot
+  );
+  const sourceFiles = listSyncFiles(resolvedSourceRoot);
+  const targetFiles = listSyncFiles(resolvedTargetRoot);
+  const allFiles = [...new Set([...sourceFiles, ...targetFiles])].sort();
+  const states = new Map();
+  const added = [];
+  const changed = [];
+  const deleted = [];
+
+  for (const relativePath of allFiles) {
+    const sourceState = captureFileState(resolvedSourceRoot, relativePath);
+    const targetState = captureFileState(resolvedTargetRoot, relativePath);
+    states.set(relativePath, { source: sourceState, target: targetState });
+    if (sourceState.status === "present" && targetState.status === "absent") {
+      added.push(relativePath);
+    } else if (sourceState.status === "absent" && targetState.status === "present") {
+      deleted.push(relativePath);
+    } else if (
+      sourceState.status === "present" &&
+      targetState.status === "present" &&
+      !sourceState.bytes.equals(targetState.bytes)
+    ) {
+      changed.push(relativePath);
+    }
+  }
+
+  const plan = { added, changed, deleted };
+  const relevantStates = new Map();
+  for (const relativePath of [...added, ...changed, ...deleted]) {
+    const state = states.get(relativePath);
+    relevantStates.set(relativePath, {
+      source: snapshotFileState(state.source),
+      target: snapshotFileState(state.target)
+    });
+  }
+  SYNC_PLAN_SNAPSHOTS.set(plan, {
+    sourceRoot: caseFoldedRealPath(resolvedSourceRoot),
+    targetRoot: caseFoldedRealPath(resolvedTargetRoot),
+    differences: {
+      added: [...added],
+      changed: [...changed],
+      deleted: [...deleted]
+    },
+    files: relevantStates
+  });
+  return plan;
 }
 
 function validateDifferences(differences) {
@@ -236,6 +305,34 @@ function differencesMatch(left, right) {
     left[key].length === right[key].length &&
     left[key].every((item, index) => item === right[key][index])
   ));
+}
+
+function assertPlanPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath) {
+  const expected = planSnapshot.files.get(relativePath);
+  if (!expected) {
+    throw new Error(`stale sync plan content: missing snapshot for ${relativePath}`);
+  }
+  const sourceState = captureFileState(sourceRoot, relativePath);
+  const targetState = captureFileState(targetRoot, relativePath);
+  if (!fileStatesMatch(expected.source, sourceState)) {
+    throw new Error(`stale sync plan content: source changed for ${relativePath}`);
+  }
+  if (!fileStatesMatch(expected.target, targetState)) {
+    throw new Error(`stale sync plan content: target changed for ${relativePath}`);
+  }
+}
+
+function assertPlanContentUnchanged(planSnapshot, sourceRoot, targetRoot) {
+  for (const relativePath of planSnapshot.files.keys()) {
+    assertPlanPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath);
+  }
+}
+
+function assertPlanSourceUnchanged(planSnapshot, sourceRoot, relativePath) {
+  const expected = planSnapshot.files.get(relativePath)?.source;
+  if (!expected || !fileStatesMatch(expected, captureFileState(sourceRoot, relativePath))) {
+    throw new Error(`stale sync plan content: source changed for ${relativePath}`);
+  }
 }
 
 function removeEmptyParentDirectories(targetRoot, deletedPaths) {
@@ -266,7 +363,7 @@ function removeEmptyParentDirectories(targetRoot, deletedPaths) {
   }
 }
 
-function replaceTargetFile(sourceRoot, targetRoot, relativePath, targetExists) {
+function replaceTargetFile(sourceRoot, targetRoot, relativePath, targetExists, planSnapshot) {
   const sourcePath = filePath(sourceRoot, relativePath);
   const targetPath = filePath(targetRoot, relativePath);
   const targetDirectory = path.dirname(targetPath);
@@ -278,6 +375,7 @@ function replaceTargetFile(sourceRoot, targetRoot, relativePath, targetExists) {
     throw new Error(`Sync source file not found: ${relativePath}`);
   }
 
+  assertPlanPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath);
   fs.mkdirSync(targetDirectory, { recursive: true });
   assertNoSymbolicLinkPath(targetRoot, targetDirectory);
   const temporaryPath = assertPathInside(
@@ -287,6 +385,7 @@ function replaceTargetFile(sourceRoot, targetRoot, relativePath, targetExists) {
   let temporaryExists = false;
 
   try {
+    assertPlanPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath);
     fs.copyFileSync(sourcePath, temporaryPath, fs.constants.COPYFILE_EXCL);
     temporaryExists = true;
     assertPathInside(targetRoot, temporaryPath);
@@ -294,16 +393,31 @@ function replaceTargetFile(sourceRoot, targetRoot, relativePath, targetExists) {
     if (!fs.lstatSync(temporaryPath).isFile()) {
       throw new Error(`Temporary sync entry is not a regular file: ${temporaryPath}`);
     }
+    const expectedSourceState = planSnapshot.files.get(relativePath).source;
+    const temporaryBytes = fs.readFileSync(temporaryPath);
+    const temporaryState = {
+      status: "present",
+      size: temporaryBytes.length,
+      digest: digestBytes(temporaryBytes)
+    };
+    if (!fileStatesMatch(expectedSourceState, temporaryState)) {
+      throw new Error(`stale sync plan content: temporary copy changed for ${relativePath}`);
+    }
 
     if (targetExists) {
+      assertPlanPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath);
       assertPathInside(targetRoot, targetPath);
       assertNoSymbolicLinkPath(targetRoot, targetPath);
       if (!fs.existsSync(targetPath) || !fs.lstatSync(targetPath).isFile()) {
         throw new Error(`Target changed during sync: ${relativePath}`);
       }
       fs.unlinkSync(targetPath);
-    } else if (fs.existsSync(targetPath)) {
-      throw new Error(`Target changed during sync: ${relativePath}`);
+      assertPlanSourceUnchanged(planSnapshot, sourceRoot, relativePath);
+      if (captureFileState(targetRoot, relativePath).status !== "absent") {
+        throw new Error(`stale sync plan content: target changed for ${relativePath}`);
+      }
+    } else {
+      assertPlanPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath);
     }
 
     assertPathInside(targetRoot, temporaryPath);
@@ -325,10 +439,25 @@ export function applyMiniprogramSync(sourceRoot, targetRoot, differences) {
     targetRoot
   );
   const validatedDifferences = validateDifferences(differences);
+  const planSnapshot = SYNC_PLAN_SNAPSHOTS.get(differences);
+  if (!planSnapshot) {
+    throw new Error("untrusted sync plan");
+  }
+  if (
+    planSnapshot.sourceRoot !== caseFoldedRealPath(resolvedSourceRoot) ||
+    planSnapshot.targetRoot !== caseFoldedRealPath(resolvedTargetRoot)
+  ) {
+    throw new Error("stale sync plan roots");
+  }
+  if (!differencesMatch(validatedDifferences, planSnapshot.differences)) {
+    throw new Error("stale sync plan differences");
+  }
+
   const freshDifferences = compareMiniprogramTrees(resolvedSourceRoot, resolvedTargetRoot);
   if (!differencesMatch(validatedDifferences, freshDifferences)) {
     throw new Error("stale sync differences");
   }
+  assertPlanContentUnchanged(planSnapshot, resolvedSourceRoot, resolvedTargetRoot);
 
   const allowedSourceFiles = new Set(listSyncFiles(resolvedSourceRoot));
   for (const relativePath of [...validatedDifferences.added, ...validatedDifferences.changed]) {
@@ -341,6 +470,7 @@ export function applyMiniprogramSync(sourceRoot, targetRoot, differences) {
   const deletedPaths = validatedDifferences.deleted;
   const actuallyDeletedPaths = [];
   for (const relativePath of deletedPaths) {
+    assertPlanPathUnchanged(planSnapshot, resolvedSourceRoot, resolvedTargetRoot, relativePath);
     const targetPath = filePath(resolvedTargetRoot, relativePath);
     assertPathInside(resolvedTargetRoot, targetPath);
     assertNoSymbolicLinkPath(resolvedTargetRoot, targetPath);
@@ -354,13 +484,13 @@ export function applyMiniprogramSync(sourceRoot, targetRoot, differences) {
   removeEmptyParentDirectories(resolvedTargetRoot, actuallyDeletedPaths);
 
   for (const relativePath of validatedDifferences.added) {
-    replaceTargetFile(resolvedSourceRoot, resolvedTargetRoot, relativePath, false);
+    replaceTargetFile(resolvedSourceRoot, resolvedTargetRoot, relativePath, false, planSnapshot);
   }
   for (const relativePath of validatedDifferences.changed) {
     if (!allowedTargetFiles.has(relativePath)) {
       throw new Error(`Sync target path is not allowed: ${relativePath}`);
     }
-    replaceTargetFile(resolvedSourceRoot, resolvedTargetRoot, relativePath, true);
+    replaceTargetFile(resolvedSourceRoot, resolvedTargetRoot, relativePath, true, planSnapshot);
   }
 }
 
