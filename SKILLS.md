@@ -47,6 +47,7 @@
 ## 常用验证
 
 ```bat
+cmd /c npm.cmd run check:skills
 cmd /c npm.cmd run check:encoding
 cmd /c npm.cmd run check --workspace apps/api
 cmd /c npm.cmd run check:content-context

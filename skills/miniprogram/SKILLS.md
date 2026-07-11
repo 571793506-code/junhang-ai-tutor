@@ -19,7 +19,7 @@
 
 ## 当前项目边界
 
-- 实际微信开发者工具运行目录：`C:\Users\86188\WeChatProjects\miniapp-1`。
+- 微信开发者工具运行目录：优先读取 `JH_MINIAPP_TARGET`，未设置时使用 `%USERPROFILE%\WeChatProjects\miniapp-1`。
 - 仓库内可追踪源码目录：`apps/miniprogram`。
 - `miniapp-1` 的页面、组件、`utils/`、`styles/`、`assets/` 等非配置源码修改后，需要同步回 `apps/miniprogram` 同路径。
 - 不要用 `apps/miniprogram` 覆盖 `miniapp-1` 的 `project.config.json`、`project.private.config.json`、`project.miniapp.json`、`app.miniapp.json`。
