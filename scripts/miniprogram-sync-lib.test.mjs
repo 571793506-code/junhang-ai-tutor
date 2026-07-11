@@ -194,6 +194,57 @@ test("case-folded protected files and directories are excluded across list, comp
   assert.deepEqual(listSyncFiles(fileRoot), []);
 });
 
+test("case-only drift with equal bytes is planned as delete plus add and preserves source casing", () => {
+  const { sourceRoot, targetRoot } = createWorkspace();
+  writeFile(sourceRoot, "Foo.js", "same bytes\n");
+  writeFile(targetRoot, "foo.js", "same bytes\n");
+
+  const plan = compareMiniprogramTrees(sourceRoot, targetRoot);
+  assert.deepEqual(plan, {
+    added: ["Foo.js"],
+    changed: [],
+    deleted: ["foo.js"]
+  });
+  applyMiniprogramSync(sourceRoot, targetRoot, plan);
+
+  assert.deepEqual(listSyncFiles(targetRoot), ["Foo.js"]);
+  assert.equal(fs.readFileSync(path.join(targetRoot, "Foo.js"), "utf8"), "same bytes\n");
+  assert.deepEqual(compareMiniprogramTrees(sourceRoot, targetRoot), {
+    added: [],
+    changed: [],
+    deleted: []
+  });
+});
+
+test("case-only drift with different bytes writes source bytes under source casing", () => {
+  const { sourceRoot, targetRoot } = createWorkspace();
+  writeFile(sourceRoot, "Foo.js", "source bytes\n");
+  writeFile(targetRoot, "foo.js", "target bytes\n");
+
+  const plan = compareMiniprogramTrees(sourceRoot, targetRoot);
+  assert.deepEqual(plan, {
+    added: ["Foo.js"],
+    changed: [],
+    deleted: ["foo.js"]
+  });
+  applyMiniprogramSync(sourceRoot, targetRoot, plan);
+
+  assert.deepEqual(listSyncFiles(targetRoot), ["Foo.js"]);
+  assert.equal(fs.readFileSync(path.join(targetRoot, "Foo.js"), "utf8"), "source bytes\n");
+  assert.deepEqual(compareMiniprogramTrees(sourceRoot, targetRoot), {
+    added: [],
+    changed: [],
+    deleted: []
+  });
+});
+
+test("buildCaseFoldedPathMap rejects duplicate folded keys with different spelling", () => {
+  assert.throws(
+    () => syncLib.buildCaseFoldedPathMap(["pages/Foo.js", "pages/foo.js"]),
+    /case-fold path collision/i
+  );
+});
+
 test("write replaces a target hardlink without changing the outside inode", () => {
   const { root, sourceRoot, targetRoot } = createWorkspace();
   const outsidePath = path.join(root, "outside.txt");

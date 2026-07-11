@@ -193,6 +193,24 @@ export function listSyncFiles(root) {
   return files.sort();
 }
 
+function caseFoldedPathKey(relativePath) {
+  return relativePath.replace(/\\/g, "/").toLowerCase();
+}
+
+export function buildCaseFoldedPathMap(paths) {
+  const foldedPaths = new Map();
+  for (const relativePath of paths) {
+    const posixPath = relativePath.replace(/\\/g, "/");
+    const foldedKey = caseFoldedPathKey(posixPath);
+    const existingPath = foldedPaths.get(foldedKey);
+    if (existingPath && existingPath !== posixPath) {
+      throw new Error(`case-fold path collision: ${existingPath} and ${posixPath}`);
+    }
+    foldedPaths.set(foldedKey, posixPath);
+  }
+  return foldedPaths;
+}
+
 function filePath(root, relativePath) {
   const normalized = validateRelativeSyncPath(relativePath);
   return assertPathInside(root, path.resolve(root, ...normalized.split("/")));
@@ -244,38 +262,47 @@ export function compareMiniprogramTrees(sourceRoot, targetRoot) {
   );
   const sourceFiles = listSyncFiles(resolvedSourceRoot);
   const targetFiles = listSyncFiles(resolvedTargetRoot);
-  const allFiles = [...new Set([...sourceFiles, ...targetFiles])].sort();
-  const states = new Map();
+  const sourcePaths = buildCaseFoldedPathMap(sourceFiles);
+  const targetPaths = buildCaseFoldedPathMap(targetFiles);
+  const allFoldedKeys = [...new Set([...sourcePaths.keys(), ...targetPaths.keys()])].sort();
+  const initialTrees = new Map();
   const added = [];
   const changed = [];
   const deleted = [];
 
-  for (const relativePath of allFiles) {
-    const sourceState = captureFileState(resolvedSourceRoot, relativePath);
-    const targetState = captureFileState(resolvedTargetRoot, relativePath);
-    states.set(relativePath, { source: sourceState, target: targetState });
-    if (sourceState.status === "present" && targetState.status === "absent") {
-      added.push(relativePath);
-    } else if (sourceState.status === "absent" && targetState.status === "present") {
-      deleted.push(relativePath);
-    } else if (
-      sourceState.status === "present" &&
-      targetState.status === "present" &&
-      !sourceState.bytes.equals(targetState.bytes)
-    ) {
-      changed.push(relativePath);
+  for (const foldedKey of allFoldedKeys) {
+    const sourcePath = sourcePaths.get(foldedKey) ?? null;
+    const targetPath = targetPaths.get(foldedKey) ?? null;
+    const sourceState = sourcePath
+      ? captureFileState(resolvedSourceRoot, sourcePath)
+      : { status: "absent" };
+    const targetState = targetPath
+      ? captureFileState(resolvedTargetRoot, targetPath)
+      : { status: "absent" };
+    initialTrees.set(foldedKey, {
+      source: { path: sourcePath, state: snapshotFileState(sourceState) },
+      target: { path: targetPath, state: snapshotFileState(targetState) }
+    });
+
+    if (sourcePath && targetPath && sourcePath !== targetPath) {
+      added.push(sourcePath);
+      deleted.push(targetPath);
+    } else if (sourcePath && !targetPath) {
+      added.push(sourcePath);
+    } else if (!sourcePath && targetPath) {
+      deleted.push(targetPath);
+    } else if (sourcePath && !sourceState.bytes.equals(targetState.bytes)) {
+      changed.push(sourcePath);
     }
   }
 
+  added.sort();
+  changed.sort();
+  deleted.sort();
   const plan = { added, changed, deleted };
-  const relevantStates = new Map();
-  for (const relativePath of [...added, ...changed, ...deleted]) {
-    const state = states.get(relativePath);
-    relevantStates.set(relativePath, {
-      source: snapshotFileState(state.source),
-      target: snapshotFileState(state.target)
-    });
-  }
+  const relevantKeys = new Set(
+    [...added, ...changed, ...deleted].map(caseFoldedPathKey)
+  );
   SYNC_PLAN_SNAPSHOTS.set(plan, {
     sourceRoot: caseFoldedRealPath(resolvedSourceRoot),
     targetRoot: caseFoldedRealPath(resolvedTargetRoot),
@@ -284,7 +311,9 @@ export function compareMiniprogramTrees(sourceRoot, targetRoot) {
       changed: [...changed],
       deleted: [...deleted]
     },
-    files: relevantStates
+    trees: new Map(
+      [...initialTrees].filter(([foldedKey]) => relevantKeys.has(foldedKey))
+    )
   });
   return plan;
 }
@@ -307,31 +336,105 @@ function differencesMatch(left, right) {
   ));
 }
 
-function assertPlanPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath) {
-  const expected = planSnapshot.files.get(relativePath);
-  if (!expected) {
+function assertTreeEntryUnchanged(root, currentPaths, foldedKey, expected, side) {
+  const currentPath = currentPaths.get(foldedKey) ?? null;
+  if (currentPath !== expected.path) {
+    throw new Error(`stale sync plan content: ${side} path changed for ${expected.path ?? foldedKey}`);
+  }
+  if (expected.path && !fileStatesMatch(expected.state, captureFileState(root, expected.path))) {
+    throw new Error(`stale sync plan content: ${side} changed for ${expected.path}`);
+  }
+}
+
+function currentPathMap(root) {
+  return buildCaseFoldedPathMap(listSyncFiles(root));
+}
+
+function planTreeEntry(planSnapshot, relativePath) {
+  const entry = planSnapshot.trees.get(caseFoldedPathKey(relativePath));
+  if (!entry) {
     throw new Error(`stale sync plan content: missing snapshot for ${relativePath}`);
   }
-  const sourceState = captureFileState(sourceRoot, relativePath);
-  const targetState = captureFileState(targetRoot, relativePath);
-  if (!fileStatesMatch(expected.source, sourceState)) {
-    throw new Error(`stale sync plan content: source changed for ${relativePath}`);
+  return entry;
+}
+
+function assertPlanContentUnchanged(planSnapshot, sourceRoot, targetRoot) {
+  const sourcePaths = currentPathMap(sourceRoot);
+  const targetPaths = currentPathMap(targetRoot);
+  for (const [foldedKey, entry] of planSnapshot.trees) {
+    assertTreeEntryUnchanged(sourceRoot, sourcePaths, foldedKey, entry.source, "source");
+    assertTreeEntryUnchanged(targetRoot, targetPaths, foldedKey, entry.target, "target");
   }
-  if (!fileStatesMatch(expected.target, targetState)) {
+}
+
+function assertDeletedPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath) {
+  const foldedKey = caseFoldedPathKey(relativePath);
+  const expected = planTreeEntry(planSnapshot, relativePath);
+  assertTreeEntryUnchanged(
+    sourceRoot,
+    currentPathMap(sourceRoot),
+    foldedKey,
+    expected.source,
+    "source"
+  );
+  assertTreeEntryUnchanged(
+    targetRoot,
+    currentPathMap(targetRoot),
+    foldedKey,
+    expected.target,
+    "target"
+  );
+}
+
+function assertAddedPathReady(planSnapshot, sourceRoot, targetRoot, relativePath) {
+  const foldedKey = caseFoldedPathKey(relativePath);
+  const expectedSource = planTreeEntry(planSnapshot, relativePath).source;
+  assertTreeEntryUnchanged(
+    sourceRoot,
+    currentPathMap(sourceRoot),
+    foldedKey,
+    expectedSource,
+    "source"
+  );
+  if (currentPathMap(targetRoot).has(foldedKey)) {
     throw new Error(`stale sync plan content: target changed for ${relativePath}`);
   }
 }
 
-function assertPlanContentUnchanged(planSnapshot, sourceRoot, targetRoot) {
-  for (const relativePath of planSnapshot.files.keys()) {
-    assertPlanPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath);
-  }
+function assertChangedPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath) {
+  const foldedKey = caseFoldedPathKey(relativePath);
+  const expected = planTreeEntry(planSnapshot, relativePath);
+  assertTreeEntryUnchanged(
+    sourceRoot,
+    currentPathMap(sourceRoot),
+    foldedKey,
+    expected.source,
+    "source"
+  );
+  assertTreeEntryUnchanged(
+    targetRoot,
+    currentPathMap(targetRoot),
+    foldedKey,
+    expected.target,
+    "target"
+  );
 }
 
 function assertPlanSourceUnchanged(planSnapshot, sourceRoot, relativePath) {
-  const expected = planSnapshot.files.get(relativePath)?.source;
-  if (!expected || !fileStatesMatch(expected, captureFileState(sourceRoot, relativePath))) {
-    throw new Error(`stale sync plan content: source changed for ${relativePath}`);
+  const foldedKey = caseFoldedPathKey(relativePath);
+  const expected = planTreeEntry(planSnapshot, relativePath).source;
+  assertTreeEntryUnchanged(
+    sourceRoot,
+    currentPathMap(sourceRoot),
+    foldedKey,
+    expected,
+    "source"
+  );
+}
+
+function assertTargetPathAbsent(targetRoot, relativePath) {
+  if (currentPathMap(targetRoot).has(caseFoldedPathKey(relativePath))) {
+    throw new Error(`stale sync plan content: target changed for ${relativePath}`);
   }
 }
 
@@ -375,7 +478,15 @@ function replaceTargetFile(sourceRoot, targetRoot, relativePath, targetExists, p
     throw new Error(`Sync source file not found: ${relativePath}`);
   }
 
-  assertPlanPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath);
+  const assertWritePathReady = () => {
+    if (targetExists) {
+      assertChangedPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath);
+    } else {
+      assertAddedPathReady(planSnapshot, sourceRoot, targetRoot, relativePath);
+    }
+  };
+
+  assertWritePathReady();
   fs.mkdirSync(targetDirectory, { recursive: true });
   assertNoSymbolicLinkPath(targetRoot, targetDirectory);
   const temporaryPath = assertPathInside(
@@ -385,7 +496,7 @@ function replaceTargetFile(sourceRoot, targetRoot, relativePath, targetExists, p
   let temporaryExists = false;
 
   try {
-    assertPlanPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath);
+    assertWritePathReady();
     fs.copyFileSync(sourcePath, temporaryPath, fs.constants.COPYFILE_EXCL);
     temporaryExists = true;
     assertPathInside(targetRoot, temporaryPath);
@@ -393,7 +504,7 @@ function replaceTargetFile(sourceRoot, targetRoot, relativePath, targetExists, p
     if (!fs.lstatSync(temporaryPath).isFile()) {
       throw new Error(`Temporary sync entry is not a regular file: ${temporaryPath}`);
     }
-    const expectedSourceState = planSnapshot.files.get(relativePath).source;
+    const expectedSourceState = planTreeEntry(planSnapshot, relativePath).source.state;
     const temporaryBytes = fs.readFileSync(temporaryPath);
     const temporaryState = {
       status: "present",
@@ -405,7 +516,7 @@ function replaceTargetFile(sourceRoot, targetRoot, relativePath, targetExists, p
     }
 
     if (targetExists) {
-      assertPlanPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath);
+      assertWritePathReady();
       assertPathInside(targetRoot, targetPath);
       assertNoSymbolicLinkPath(targetRoot, targetPath);
       if (!fs.existsSync(targetPath) || !fs.lstatSync(targetPath).isFile()) {
@@ -413,11 +524,9 @@ function replaceTargetFile(sourceRoot, targetRoot, relativePath, targetExists, p
       }
       fs.unlinkSync(targetPath);
       assertPlanSourceUnchanged(planSnapshot, sourceRoot, relativePath);
-      if (captureFileState(targetRoot, relativePath).status !== "absent") {
-        throw new Error(`stale sync plan content: target changed for ${relativePath}`);
-      }
+      assertTargetPathAbsent(targetRoot, relativePath);
     } else {
-      assertPlanPathUnchanged(planSnapshot, sourceRoot, targetRoot, relativePath);
+      assertWritePathReady();
     }
 
     assertPathInside(targetRoot, temporaryPath);
@@ -470,7 +579,12 @@ export function applyMiniprogramSync(sourceRoot, targetRoot, differences) {
   const deletedPaths = validatedDifferences.deleted;
   const actuallyDeletedPaths = [];
   for (const relativePath of deletedPaths) {
-    assertPlanPathUnchanged(planSnapshot, resolvedSourceRoot, resolvedTargetRoot, relativePath);
+    assertDeletedPathUnchanged(
+      planSnapshot,
+      resolvedSourceRoot,
+      resolvedTargetRoot,
+      relativePath
+    );
     const targetPath = filePath(resolvedTargetRoot, relativePath);
     assertPathInside(resolvedTargetRoot, targetPath);
     assertNoSymbolicLinkPath(resolvedTargetRoot, targetPath);
