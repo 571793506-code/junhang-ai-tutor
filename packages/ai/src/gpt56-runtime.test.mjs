@@ -391,7 +391,7 @@ test("answerStudentQuestion infers a safe mode when input.mode is invalid", asyn
 test("answerStudentQuestion keeps malformed and blocked outputs on one Terra call", async () => {
   const cases = [
     {
-      content: "```text\n先理解十分之一，再看 0.5。\nprovider: Terra\ndebug: hidden\n```",
+      content: "先理解十分之一，再看 0.5。",
       expectedAnswer: "先理解十分之一，再看 0.5。",
       structureValid: false,
       learningSignal: null

@@ -132,22 +132,12 @@ test("normalizeQaModelOutput forces the approved refusal for blocked content", (
   assert.equal(JSON.stringify(result).includes("原始回答"), false);
 });
 
-test("normalizeQaModelOutput sanitizes malformed plain text without creating an eligible signal", () => {
-  const result = normalizeQaModelOutput([
-    "```text",
-    "<studentAnswer>先理解十分之一，再看 0.5。</studentAnswer>",
-    "provider: Terra",
-    "model: gpt-5.6",
-    "prompt: hidden",
-    "debug: hidden",
-    "```"
-  ].join("\n"));
+test("normalizeQaModelOutput allows an explicit natural-language fallback", () => {
+  const result = normalizeQaModelOutput("先理解十分之一，再看 0.5。");
 
   assert.equal(result.structureValid, false);
   assert.equal(result.studentAnswer, "先理解十分之一，再看 0.5。");
   assert.equal(result.learningSignal, null);
-  assert.equal(JSON.stringify(result).includes("Terra"), false);
-  assert.equal(JSON.stringify(result).includes("gpt-5.6"), false);
 });
 
 test("normalizeQaModelOutput never echoes parseable JSON with a non-string studentAnswer", () => {
@@ -195,6 +185,33 @@ test("normalizeQaModelOutput never treats structured fragments as plain-text ans
     assert.equal(result.studentAnswer.includes("fragment-secret"), false);
     assert.equal(result.studentAnswer.includes("learningSignal"), false);
   }
+});
+
+test("normalizeQaModelOutput blocks embedded and fenced structured output", () => {
+  const fragments = [
+    "Here is JSON: {\"studentAnswer\":42,\"learningSignal\":{\"knowledgePoints\":[\"prefix-secret\"]},\"provider\":\"Terra-prefix\"}",
+    "模型响应如下：\n```json\n{\"studentAnswer\":\"fenced-secret\",\"learningSignal\":{}}\n```\n请查收",
+    "说明在前。\nstudentAnswer: \"multiline-secret\"\nlearningSignal: {\n  knowledgePoints: [\"hidden-point\"]\n}\nprovider: Terra-multiline",
+    "结果是 {\"answer\":\"suffix-secret\"}，以上为内部输出。"
+  ];
+
+  for (const fragment of fragments) {
+    const result = normalizeQaModelOutput(fragment);
+    assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+    assert.equal(result.structureValid, false);
+    assert.equal(result.learningSignal, null);
+    for (const forbidden of ["studentAnswer", "learningSignal", "provider", "secret", "Terra", "hidden-point"]) {
+      assert.equal(result.studentAnswer.includes(forbidden), false);
+    }
+  }
+});
+
+test("normalizeQaModelOutput does not over-block ordinary mathematical braces", () => {
+  const result = normalizeQaModelOutput("集合 {1, 2} 有两个元素。");
+
+  assert.equal(result.studentAnswer, "集合 {1, 2} 有两个元素。");
+  assert.equal(result.structureValid, false);
+  assert.equal(result.learningSignal, null);
 });
 
 test("normalizeQaModelOutput uses approved fallback copy when malformed text is unsafe or unreadable", () => {

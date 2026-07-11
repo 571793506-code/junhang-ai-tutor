@@ -10,6 +10,9 @@ const INTERNAL_FIELD_LINE = /^\s*"?(?:provider|model|raw|prompt|debug)"?\s*[:=]/
 const INTERNAL_FIELD_FRAGMENT = /\s*(?:[,;，；]\s*)?"?(?:provider|model|raw|prompt|debug)"?\s*[:=][\s\S]*$/i;
 const STRUCTURE_FIELD_LINE = /^\s*"?(?:studentAnswer|learningSignal|knowledgePoints|questionIntent|difficultySignal|misconceptionHypotheses|followUpNeeded|confidence|safetyStatus|profileEligibility|blockedReason)"?\s*[:=]/i;
 const BLOCKED_STATUS = /(?:^|[\s"'<{,])safetyStatus["']?\s*[:=]\s*["']?blocked\b/i;
+const JSON_LIKE_QUOTED_KEY = /"[^"\r\n]+"\s*:/;
+const JSON_CODE_FENCE = /```json\b/i;
+const SENSITIVE_STRUCTURE_LABEL = /\b(?:studentAnswer|learningSignal|provider|model|raw|prompt|debug)\b\s*(?::|["'])/i;
 
 function trimAndCap(value, maxLength) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -88,7 +91,11 @@ export function normalizeQaModelOutput(text) {
   const source = String(text || "");
   const parsed = parseJsonObject(source);
   const strippedSource = stripCodeFences(source).trimStart();
-  const structuredSource = strippedSource.startsWith("{") || strippedSource.startsWith("[");
+  const structuredSource = strippedSource.startsWith("{")
+    || strippedSource.startsWith("[")
+    || JSON_LIKE_QUOTED_KEY.test(source)
+    || JSON_CODE_FENCE.test(source)
+    || SENSITIVE_STRUCTURE_LABEL.test(source);
   const signal = parsed?.learningSignal;
   const structureValid = typeof parsed?.studentAnswer === "string"
     && signal
