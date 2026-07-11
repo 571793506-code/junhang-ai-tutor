@@ -223,6 +223,32 @@ test("normalizeQaModelOutput rejects complete JSON values outside the exact cont
   }
 });
 
+test("normalizeQaModelOutput rejects encoded structured JSON strings", () => {
+  const values = [
+    "prefix \"{\\\"studentAnswer\\\":\\\"double-secret\\\",\\\"learningSignal\\\":null}\" suffix",
+    "prefix \"{\\\"studentAnswer\\\":\\\"scalar-secret\\\",\\\"learningSignal\\\":42}\" suffix",
+    "prefix \"{\\\"answer\\\":\\\"alias-secret\\\"}\" suffix"
+  ];
+
+  for (const value of values) {
+    const result = normalizeQaModelOutput(value);
+    assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+    assert.equal(result.structureValid, false);
+    assert.equal(result.learningSignal, null);
+    assert.equal(result.studentAnswer.includes("secret"), false);
+  }
+});
+
+test("normalizeQaModelOutput fails closed when embedded scanning exceeds its work budget", () => {
+  for (const size of [100 * 1024, 500 * 1024]) {
+    const value = `${"{".repeat(256)}${"x".repeat(size - 256)}`;
+    const result = normalizeQaModelOutput(value);
+    assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+    assert.equal(result.structureValid, false);
+    assert.equal(result.learningSignal, null);
+  }
+});
+
 test("normalizeQaModelOutput rejects embedded parseable JSON containers with unknown keys", () => {
   const values = [
     "前缀说明 {\"answer\":\"embedded-object-secret\"} 后缀说明",

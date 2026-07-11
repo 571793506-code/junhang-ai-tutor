@@ -17,7 +17,10 @@ const BLOCKED_STATUS = /(?:^|[\s"'<{,])safetyStatus["']?\s*[:=]\s*["']?blocked\b
 const JSON_CODE_FENCE = /```\s*json\b/i;
 const KNOWN_SCHEMA_LABEL = /\b(?:studentAnswer|learningSignal|knowledgePoints|questionIntent|difficultySignal|misconceptionHypotheses|followUpNeeded|confidence|safetyStatus|profileEligibility|blockedReason)\b["']?\s*[=:：＝]/i;
 const UNQUOTED_INTERNAL_LABEL = /(?:^|[\s,;，；])(?:provider|model|raw|prompt|debug)\s*[=:：＝]/i;
+const OLD_ANSWER_ALIAS_LABEL = /(?:^|[\s{,])["']answer["']\s*[=:：＝]/i;
 const MAX_EMBEDDED_JSON_CANDIDATES = 256;
+const MAX_EMBEDDED_JSON_SCAN_WORK = 65536;
+const SCAN_WORK_EXHAUSTED = -2;
 
 function toWellFormedText(value) {
   return String(value || "").toWellFormed();
@@ -44,12 +47,14 @@ function isJsonValue(value) {
   }
 }
 
-function findBalancedContainerEnd(value, start) {
+function findBalancedContainerEnd(value, start, work) {
   const stack = [value[start]];
   let inString = false;
   let escaped = false;
 
   for (let index = start + 1; index < value.length; index += 1) {
+    work.used += 1;
+    if (work.used > MAX_EMBEDDED_JSON_SCAN_WORK) return SCAN_WORK_EXHAUSTED;
     const character = value[index];
     if (inString) {
       if (escaped) {
@@ -78,13 +83,14 @@ function findBalancedContainerEnd(value, start) {
   return -1;
 }
 
-function hasEmbeddedJsonContainer(value) {
+function hasEmbeddedJsonContainer(value, work) {
   let candidateCount = 0;
   for (let start = 0; start < value.length; start += 1) {
     if (value[start] !== "{" && value[start] !== "[") continue;
     candidateCount += 1;
     if (candidateCount > MAX_EMBEDDED_JSON_CANDIDATES) return true;
-    const end = findBalancedContainerEnd(value, start);
+    const end = findBalancedContainerEnd(value, start, work);
+    if (end === SCAN_WORK_EXHAUSTED) return true;
     if (end < 0) continue;
     try {
       const parsed = JSON.parse(value.slice(start, end + 1));
@@ -92,6 +98,42 @@ function hasEmbeddedJsonContainer(value) {
     } catch {
       // Each later opening index is still evaluated independently.
     }
+  }
+  return false;
+}
+
+function hasEncodedStructuredString(value, work) {
+  let start = -1;
+  let escaped = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (start < 0) {
+      if (character === '"') start = index;
+      continue;
+    }
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (character !== '"') continue;
+    try {
+      const decoded = JSON.parse(value.slice(start, index + 1));
+      if (typeof decoded === "string" && (
+        isJsonValue(decoded)
+        || hasEmbeddedJsonContainer(decoded, work)
+        || JSON_CODE_FENCE.test(decoded)
+        || KNOWN_SCHEMA_LABEL.test(decoded)
+        || OLD_ANSWER_ALIAS_LABEL.test(decoded)
+      )) return true;
+    } catch {
+      // Invalid JSON string literals are not decoded or inspected as structured output.
+    }
+    start = -1;
+    escaped = false;
   }
   return false;
 }
@@ -171,8 +213,10 @@ export function normalizeQaModelOutput(text) {
   const source = toWellFormedText(text);
   const parsed = parseJsonObject(source);
   const strippedSource = stripCodeFences(source).trim();
+  const scanWork = { used: 0 };
   const structuredSource = isJsonValue(strippedSource)
-    || hasEmbeddedJsonContainer(strippedSource)
+    || hasEmbeddedJsonContainer(strippedSource, scanWork)
+    || hasEncodedStructuredString(strippedSource, scanWork)
     || JSON_CODE_FENCE.test(source)
     || KNOWN_SCHEMA_LABEL.test(source)
     || UNQUOTED_INTERNAL_LABEL.test(source)
