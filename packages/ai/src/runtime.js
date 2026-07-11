@@ -574,6 +574,37 @@ function parseJsonObjectText(text) {
   }
 }
 
+function hasUsableReferenceAnswerStructure(parsed = {}) {
+  const source = parsed && typeof parsed === "object" ? parsed : {};
+  const answers = Array.isArray(source.referenceAnswers)
+    ? source.referenceAnswers
+    : Array.isArray(source.answers)
+      ? source.answers
+      : [];
+  return answers.some((item) => {
+    const source = item && typeof item === "object" ? item : {};
+    const answer = source.correctAnswer || source.answer || source.standardAnswer || source.expectedAnswer;
+    const prompt = source.prompt || source.question || source.printedPrompt || source.text;
+    return Boolean(String(answer || "").trim() || String(prompt || "").trim());
+  });
+}
+
+function hasUsableGradingQuestionStructure(parsed = {}) {
+  const source = parsed && typeof parsed === "object" ? parsed : {};
+  const questions = Array.isArray(source.questionResults)
+    ? source.questionResults
+    : Array.isArray(source.questions)
+      ? source.questions
+      : [];
+  const allowedStatuses = new Set(["correct", "wrong", "partial", "uncertain"]);
+  return questions.some((item) => {
+    const source = item && typeof item === "object" ? item : {};
+    const questionNo = String(source.questionNo || source.no || "").trim();
+    const status = String(source.status || "").trim().toLowerCase();
+    return Boolean(questionNo) && allowedStatuses.has(status);
+  });
+}
+
 function normalizeVocabularyCard(input = {}, parsed = {}) {
   const word = String(parsed.word || parsed.term || input.word || "").trim().toLowerCase();
   const related = Array.isArray(parsed.related)
@@ -1224,10 +1255,7 @@ export async function generateSubmissionReferenceAnswers(config, input = {}, exe
   const text = result.body ? extractChatText(result.body) : "";
   const parsed = parseJsonObjectText(text);
   const solAttempted = attempts.some((attempt) => attempt.role === "sol-escalation");
-  const usedModelEscalation = solAttempted && result.status === "SUCCESS" && Boolean(
-    (Array.isArray(parsed?.referenceAnswers) && parsed.referenceAnswers.length) ||
-    (Array.isArray(parsed?.answers) && parsed.answers.length)
-  );
+  const usedModelEscalation = solAttempted && result.status === "SUCCESS" && hasUsableReferenceAnswerStructure(parsed);
 
   return {
     available: result.status === "SUCCESS",
@@ -1344,10 +1372,7 @@ export async function gradeSubmissionText(config, input = {}, execution = {}) {
   const text = result.body ? extractChatText(result.body) : "";
   const parsed = parseJsonObjectText(text);
   const solAttempted = attempts.some((attempt) => attempt.role === "sol-escalation");
-  const usedModelEscalation = solAttempted && result.status === "SUCCESS" && (
-    (Array.isArray(parsed?.questionResults) && parsed.questionResults.length > 0) ||
-    (Array.isArray(parsed?.questions) && parsed.questions.length > 0)
-  );
+  const usedModelEscalation = solAttempted && result.status === "SUCCESS" && hasUsableGradingQuestionStructure(parsed);
 
   return {
     available: result.status === "SUCCESS",

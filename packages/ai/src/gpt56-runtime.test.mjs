@@ -352,10 +352,16 @@ test("submission runtime does not treat malformed model content as an availabili
 
 for (const workflow of ["reference", "grading"]) {
   test(`${workflow} records an unsuccessful Sol attempt without claiming model escalation`, async () => {
+    const unusableContents = workflow === "reference"
+      ? ["not-json", "{}", JSON.stringify({ referenceAnswers: [{}] }), JSON.stringify({ answers: [{ answer: "   ", question: "" }] })]
+      : ["not-json", "{}", JSON.stringify({ questionResults: [{}] }), JSON.stringify({ questionResults: [{ questionNo: "1", status: "invalid" }] })];
     for (const solResponse of [
       { status: 524, contentType: "text/plain", body: "Sol timeout" },
-      { status: 200, contentType: "application/json", body: JSON.stringify({ choices: [{ message: { content: "not-json" } }] }) },
-      { status: 200, contentType: "application/json", body: JSON.stringify({ choices: [{ message: { content: "{}" } }] }) }
+      ...unusableContents.map((content) => ({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ choices: [{ message: { content } }] })
+      }))
     ]) {
       const { payloads, result } = await runSubmissionEscalationCase(workflow, {
         status: 524,
