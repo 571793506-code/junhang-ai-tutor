@@ -8,8 +8,10 @@ const CONFIDENCE_LEVELS = new Set(["low", "medium", "high"]);
 const SAFETY_STATUSES = new Set(["pass", "blocked"]);
 const INTERNAL_FIELD_LINE = /^\s*(?:provider|model|raw|prompt|debug)\s*[=:：＝]/i;
 const INTERNAL_FIELD_FRAGMENT = /\s*(?:[,;，；]\s*)?(?:provider|model|raw|prompt|debug)\s*[=:：＝][\s\S]*$/i;
-const QUOTED_INTERNAL_FIELD_LINE = /^\s*["'](?:provider|model|raw|prompt|debug)["']\s*[=:：＝]\s*["']?\s*(?:gpt(?:-\d)?|terra|sol|deepseek|minimax|openai|https?:\/\/|wss?:\/\/|[\[{])/i;
-const QUOTED_INTERNAL_FIELD_FRAGMENT = /\s*(?:[,;，；]\s*)?["'](?:provider|model|raw|prompt|debug)["']\s*[=:：＝]\s*["']?\s*(?:gpt(?:-\d)?|terra|sol|deepseek|minimax|openai|https?:\/\/|wss?:\/\/|[\[{])[\s\S]*$/i;
+const QUOTED_ALWAYS_INTERNAL_LINE = /^\s*["'](?:debug|prompt|raw)["']\s*[=:：＝]/i;
+const QUOTED_ALWAYS_INTERNAL_FRAGMENT = /\s*(?:[,;，；]\s*)?["'](?:debug|prompt|raw)["']\s*[=:：＝][\s\S]*$/i;
+const QUOTED_ROUTE_INTERNAL_LINE = /^\s*["'](?:provider|model)["']\s*[=:：＝]\s*["']?\s*(?:gpt(?:-\d)?|terra|sol|deepseek|minimax|openai|https?:\/\/|wss?:\/\/|[\[{])/i;
+const QUOTED_ROUTE_INTERNAL_FRAGMENT = /\s*(?:[,;，；]\s*)?["'](?:provider|model)["']\s*[=:：＝]\s*["']?\s*(?:gpt(?:-\d)?|terra|sol|deepseek|minimax|openai|https?:\/\/|wss?:\/\/|[\[{])[\s\S]*$/i;
 const STRUCTURE_FIELD_LINE = /^\s*"?(?:studentAnswer|learningSignal|knowledgePoints|questionIntent|difficultySignal|misconceptionHypotheses|followUpNeeded|confidence|safetyStatus|profileEligibility|blockedReason)"?\s*[:=]/i;
 const BLOCKED_STATUS = /(?:^|[\s"'<{,])safetyStatus["']?\s*[:=]\s*["']?blocked\b/i;
 const JSON_CODE_FENCE = /```\s*json\b/i;
@@ -42,16 +44,56 @@ function isJsonValue(value) {
 }
 
 function hasEmbeddedJsonContainer(value) {
-  for (const [open, close] of [["{", "}"], ["[", "]"]]) {
-    const start = value.indexOf(open);
-    const end = value.lastIndexOf(close);
-    if (start < 0 || end <= start) continue;
+  const stack = [];
+  let candidateStart = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (stack.length === 0) {
+      if (character === "{" || character === "[") {
+        candidateStart = index;
+        stack.push(character);
+      }
+      continue;
+    }
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === "{" || character === "[") {
+      stack.push(character);
+      continue;
+    }
+    if (character !== "}" && character !== "]") continue;
+    const expectedOpen = character === "}" ? "{" : "[";
+    if (stack.at(-1) !== expectedOpen) {
+      stack.length = 0;
+      candidateStart = -1;
+      continue;
+    }
+    stack.pop();
+    if (stack.length > 0) continue;
     try {
-      const parsed = JSON.parse(value.slice(start, end + 1));
+      const parsed = JSON.parse(value.slice(candidateStart, index + 1));
       if (parsed && typeof parsed === "object") return true;
     } catch {
-      // Not a JSON container; ordinary mathematical braces remain eligible for text fallback.
+      // Continue scanning after a balanced non-JSON container such as a mathematical set.
     }
+    candidateStart = -1;
+    inString = false;
+    escaped = false;
   }
   return false;
 }
@@ -61,7 +103,8 @@ function sanitizeRestrictedText(value, maxLength) {
   const text = stripCodeFences(value)
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/<\/?(?:studentAnswer|learningSignal)>/gi, "")
-    .replace(QUOTED_INTERNAL_FIELD_FRAGMENT, "")
+    .replace(QUOTED_ALWAYS_INTERNAL_FRAGMENT, "")
+    .replace(QUOTED_ROUTE_INTERNAL_FRAGMENT, "")
     .replace(INTERNAL_FIELD_FRAGMENT, "")
     .trim();
   return trimAndCap(text, maxLength);
@@ -85,11 +128,13 @@ function sanitizeStudentAnswer(value) {
     .replace(/<\/?(?:studentAnswer|learningSignal)>/gi, "")
     .split(/\r?\n/)
     .filter((line) => !INTERNAL_FIELD_LINE.test(line))
-    .filter((line) => !QUOTED_INTERNAL_FIELD_LINE.test(line))
+    .filter((line) => !QUOTED_ALWAYS_INTERNAL_LINE.test(line))
+    .filter((line) => !QUOTED_ROUTE_INTERNAL_LINE.test(line))
     .filter((line) => extracted || !STRUCTURE_FIELD_LINE.test(line))
     .filter((line) => !/^\s*[{}\[\],]+\s*$/.test(line))
     .map((line) => line
-      .replace(QUOTED_INTERNAL_FIELD_FRAGMENT, "")
+      .replace(QUOTED_ALWAYS_INTERNAL_FRAGMENT, "")
+      .replace(QUOTED_ROUTE_INTERNAL_FRAGMENT, "")
       .replace(INTERNAL_FIELD_FRAGMENT, "")
       .trim())
     .filter(Boolean);
@@ -133,7 +178,8 @@ export function normalizeQaModelOutput(text) {
     || JSON_CODE_FENCE.test(source)
     || KNOWN_SCHEMA_LABEL.test(source)
     || UNQUOTED_INTERNAL_LABEL.test(source)
-    || QUOTED_INTERNAL_FIELD_FRAGMENT.test(source);
+    || QUOTED_ALWAYS_INTERNAL_FRAGMENT.test(source)
+    || QUOTED_ROUTE_INTERNAL_FRAGMENT.test(source);
   const signal = parsed?.learningSignal;
   const structureValid = typeof parsed?.studentAnswer === "string"
     && signal

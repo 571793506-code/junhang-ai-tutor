@@ -226,7 +226,9 @@ test("normalizeQaModelOutput rejects complete JSON values outside the exact cont
 test("normalizeQaModelOutput rejects embedded parseable JSON containers with unknown keys", () => {
   const values = [
     "前缀说明 {\"answer\":\"embedded-object-secret\"} 后缀说明",
-    "前缀说明 [{\"answer\":\"embedded-array-secret\"}] 后缀说明"
+    "前缀说明 [{\"answer\":\"embedded-array-secret\"}] 后缀说明",
+    "Set {1, 2} is invalid JSON. Internal {\"answer\":\"container-secret\"}",
+    "First {\"answer\":\"one-secret\"}, second {\"answer\":\"two-secret\"}."
   ];
 
   for (const value of values) {
@@ -284,6 +286,35 @@ test("normalizeQaModelOutput removes internal fields with case and fullwidth sep
     assert.equal(JSON.stringify(output).includes("gpt-5.6"), false);
     assert.equal(JSON.stringify(output).includes("Terra"), false);
     assert.equal(JSON.stringify(output).includes("trace"), false);
+  }
+});
+
+test("normalizeQaModelOutput always removes quoted debug prompt and raw fields", () => {
+  const result = normalizeQaModelOutput(JSON.stringify({
+    studentAnswer: [
+      "安全回答。",
+      "\"debug\": \"trace-secret\"",
+      "补充说明； \"prompt\"＝\"hidden-secret\"",
+      "\"raw\"： \"raw-secret\""
+    ].join("\n"),
+    learningSignal: {
+      ...validPayload.learningSignal,
+      knowledgePoints: [
+        "知识点 \"debug\": \"knowledge-secret\"",
+        "原始信息 \"raw\"＝\"raw-knowledge-secret\""
+      ],
+      misconceptionHypotheses: [
+        "需要观察 \"prompt\"：\"hypothesis-secret\"",
+        "另一个假设 \"debug\"=\"debug-hypothesis-secret\""
+      ]
+    }
+  }));
+
+  assert.equal(result.studentAnswer, "安全回答。\n补充说明");
+  assert.deepEqual(result.learningSignal.knowledgePoints, ["知识点", "原始信息"]);
+  assert.deepEqual(result.learningSignal.misconceptionHypotheses, ["需要观察", "另一个假设"]);
+  for (const forbidden of ["trace-secret", "hidden-secret", "raw-secret", "knowledge-secret", "hypothesis-secret"]) {
+    assert.equal(JSON.stringify(result).includes(forbidden), false);
   }
 });
 
