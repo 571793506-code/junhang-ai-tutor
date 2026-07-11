@@ -126,6 +126,49 @@ export interface SubmissionExecutionOptions {
   disableSolEscalation?: boolean;
 }
 
+export type QaQuestionIntent = "concept" | "method" | "error_reasoning" | "expression" | "other";
+export type QaDifficultySignal = "none" | "possible" | "clear";
+export type QaConfidence = "low" | "medium" | "high";
+export type QaSafetyStatus = "pass" | "blocked";
+export type QaMode = "GUIDED_THINKING" | "KNOWLEDGE_EXPLANATION";
+
+export interface QaLearningSignal {
+  knowledgePoints: string[];
+  questionIntent: QaQuestionIntent;
+  difficultySignal: QaDifficultySignal;
+  misconceptionHypotheses: string[];
+  followUpNeeded: boolean;
+  confidence: QaConfidence;
+  safetyStatus: QaSafetyStatus;
+  profileEligibility: boolean;
+  blockedReason: string | null;
+}
+
+export interface QaNormalizedOutput {
+  studentAnswer: string;
+  learningSignal: QaLearningSignal | null;
+  structureValid: boolean;
+}
+
+export interface QaRuntimeResult extends QaNormalizedOutput {
+  available: boolean;
+  providerId: "gpt56";
+  model?: string;
+  mode: QaMode;
+  answer: string;
+  status?: "unavailable";
+  reason?: string;
+  raw?: unknown;
+  error?: string;
+  modelRun: Record<string, unknown>;
+}
+
+export declare const QA_LEARNING_SIGNAL_SCHEMA_VERSION: "qa-learning-signal-v1";
+export declare const QA_UNAVAILABLE_ANSWER: "AI 问答暂时不可用，请稍后再试。";
+export declare const QA_BLOCKED_ANSWER: "这个问题暂时不能直接回答，请换一种安全、清楚的方式提问。";
+export declare function normalizeQaModelOutput(text: unknown): QaNormalizedOutput;
+export declare function unavailableQaOutput(reason?: unknown): QaNormalizedOutput;
+
 export declare function buildAiStartupSnapshot(config?: RuntimeConfigLike): AiStartupSnapshot;
 export declare function createDemoAiSnapshot(): AiStartupSnapshot;
 export declare function routeCapability(capabilityId: string, snapshot?: AiStartupSnapshot): AiFeatureSnapshot;
@@ -146,8 +189,8 @@ export declare function callMiniMaxChat(config: RuntimeConfigLike, messages: Arr
 export declare function callGpt55Chat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>, options?: Record<string, unknown>): Promise<unknown>;
 export declare function callGpt56Chat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>, options?: Record<string, unknown>): Promise<unknown>;
 export declare function extractChatText(body: unknown): string;
-export declare function inferClassroomQaMode(question?: string): "GUIDED_THINKING" | "KNOWLEDGE_EXPLANATION";
-export declare function answerStudentQuestion(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
+export declare function inferClassroomQaMode(question?: string): QaMode;
+export declare function answerStudentQuestion(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<QaRuntimeResult>;
 export declare function generateVocabularyCard(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function draftTeacherTask(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function draftAssessment(

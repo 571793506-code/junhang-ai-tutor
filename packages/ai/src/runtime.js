@@ -5,6 +5,21 @@ import {
   solEscalationEnabled,
   validateAssessmentPartition
 } from "./model-escalation.js";
+import {
+  QA_BLOCKED_ANSWER,
+  QA_LEARNING_SIGNAL_SCHEMA_VERSION,
+  QA_UNAVAILABLE_ANSWER,
+  normalizeQaModelOutput,
+  unavailableQaOutput
+} from "./qa-learning-signal.js";
+
+export {
+  QA_BLOCKED_ANSWER,
+  QA_LEARNING_SIGNAL_SCHEMA_VERSION,
+  QA_UNAVAILABLE_ANSWER,
+  normalizeQaModelOutput,
+  unavailableQaOutput
+};
 
 export const providerCatalog = [
   {
@@ -496,24 +511,45 @@ export async function answerStudentQuestion(config, input = {}) {
   const mode = input.mode || inferClassroomQaMode(input.question);
 
   if (provider?.status !== "ready") {
+    const normalized = unavailableQaOutput(provider?.reason || "GPT-5.6 unavailable");
     return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       mode,
-      answer: "AI 问答暂时不可用，老师稍后会协助处理。",
+      ...normalized,
+      answer: normalized.studentAnswer,
       modelRun: {
         provider: "gpt56",
         model: provider?.model,
         skill: "student-qa",
         inputSummary: input.question,
-        outputSummary: "Provider unavailable",
+        outputSummary: normalized.studentAnswer,
         status: "SKIPPED"
       }
     });
   }
 
-  const system =
+  const teachingInstruction =
     mode === "GUIDED_THINKING"
-      ? withProjectPromptPrinciples("你是小学三到六年级课后辅导助教。遇到题目或作业问题时，只做思路引导、关键步骤提示和追问，不直接给最终答案。语气温和、简短。")
-      : withProjectPromptPrinciples("你是小学三到六年级课后辅导助教。常识或知识概念可以直接解释，语言适合小学生和家长理解。");
+      ? "遇到题目或作业问题时，只做思路引导、关键步骤提示和追问，不直接给最终答案。语气温和、简短。"
+      : "常识或知识概念可以直接解释，语言适合小学生和家长理解。";
+  const system = withProjectPromptPrinciples(
+    `你是小学三到六年级课后辅导助教。${teachingInstruction}
+一次调用同时生成面向学生的回答和内部低置信学习信号。返回严格 JSON 对象，只能包含以下结构，不得输出 JSON 之外内容：
+{
+  "studentAnswer": "面向学生的安全回答",
+  "learningSignal": {
+    "knowledgePoints": [],
+    "questionIntent": "concept|method|error_reasoning|expression|other",
+    "difficultySignal": "none|possible|clear",
+    "misconceptionHypotheses": [],
+    "followUpNeeded": false,
+    "confidence": "low|medium|high",
+    "safetyStatus": "pass|blocked",
+    "profileEligibility": false,
+    "blockedReason": null
+  }
+}
+studentAnswer 必须只含学生可见内容，不得出现供应商、模型、内部提示词、原始响应或调试字段。learningSignal 只作候选信号，profileEligibility 由服务端最终重算。不能安全回答时设置 safetyStatus=blocked。`
+  );
 
   const messages = [
     { role: "system", content: system },
@@ -532,15 +568,22 @@ export async function answerStudentQuestion(config, input = {}) {
     }
   ];
 
-  const result = await timedCall(() => callGpt56Chat(config, messages, { reasoningEffort: "low" }));
-  const answer = result.body ? extractChatText(result.body) : "";
+  const result = await timedCall(() => callGpt56Chat(config, messages, {
+    responseFormat: { type: "json_object" },
+    reasoningEffort: "low"
+  }));
+  const text = result.body ? extractChatText(result.body) : "";
+  const normalized = result.status === "SUCCESS"
+    ? normalizeQaModelOutput(text)
+    : unavailableQaOutput(result.error || "GPT-5.6 unavailable");
 
   return {
     available: result.status === "SUCCESS",
     providerId: "gpt56",
     model: provider.model,
     mode,
-    answer: answer || "这次问题没有拿到稳定回答，建议老师复核。",
+    ...normalized,
+    answer: normalized.studentAnswer,
     raw: result.body,
     error: result.error,
     modelRun: {
@@ -548,7 +591,7 @@ export async function answerStudentQuestion(config, input = {}) {
       model: provider.model,
       skill: "student-qa",
       inputSummary: input.question,
-      outputSummary: answer.slice(0, 240),
+      outputSummary: normalized.studentAnswer.slice(0, 240),
       status: result.status,
       latencyMs: result.latencyMs,
       metadata: { mode, subject: input.subject || null }

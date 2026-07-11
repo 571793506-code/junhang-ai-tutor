@@ -14,6 +14,10 @@ import {
   normalizeRuntimeConfig,
   reviewWithGpt55
 } from "./runtime.js";
+import {
+  QA_BLOCKED_ANSWER,
+  QA_UNAVAILABLE_ANSWER
+} from "./qa-learning-signal.js";
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -253,6 +257,165 @@ test("callGpt56Chat classifies a successful non-JSON upstream response", async (
   } finally {
     await close(server);
   }
+});
+
+const qaLearningSignal = {
+  knowledgePoints: ["小数意义"],
+  questionIntent: "concept",
+  difficultySignal: "possible",
+  misconceptionHypotheses: ["可能把十分位理解成十位"],
+  followUpNeeded: true,
+  confidence: "medium",
+  safetyStatus: "pass",
+  profileEligibility: true,
+  blockedReason: null
+};
+
+async function runQaCase(response) {
+  const payloads = [];
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      payloads.push(JSON.parse(body));
+      res.writeHead(response.status ?? 200, { "Content-Type": response.contentType || "application/json" });
+      res.end(response.body);
+    });
+  });
+  const address = await listen(server);
+  const config = {
+    GPT56_API_KEY: "test-key",
+    GPT56_BASE_URL: `http://127.0.0.1:${address.port}`,
+    GPT56_MODEL: "gpt-5.6",
+    GPT56_REASONING_EFFORT_ENABLED: "true",
+    GPT56_SOL_FALLBACK_ENABLED: "true",
+    GPT56_SOL_MODEL: "gpt-5.6-sol"
+  };
+  try {
+    const result = await answerStudentQuestion(config, { question: "0.5 表示什么？", subject: "数学" });
+    return { payloads, result };
+  } finally {
+    await close(server);
+  }
+}
+
+test("answerStudentQuestion requests and returns the exact structured learning signal", async () => {
+  const content = JSON.stringify({
+    studentAnswer: "先把 0.5 看成 5 个十分之一。",
+    learningSignal: qaLearningSignal,
+    provider: "must-not-leak",
+    debug: "must-not-leak"
+  });
+  const { payloads, result } = await runQaCase({
+    body: JSON.stringify({ choices: [{ message: { content } }] })
+  });
+
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].model, "gpt-5.6");
+  assert.deepEqual(payloads[0].response_format, { type: "json_object" });
+  assert.equal(payloads[0].reasoning_effort, "low");
+  const system = String(payloads[0].messages?.[0]?.content || "");
+  for (const field of [
+    "studentAnswer",
+    "learningSignal",
+    "knowledgePoints",
+    "questionIntent",
+    "difficultySignal",
+    "misconceptionHypotheses",
+    "followUpNeeded",
+    "confidence",
+    "safetyStatus",
+    "profileEligibility",
+    "blockedReason"
+  ]) {
+    assert.match(system, new RegExp(field));
+  }
+  assert.match(system, /concept\|method\|error_reasoning\|expression\|other/);
+  assert.match(system, /none\|possible\|clear/);
+  assert.match(system, /low\|medium\|high/);
+  assert.match(system, /pass\|blocked/);
+  assert.match(system, /严格 JSON/);
+  assert.match(system, /学生.*不得.*供应商.*模型.*内部提示词/);
+
+  assert.equal(result.available, true);
+  assert.equal(result.structureValid, true);
+  assert.equal(result.studentAnswer, "先把 0.5 看成 5 个十分之一。");
+  assert.equal(result.answer, result.studentAnswer);
+  assert.deepEqual(result.learningSignal, qaLearningSignal);
+  assert.equal(result.modelRun.outputSummary, result.studentAnswer);
+  assert.equal(JSON.stringify(result.learningSignal).includes("must-not-leak"), false);
+});
+
+test("answerStudentQuestion returns the approved unavailable result without a provider call", async () => {
+  const result = await answerStudentQuestion({
+    GPT56_SOL_FALLBACK_ENABLED: "true",
+    GPT56_SOL_MODEL: "gpt-5.6-sol"
+  }, { question: "0.5 表示什么？", subject: "数学" });
+
+  assert.equal(result.available, false);
+  assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+  assert.equal(result.answer, result.studentAnswer);
+  assert.equal(result.learningSignal, null);
+  assert.equal(result.structureValid, false);
+  assert.equal(JSON.stringify(result).includes("gpt-5.6-sol"), false);
+});
+
+test("answerStudentQuestion keeps malformed and blocked outputs on one Terra call", async () => {
+  const cases = [
+    {
+      content: "```text\n先理解十分之一，再看 0.5。\nprovider: Terra\ndebug: hidden\n```",
+      expectedAnswer: "先理解十分之一，再看 0.5。",
+      structureValid: false,
+      learningSignal: null
+    },
+    {
+      content: JSON.stringify({
+        studentAnswer: "unsafe raw answer",
+        learningSignal: { ...qaLearningSignal, safetyStatus: "blocked", profileEligibility: true }
+      }),
+      expectedAnswer: QA_BLOCKED_ANSWER,
+      structureValid: true,
+      learningSignal: { safetyStatus: "blocked", profileEligibility: false }
+    }
+  ];
+
+  for (const item of cases) {
+    const { payloads, result } = await runQaCase({
+      body: JSON.stringify({ choices: [{ message: { content: item.content } }] })
+    });
+    assert.equal(payloads.length, 1);
+    assert.deepEqual(payloads.map((payload) => payload.model), ["gpt-5.6"]);
+    assert.equal(result.available, true);
+    assert.equal(result.studentAnswer, item.expectedAnswer);
+    assert.equal(result.answer, item.expectedAnswer);
+    assert.equal(result.structureValid, item.structureValid);
+    if (item.learningSignal === null) {
+      assert.equal(result.learningSignal, null);
+    } else {
+      assert.equal(result.learningSignal.safetyStatus, item.learningSignal.safetyStatus);
+      assert.equal(result.learningSignal.profileEligibility, item.learningSignal.profileEligibility);
+    }
+  }
+});
+
+test("answerStudentQuestion does not escalate a Terra transport failure to Sol", async () => {
+  const { payloads, result } = await runQaCase({
+    status: 524,
+    contentType: "text/plain",
+    body: "Terra timeout"
+  });
+
+  assert.equal(payloads.length, 1);
+  assert.deepEqual(payloads.map((payload) => payload.model), ["gpt-5.6"]);
+  assert.equal(result.available, false);
+  assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+  assert.equal(result.answer, result.studentAnswer);
+  assert.equal(result.learningSignal, null);
+  assert.equal(result.structureValid, false);
+  assert.equal(result.modelRun.status, "ERROR");
 });
 
 async function runSubmissionEscalationCase(workflow, primaryResponse, solResponse = null) {
