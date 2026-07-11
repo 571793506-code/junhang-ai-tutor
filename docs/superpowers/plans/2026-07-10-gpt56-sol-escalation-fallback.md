@@ -701,3 +701,10 @@ Do not push unless the user explicitly requests the remote update after reviewin
 - Local enablement: after the real capability and quality gates passed, the ignored repository-local `.env` was updated with the three approved Sol fallback fields. No key or base URL was changed or copied into Git.
 - Enabled-gate regression: API check and service smoke exited `0`; focused AI/service fake-server tests passed `94/94`, confirming valid normal requests remain on Terra.
 - Remote state: no push was performed.
+
+## Post-Closeout Boundary Verification (2026-07-11)
+
+- Final branch review found and fixed three cross-task boundaries: a prior reference-answer Sol attempt cannot be repeated by the quality gate; insufficient grading evidence disables runtime Sol while preserving the Terra grading attempt; learner payload sanitization recursively removes model-routing, escalation, attempt, budget, and internal-error metadata.
+- Fresh automated regression after commit `a96d5d1`: AI `58/58`, services `44/44`, capability/generation/Sol/grading scripts `30/30`, and learner payload/export tests `3/3`; zero failures.
+- Fresh project checks after the boundary fixes: generation blueprint `9/9`, API check, Web typecheck, miniprogram JavaScript check, service smoke, and source encoding check all exited `0`; encoding checked 251 files with zero issues.
+- The real intermediary capability and generation-quality evidence above remains applicable because the boundary fixes do not change model names, prompts, generation budgets, or the forced Sol quality runner. Teacher grading gold is still unavailable, so production grading accuracy remains unverified.
