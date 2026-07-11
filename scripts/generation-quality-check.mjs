@@ -192,8 +192,8 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
     attempts: Array.isArray(model.attempts) ? model.attempts : []
   };
 
-  if (!result.modelAvailable) issues.push("质量样本必须来自可用模型。");
-  if (result.usedDynamicFallback) issues.push("质量样本必须来自真实模型生成，不能使用动态兜底。");
+  if (result.modelAvailable !== true) issues.push("质量样本必须来自可用模型。");
+  if (result.usedDynamicFallback !== false) issues.push("质量样本必须来自真实模型生成，不能使用动态兜底。");
   if (!result.draftAvailable) issues.push("质量样本必须形成结构化草稿。");
   if (model.generationProfile && model.generationProfile !== sample.generationProfile) {
     issues.push(`生成 profile 应为 ${sample.generationProfile}，实际为 ${model.generationProfile}。`);
@@ -201,7 +201,7 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
   if (model.assessmentMaxTokens && Number(model.assessmentMaxTokens) < Number(sample.assessmentMaxTokens)) {
     issues.push(`模型 token 上限低于样本预算 ${sample.assessmentMaxTokens}。`);
   }
-  if (!result.modelAvailable || result.usedDynamicFallback || !result.draftAvailable) {
+  if (result.modelAvailable !== true || result.usedDynamicFallback !== false || !result.draftAvailable) {
     return {
       name: sample.name,
       ok: false,

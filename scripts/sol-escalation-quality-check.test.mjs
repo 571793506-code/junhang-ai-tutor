@@ -106,8 +106,10 @@ test("Sol quality check injects forced Sol only through the internal draft runne
     timeoutMs: 180000
   });
   assert.equal(summary.ok, true);
+  assert.equal(summary.status, "passed");
   assert.equal(summary.verification.mode, "forced-sol-primary");
   assert.equal(summary.checks[0].case, "数学-小测");
+  assert.equal(summary.checks[0].status, "passed");
   assert.equal(summary.checks[0].model, "gpt-5.6-sol");
   assert.equal(summary.checks[0].effort, "high");
   assert.equal(summary.checks[0].role, "sol-quality-check");
@@ -137,6 +139,8 @@ test("Sol quality check rejects a local dynamic fallback result", async () => {
   });
 
   assert.equal(summary.ok, false);
+  assert.equal(summary.status, "failed");
+  assert.equal(summary.checks[0].status, "failed");
   assert.equal(summary.checks[0].usedDynamicFallback, true);
   assert.ok(summary.checks[0].issues.includes("质量样本必须来自真实模型生成，不能使用动态兜底。"));
 });
@@ -157,4 +161,23 @@ test("Sol quality check requires an explicit passed project audit", async () => 
 
   assert.equal(summary.ok, false);
   assert.ok(summary.checks[0].issues.includes("服务层本地审查未通过。"));
+});
+
+test("Sol quality check rejects missing availability and fallback flags", async () => {
+  const [sample] = buildSolQualityCases();
+  const resultWithoutFlags = validMathQuizResult();
+  delete resultWithoutFlags.modelAvailable;
+  delete resultWithoutFlags.usedDynamicFallback;
+  const summary = await runSolQualityCheck({}, {
+    cases: [sample],
+    draftAssessmentImpl: async () => ({ available: true }),
+    draftAssessmentServiceImpl: async (config, input, options) => {
+      await options.assessmentDraftRunner(config, input);
+      return resultWithoutFlags;
+    }
+  });
+
+  assert.equal(summary.ok, false);
+  assert.ok(summary.checks[0].issues.includes("质量样本必须来自可用模型。"));
+  assert.ok(summary.checks[0].issues.includes("质量样本必须来自真实模型生成，不能使用动态兜底。"));
 });

@@ -67,6 +67,7 @@ export async function runSolQualityCheck(
       mode: "forced-sol-primary",
       latencyMs,
       ok: evaluated.ok,
+      status: evaluated.ok ? "passed" : "failed",
       issues: evaluated.detail.issues,
       usedModelEscalation: result.usedModelEscalation === true,
       usedDynamicFallback: result.usedDynamicFallback === true,
@@ -75,8 +76,10 @@ export async function runSolQualityCheck(
     progress(`${evaluated.ok ? "pass" : "fail"} ${sample.name}: ${latencyMs}ms`);
   }
 
+  const ok = checks.every((check) => check.ok);
   return {
-    ok: checks.every((check) => check.ok),
+    ok,
+    status: ok ? "passed" : "failed",
     generatedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
     verification: {
