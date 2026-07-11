@@ -1006,10 +1006,26 @@ function sanitizeLearnerPayload(value) {
     }
     return value;
   }
-  const hiddenKeys = new Set(["provider", "providerId", "model", "modelRunId", "baseUrl"]);
+  const hiddenKeys = new Set([
+    "provider",
+    "providerId",
+    "model",
+    "modelRunId",
+    "baseUrl",
+    "solAttempted",
+    "usedModelEscalation",
+    "escalationModelRunId",
+    "escalationPersistenceError"
+  ]);
+  const isInternalKey = (key) => {
+    if (hiddenKeys.has(key)) return true;
+    const normalized = String(key || "").toLowerCase();
+    if (/model|provider|escalation|attempt|reasoning|budget|timeout|token|trigger|fallback|latency|internal/.test(normalized)) return true;
+    return normalized !== "errorstep" && normalized.includes("error");
+  };
   return Object.fromEntries(
     Object.entries(value)
-      .filter(([key]) => !hiddenKeys.has(key))
+      .filter(([key]) => !isInternalKey(key))
       .map(([key, item]) => [key, sanitizeLearnerPayload(item)])
   );
 }

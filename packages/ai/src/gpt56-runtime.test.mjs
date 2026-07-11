@@ -337,6 +337,25 @@ for (const workflow of ["reference", "grading"]) {
   });
 }
 
+test("reference Sol usability preserves numeric and boolean answer fields", async () => {
+  for (const content of [
+    JSON.stringify({ referenceAnswers: [{ questionNo: "1", correctAnswer: 0 }] }),
+    JSON.stringify({ referenceAnswers: [{ questionNo: "1", prompt: false }] })
+  ]) {
+    const { result } = await runSubmissionEscalationCase("reference", {
+      status: 524,
+      contentType: "text/plain",
+      body: "Terra timeout"
+    }, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ choices: [{ message: { content } }] })
+    });
+    assert.equal(result.modelRun.metadata.solAttempted, true);
+    assert.equal(result.modelRun.metadata.usedModelEscalation, true);
+  }
+});
+
 test("submission runtime does not treat malformed model content as an availability failure", async () => {
   const response = {
     status: 200,

@@ -649,12 +649,11 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
     : optionalNumber(parsed.confidence) ?? 0;
   const runtime = normalizeRuntimeConfig(config);
   const solEnabled = solEscalationEnabled(runtime);
-  const alreadyEscalated = result.modelRun?.metadata?.usedModelEscalation === true;
   const clearPrintedEvidence = Boolean(
     runnerInput.printedText ||
     runnerInput.ocrQuestions.some((item) => String(item?.printedText || item?.printedPrompt || "").trim())
   );
-  if (solEnabled && clearPrintedEvidence && !alreadyEscalated && result.available && normalizedAnswers.length && averageConfidence < 0.72) {
+  if (solEnabled && clearPrintedEvidence && !solAttempted && !usedModelEscalation && result.available && normalizedAnswers.length && averageConfidence < 0.72) {
     const solResult = await referenceAnswerRunner(config, runnerInput, {
       model: runtime.gpt56SolModel,
       timeoutMs: runtime.gpt56SolFallbackTimeoutMs,
@@ -4070,6 +4069,7 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
   const deterministicPlan = buildDeterministicGradingPlan(gradingInput, ocr, reference.referenceAnswers || []);
   const gradingRunner = options.gradingRunner || gradeSubmissionText;
   const remoteGradingInput = buildUnresolvedGradingInput(gradingInput, deterministicPlan);
+  const gradingEvidenceSufficient = hasSufficientSolGradingEvidence(gradingInput, ocr, reference);
   const remoteResult = deterministicPlan.fullyResolved
     ? {
         available: true,
@@ -4085,7 +4085,9 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
         }),
         modelRun: null
       }
-    : await gradingRunner(config, remoteGradingInput);
+    : await gradingRunner(config, remoteGradingInput, {
+        disableSolEscalation: !gradingEvidenceSufficient
+      });
   const result = mergeDeterministicGradingResult(remoteResult, deterministicPlan.deterministicResults, gradingInput);
   const primaryModelRun = await persistRun(result.modelRun, options);
   let effectiveResult = result;

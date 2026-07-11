@@ -609,6 +609,48 @@ test("insufficient grading evidence never calls Sol", async () => {
   }
 });
 
+test("insufficient evidence still runs Terra grading with runtime Sol disabled", async () => {
+  let gradingCalls = 0;
+  let execution = null;
+  let solCalls = 0;
+  const result = await gradeSubmissionService(
+    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+    {
+      subject: "语文",
+      totalScore: 6,
+      referenceAnswers: [{ questionNo: "1", prompt: "", correctAnswer: "言之有理即可", score: 6, confidence: 1 }],
+      studentAnswerText: "1. 勇敢",
+      ocrQuestions: [{ questionNo: "1", printedText: "", studentAnswer: "勇敢", confidence: 0.95 }]
+    },
+    {
+      persist: false,
+      gradingRunner: async (_config, _input, runnerExecution) => {
+        gradingCalls += 1;
+        execution = runnerExecution;
+        return {
+          available: false,
+          providerId: "gpt56",
+          gradingText: "",
+          modelRun: { provider: "gpt56", model: "gpt-5.6", status: "ERROR" }
+        };
+      },
+      solGradingRunner: async () => {
+        solCalls += 1;
+        throw new Error("Sol must not run without sufficient evidence");
+      },
+      gradingReviewers: {
+        premium: async () => ({ available: false, reviewText: "" })
+      }
+    }
+  );
+
+  assert.equal(gradingCalls, 1);
+  assert.equal(execution.disableSolEscalation, true);
+  assert.equal(solCalls, 0);
+  assert.equal(result.structured.score, null);
+  assert.equal(result.structured.needsTeacherReview, true);
+});
+
 test("unresolved Sol preserves provisional score, blocks audit, and does not chain a Terra reviewer", async () => {
   let premiumCalls = 0;
   const result = await gradeSubmissionService(

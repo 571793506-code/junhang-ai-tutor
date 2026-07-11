@@ -82,6 +82,40 @@ test("low-confidence generated references retry once with Sol only when printed 
   assert.equal(executions.length, 1);
 });
 
+test("a prior runtime Sol reference attempt is never repeated by the quality gate", async () => {
+  let referenceCalls = 0;
+  const result = await gradeSubmissionService(
+    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+    { subject: "数学", printedText: "1. 1+1=?", studentAnswerText: "1. 2" },
+    {
+      persist: false,
+      referenceAnswerRunner: async () => {
+        referenceCalls += 1;
+        return {
+          available: true,
+          providerId: "gpt56",
+          referenceText: JSON.stringify({ referenceAnswers: [{ questionNo: "1", correctAnswer: "2", confidence: 0.5 }] }),
+          modelRun: {
+            provider: "gpt56",
+            model: "gpt-5.6",
+            status: "SUCCESS",
+            metadata: { solAttempted: true, usedModelEscalation: false }
+          }
+        };
+      },
+      gradingRunner: async () => ({
+        available: true,
+        providerId: "gpt56",
+        gradingText: JSON.stringify({ score: 5, questionResults: [{ questionNo: "1", status: "correct", score: 5, maxScore: 5, confidence: 0.95 }] })
+      })
+    }
+  );
+
+  assert.equal(referenceCalls, 1);
+  assert.equal(result.referenceAnswer.solAttempted, true);
+  assert.equal(result.referenceAnswer.usedModelEscalation, false);
+});
+
 test("failed Sol reference regeneration keeps Terra content and tracks both persisted runs", async () => {
   let callCount = 0;
   let runId = 0;

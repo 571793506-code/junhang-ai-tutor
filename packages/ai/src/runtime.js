@@ -583,9 +583,9 @@ function hasUsableReferenceAnswerStructure(parsed = {}) {
       : [];
   return answers.some((item) => {
     const source = item && typeof item === "object" ? item : {};
-    const answer = source.correctAnswer || source.answer || source.standardAnswer || source.expectedAnswer;
-    const prompt = source.prompt || source.question || source.printedPrompt || source.text;
-    return Boolean(String(answer || "").trim() || String(prompt || "").trim());
+    const answer = source.correctAnswer ?? source.answer ?? source.standardAnswer ?? source.expectedAnswer;
+    const prompt = source.prompt ?? source.question ?? source.printedPrompt ?? source.text;
+    return Boolean(String(answer ?? "").trim() || String(prompt ?? "").trim());
   });
 }
 
