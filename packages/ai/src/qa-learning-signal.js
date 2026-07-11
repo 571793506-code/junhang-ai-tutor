@@ -47,6 +47,16 @@ function isJsonValue(value) {
   }
 }
 
+function isJsonContainerValue(value) {
+  if (!value) return false;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object";
+  } catch {
+    return false;
+  }
+}
+
 function findBalancedContainerEnd(value, start, work) {
   const stack = [value[start]];
   let inString = false;
@@ -122,7 +132,11 @@ function hasEncodedStructuredString(value, work) {
     if (character !== '"') continue;
     try {
       const decoded = JSON.parse(value.slice(start, index + 1));
-      if (typeof decoded === "string" && containsRestrictedStructure(decoded, work, false)) return true;
+      if (typeof decoded === "string" && containsRestrictedStructure(
+        decoded,
+        { level: "nested", includeEncoded: false },
+        work
+      )) return true;
     } catch {
       // Invalid JSON string literals are not decoded or inspected as structured output.
     }
@@ -132,14 +146,15 @@ function hasEncodedStructuredString(value, work) {
   return false;
 }
 
-function containsRestrictedStructure(value, work = { used: 0 }, includeEncoded = true) {
+function containsRestrictedStructure(value, options = {}, work = { used: 0 }) {
+  const { level = "top", includeEncoded = true } = options;
   const source = stripCodeFences(value).trim();
-  return isJsonValue(source)
+  return (level === "top" ? isJsonValue(source) : isJsonContainerValue(source))
     || hasEmbeddedJsonContainer(source, work)
     || (includeEncoded && hasEncodedStructuredString(source, work))
     || JSON_CODE_FENCE.test(source)
     || KNOWN_SCHEMA_LABEL.test(source)
-    || OLD_ANSWER_ALIAS_LABEL.test(source)
+    || (level === "top" && OLD_ANSWER_ALIAS_LABEL.test(source))
     || UNQUOTED_INTERNAL_LABEL.test(source)
     || QUOTED_ALWAYS_INTERNAL_FRAGMENT.test(source)
     || QUOTED_ROUTE_INTERNAL_FRAGMENT.test(source);
@@ -148,7 +163,7 @@ function containsRestrictedStructure(value, work = { used: 0 }, includeEncoded =
 function sanitizeRestrictedText(value, maxLength) {
   if (typeof value !== "string") return "";
   const source = stripCodeFences(value);
-  const restricted = containsRestrictedStructure(source);
+  const restricted = containsRestrictedStructure(source, { level: "nested" });
   const text = source
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/<\/?(?:studentAnswer|learningSignal)>/gi, "")
@@ -156,7 +171,7 @@ function sanitizeRestrictedText(value, maxLength) {
     .replace(QUOTED_ROUTE_INTERNAL_FRAGMENT, "")
     .replace(INTERNAL_FIELD_FRAGMENT, "")
     .trim();
-  if (restricted && containsRestrictedStructure(text)) return "";
+  if (restricted && containsRestrictedStructure(text, { level: "nested" })) return "";
   return trimAndCap(text, maxLength);
 }
 
@@ -172,7 +187,7 @@ function extractMalformedStudentAnswer(source) {
 
 function sanitizeStudentAnswer(value) {
   const source = stripCodeFences(value).trim();
-  const restricted = containsRestrictedStructure(source);
+  const restricted = containsRestrictedStructure(source, { level: "nested" });
   const extracted = extractMalformedStudentAnswer(source);
   const candidate = extracted || source;
   const lines = candidate
@@ -190,7 +205,7 @@ function sanitizeStudentAnswer(value) {
       .trim())
     .filter(Boolean);
   const answer = trimAndCap(lines.join("\n"), 2000);
-  if (restricted && containsRestrictedStructure(answer)) return "";
+  if (restricted && containsRestrictedStructure(answer, { level: "nested" })) return "";
   return /[\p{L}\p{N}]/u.test(answer) ? answer : "";
 }
 

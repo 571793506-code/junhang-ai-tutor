@@ -480,6 +480,28 @@ test("answerStudentQuestion marks valid outer responses with restricted nested a
   }
 });
 
+test("answerStudentQuestion keeps valid outer scalar-like answers available", async () => {
+  const answers = [
+    "42",
+    "true",
+    "In this dictionary example, \"answer\": \"response\"."
+  ];
+
+  for (const studentAnswer of answers) {
+    const content = JSON.stringify({ studentAnswer, learningSignal: qaLearningSignal });
+    const { payloads, result } = await runQaCase({
+      body: JSON.stringify({ choices: [{ message: { content } }] })
+    });
+    assert.equal(payloads.length, 1);
+    assert.equal(result.available, true);
+    assert.equal(result.status, undefined);
+    assert.equal(result.studentAnswer, studentAnswer);
+    assert.equal(result.answer, studentAnswer);
+    assert.equal(result.structureValid, true);
+    assert.equal(result.learningSignal.profileEligibility, true);
+  }
+});
+
 test("answerStudentQuestion does not escalate a Terra transport failure to Sol", async () => {
   const { payloads, result } = await runQaCase({
     status: 524,

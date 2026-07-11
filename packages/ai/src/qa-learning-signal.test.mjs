@@ -259,6 +259,25 @@ test("normalizeQaModelOutput rejects nested structures inside a valid outer stud
   }
 });
 
+test("normalizeQaModelOutput preserves scalar-like text inside a valid outer studentAnswer", () => {
+  const answers = [
+    "42",
+    "true",
+    "In this dictionary example, \"answer\": \"response\"."
+  ];
+
+  for (const studentAnswer of answers) {
+    const result = normalizeQaModelOutput(JSON.stringify({
+      studentAnswer,
+      learningSignal: validPayload.learningSignal
+    }));
+    assert.equal(result.studentAnswer, studentAnswer);
+    assert.equal(result.structureValid, true);
+    assert.equal(result.learningSignal.profileEligibility, true);
+    assert.notEqual(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+  }
+});
+
 test("normalizeQaModelOutput drops restricted array items containing nested structures", () => {
   const result = normalizeQaModelOutput(JSON.stringify({
     studentAnswer: validPayload.studentAnswer,
