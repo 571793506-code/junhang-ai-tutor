@@ -376,6 +376,95 @@ test("quality Sol success returns and persists the effective merged result with 
   assert.equal(result.persisted.modelRunId, "run-2");
   assert.equal(result.persisted.primaryModelRunId, "run-1");
   assert.equal(result.persisted.escalationModelRunId, "run-2");
+  assert.equal(result.solAttempted, true);
+  assert.equal(result.usedModelEscalation, true);
+});
+
+test("quality Sol persistence failure preserves Terra effective result and blocks review", async () => {
+  let persistCalls = 0;
+  const result = await gradeSubmissionService(
+    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+    {
+      assignmentId: "existing-assignment",
+      subject: "语文",
+      totalScore: 6,
+      referenceAnswers: [{ questionNo: "1", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }],
+      ocrQuestions: [{ questionNo: "1", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.99 }]
+    },
+    {
+      prisma: {
+        modelRun: {
+          create: async ({ data }) => {
+            persistCalls += 1;
+            if (persistCalls === 2) throw new Error("optional grading Sol persistence failed");
+            return { id: "terra-run", ...data };
+          }
+        }
+      },
+      gradingRunner: async () => ({
+        ...riskyTwoQuestionResult(),
+        providerId: "terra-provider",
+        gradingText: JSON.stringify({ score: 3, questionResults: [{ questionNo: "1", status: "uncertain", score: 3, maxScore: 6, correctAnswer: "勇敢", confidence: 0.5 }] })
+      }),
+      solGradingRunner: async () => ({
+        available: true,
+        providerId: "sol-provider",
+        gradingText: JSON.stringify({ questionResults: [{ questionNo: "1", status: "correct", score: 6, maxScore: 6, correctAnswer: "勇敢", confidence: 0.95 }] }),
+        modelRun: { provider: "gpt56", model: "gpt-5.6-sol", status: "SUCCESS" }
+      })
+    }
+  );
+
+  assert.equal(result.providerId, "terra-provider");
+  assert.equal(result.persisted.modelRunId, "terra-run");
+  assert.equal(result.persisted.primaryModelRunId, "terra-run");
+  assert.equal(result.persisted.escalationModelRunId, null);
+  assert.equal(result.solAttempted, true);
+  assert.equal(result.usedModelEscalation, false);
+  assert.equal(result.escalationPersistenceError, "optional grading Sol persistence failed");
+  assert.equal(result.structured.score, null);
+  assert.equal(result.structured.gradingAudit.scoreReliable, false);
+  assert.equal(result.structured.gradingAudit.archiveAllowed, false);
+});
+
+test("quality Sol does not adopt empty, non-selected, or duplicate replacements", async () => {
+  const invalidQuestionResults = [
+    [],
+    [{ questionNo: "99", status: "correct", score: 6, maxScore: 6, confidence: 0.95 }],
+    [
+      { questionNo: "1", status: "correct", score: 6, maxScore: 6, confidence: 0.95 },
+      { questionNo: "1", status: "partial", score: 3, maxScore: 6, confidence: 0.9 }
+    ]
+  ];
+  for (const questionResults of invalidQuestionResults) {
+    const terraText = JSON.stringify({ score: 3, questionResults: [{ questionNo: "1", status: "uncertain", score: 3, maxScore: 6, confidence: 0.5 }] });
+    const result = await gradeSubmissionService(
+      { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+      {
+        subject: "语文",
+        totalScore: 6,
+        referenceAnswers: [{ questionNo: "1", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }],
+        ocrQuestions: [{ questionNo: "1", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.99 }]
+      },
+      {
+        persist: false,
+        gradingRunner: async () => ({ available: true, providerId: "terra-provider", gradingText: terraText }),
+        solGradingRunner: async () => ({
+          available: true,
+          providerId: "sol-provider",
+          gradingText: JSON.stringify({ questionResults }),
+          modelRun: { provider: "gpt56", model: "gpt-5.6-sol", status: "SUCCESS", metadata: { usedModelEscalation: true } }
+        })
+      }
+    );
+
+    assert.equal(result.providerId, "terra-provider");
+    assert.equal(result.gradingText, terraText);
+    assert.equal(result.solAttempted, true);
+    assert.equal(result.usedModelEscalation, false);
+    assert.equal(result.structured.score, null);
+    assert.equal(result.structured.gradingAudit.archiveAllowed, false);
+  }
 });
 
 test("Sol filtering preserves original question numbers when source arrays omit questionNo", async () => {

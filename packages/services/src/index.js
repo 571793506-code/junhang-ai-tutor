@@ -1597,9 +1597,20 @@ function mergeSolGradingResult(initialStructured = {}, solResult = {}, input = {
   const parsed = parseJsonObjectText(solResult.gradingText) || {};
   const solQuestions = Array.isArray(parsed.questionResults) ? parsed.questionResults : [];
   const selected = new Set(selectedQuestionNos.map(String));
+  const allowedStatuses = new Set(["correct", "wrong", "partial", "uncertain"]);
+  const counts = new Map();
+  for (const item of solQuestions) {
+    const questionNo = String(item?.questionNo ?? item?.no ?? "").trim();
+    if (selected.has(questionNo)) counts.set(questionNo, (counts.get(questionNo) || 0) + 1);
+  }
   const solByQuestion = new Map(solQuestions
-    .filter((item, index) => selected.has(String(item.questionNo || item.no || index + 1)))
-    .map((item, index) => [String(item.questionNo || item.no || index + 1), { ...item, modelEscalated: true }]));
+    .filter((item) => {
+      const questionNo = String(item?.questionNo ?? item?.no ?? "").trim();
+      const status = String(item?.status || "").trim().toLowerCase();
+      return selected.has(questionNo) && counts.get(questionNo) === 1 && allowedStatuses.has(status);
+    })
+    .map((item) => [String(item.questionNo ?? item.no).trim(), { ...item, modelEscalated: true }]));
+  if (!solByQuestion.size) return null;
   const questionResults = (initialStructured.questionResults || []).map((item) => solByQuestion.get(String(item.questionNo || "")) || item);
   const explicitScores = questionResults.map((item) => optionalNumber(item.score));
   const score = explicitScores.every((item) => item != null)
@@ -4079,7 +4090,11 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
   const primaryModelRun = await persistRun(result.modelRun, options);
   let effectiveResult = result;
   let effectiveModelRun = primaryModelRun;
-  let escalationModelRun = result.modelRun?.metadata?.usedModelEscalation === true ? primaryModelRun : null;
+  let escalationModelRun = result.modelRun?.metadata?.solAttempted === true || result.modelRun?.metadata?.usedModelEscalation === true
+    ? primaryModelRun
+    : null;
+  let usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
+  let escalationPersistenceError = null;
   let initialStructured = normalizeGradingResult(result, gradingInput, ocr);
   let auditModelRun = null;
   let premiumAuditModelRun = null;
@@ -4105,13 +4120,23 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
         disableSolEscalation: true
       }
     );
-    const solModelRun = await persistRun(solResult.modelRun, options);
-    escalationModelRun = solModelRun;
-    if (solResult.available) {
+    let solModelRun = null;
+    let solPersistenceAvailable = true;
+    try {
+      solModelRun = await persistRun(solResult.modelRun, options);
+      escalationModelRun = solModelRun;
+    } catch (error) {
+      solPersistenceAvailable = false;
+      escalationPersistenceError = String(error?.message || error || "Sol grading persistence failed");
+    }
+    if (solPersistenceAvailable && solResult.available) {
       const mergedSolResult = mergeSolGradingResult(initialStructured, solResult, gradingInput, selectedSolQuestionNos);
-      effectiveResult = mergedSolResult;
-      effectiveModelRun = solModelRun;
-      initialStructured = normalizeGradingResult(mergedSolResult, gradingInput, ocr);
+      if (mergedSolResult) {
+        effectiveResult = mergedSolResult;
+        effectiveModelRun = solModelRun;
+        usedModelEscalation = true;
+        initialStructured = normalizeGradingResult(mergedSolResult, gradingInput, ocr);
+      }
     }
   }
   const riskReviewRequired = shouldRunGradingRiskReview(initialStructured);
@@ -4291,6 +4316,9 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
 
   return {
     ...effectiveResult,
+    solAttempted: actualSolAttempt,
+    usedModelEscalation,
+    escalationPersistenceError,
     referenceAnswer: reference,
     gradingAudit: structured.gradingAudit,
     structured,
