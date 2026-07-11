@@ -6,20 +6,24 @@ const QUESTION_INTENTS = new Set(["concept", "method", "error_reasoning", "expre
 const DIFFICULTY_SIGNALS = new Set(["none", "possible", "clear"]);
 const CONFIDENCE_LEVELS = new Set(["low", "medium", "high"]);
 const SAFETY_STATUSES = new Set(["pass", "blocked"]);
-const INTERNAL_FIELD_LINE = /^\s*"?(?:provider|model|raw|prompt|debug)"?\s*[:=]/i;
-const INTERNAL_FIELD_FRAGMENT = /\s*(?:[,;，；]\s*)?"?(?:provider|model|raw|prompt|debug)"?\s*[:=][\s\S]*$/i;
+const INTERNAL_FIELD_LINE = /^\s*"?(?:provider|model|raw|prompt|debug)"?\s*[=:：＝]/i;
+const INTERNAL_FIELD_FRAGMENT = /\s*(?:[,;，；]\s*)?"?(?:provider|model|raw|prompt|debug)"?\s*[=:：＝][\s\S]*$/i;
 const STRUCTURE_FIELD_LINE = /^\s*"?(?:studentAnswer|learningSignal|knowledgePoints|questionIntent|difficultySignal|misconceptionHypotheses|followUpNeeded|confidence|safetyStatus|profileEligibility|blockedReason)"?\s*[:=]/i;
 const BLOCKED_STATUS = /(?:^|[\s"'<{,])safetyStatus["']?\s*[:=]\s*["']?blocked\b/i;
-const JSON_LIKE_QUOTED_KEY = /"[^"\r\n]+"\s*:/;
-const JSON_CODE_FENCE = /```json\b/i;
-const SENSITIVE_STRUCTURE_LABEL = /\b(?:studentAnswer|learningSignal|provider|model|raw|prompt|debug)\b\s*(?::|["'])/i;
+const JSON_CODE_FENCE = /```\s*json\b/i;
+const KNOWN_STRUCTURE_LABEL = /\b(?:studentAnswer|learningSignal|knowledgePoints|questionIntent|difficultySignal|misconceptionHypotheses|followUpNeeded|confidence|safetyStatus|profileEligibility|blockedReason|provider|model|raw|prompt|debug)\b["']?\s*[=:：＝]/i;
+
+function toWellFormedText(value) {
+  return String(value || "").toWellFormed();
+}
 
 function trimAndCap(value, maxLength) {
-  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+  if (typeof value !== "string") return "";
+  return Array.from(value.toWellFormed().trim()).slice(0, maxLength).join("");
 }
 
 function stripCodeFences(value) {
-  return String(value || "")
+  return toWellFormedText(value)
     .replace(/^\s*```[^\r\n]*\r?\n?/i, "")
     .replace(/\r?\n?\s*```\s*$/i, "");
 }
@@ -31,7 +35,7 @@ function sanitizeRestrictedText(value, maxLength) {
     .replace(/<\/?(?:studentAnswer|learningSignal)>/gi, "")
     .replace(INTERNAL_FIELD_FRAGMENT, "")
     .trim();
-  return text.slice(0, maxLength);
+  return trimAndCap(text, maxLength);
 }
 
 function extractMalformedStudentAnswer(source) {
@@ -88,14 +92,12 @@ export function unavailableQaOutput(_reason) {
 }
 
 export function normalizeQaModelOutput(text) {
-  const source = String(text || "");
+  const source = toWellFormedText(text);
   const parsed = parseJsonObject(source);
   const strippedSource = stripCodeFences(source).trimStart();
-  const structuredSource = strippedSource.startsWith("{")
-    || strippedSource.startsWith("[")
-    || JSON_LIKE_QUOTED_KEY.test(source)
+  const structuredSource = strippedSource === "null"
     || JSON_CODE_FENCE.test(source)
-    || SENSITIVE_STRUCTURE_LABEL.test(source);
+    || KNOWN_STRUCTURE_LABEL.test(source);
   const signal = parsed?.learningSignal;
   const structureValid = typeof parsed?.studentAnswer === "string"
     && signal

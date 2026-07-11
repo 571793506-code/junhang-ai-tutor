@@ -514,7 +514,10 @@ export async function answerStudentQuestion(config, input = {}) {
 
   if (provider?.status !== "ready") {
     const normalized = unavailableQaOutput(provider?.reason || "GPT-5.6 unavailable");
-    return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
+    return {
+      available: false,
+      providerId: "gpt56",
+      status: "unavailable",
       mode,
       ...normalized,
       answer: normalized.studentAnswer,
@@ -526,7 +529,7 @@ export async function answerStudentQuestion(config, input = {}) {
         outputSummary: normalized.studentAnswer,
         status: "SKIPPED"
       }
-    });
+    };
   }
 
   const teachingInstruction =
@@ -578,9 +581,12 @@ studentAnswer 必须只含学生可见内容，不得出现供应商、模型、
   const normalized = result.status === "SUCCESS"
     ? normalizeQaModelOutput(text)
     : unavailableQaOutput(result.error || "GPT-5.6 unavailable");
+  const contentAvailable = result.status === "SUCCESS"
+    && normalized.studentAnswer !== QA_UNAVAILABLE_ANSWER;
 
   return {
-    available: result.status === "SUCCESS",
+    available: contentAvailable,
+    ...(contentAvailable ? {} : { status: "unavailable" }),
     providerId: "gpt56",
     model: provider.model,
     mode,

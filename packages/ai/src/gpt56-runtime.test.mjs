@@ -372,6 +372,7 @@ test("answerStudentQuestion makes zero provider calls when GPT-5.6 is unavailabl
     assert.equal(result.answer, result.studentAnswer);
     assert.equal(result.learningSignal, null);
     assert.equal(result.structureValid, false);
+    assert.equal(Object.hasOwn(result, "reason"), false);
     assert.equal(JSON.stringify(result).includes("gpt-5.6-sol"), false);
   } finally {
     await close(server);
@@ -414,6 +415,7 @@ test("answerStudentQuestion keeps malformed and blocked outputs on one Terra cal
     assert.equal(payloads.length, 1);
     assert.deepEqual(payloads.map((payload) => payload.model), ["gpt-5.6"]);
     assert.equal(result.available, true);
+    assert.equal(result.status, undefined);
     assert.equal(result.studentAnswer, item.expectedAnswer);
     assert.equal(result.answer, item.expectedAnswer);
     assert.equal(result.structureValid, item.structureValid);
@@ -423,6 +425,31 @@ test("answerStudentQuestion keeps malformed and blocked outputs on one Terra cal
       assert.equal(result.learningSignal.safetyStatus, item.learningSignal.safetyStatus);
       assert.equal(result.learningSignal.profileEligibility, item.learningSignal.profileEligibility);
     }
+  }
+});
+
+test("answerStudentQuestion separates HTTP success from unavailable content", async () => {
+  const contents = [
+    null,
+    "",
+    "null",
+    "Here is JSON: {\"studentAnswer\":42,\"learningSignal\":{}}"
+  ];
+
+  for (const content of contents) {
+    const { payloads, result } = await runQaCase({
+      body: JSON.stringify({ choices: [{ message: { content } }] })
+    });
+    assert.equal(payloads.length, 1);
+    assert.deepEqual(payloads.map((payload) => payload.model), ["gpt-5.6"]);
+    assert.equal(result.available, false);
+    assert.equal(result.status, "unavailable");
+    assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+    assert.equal(result.answer, QA_UNAVAILABLE_ANSWER);
+    assert.equal(result.learningSignal, null);
+    assert.equal(result.structureValid, false);
+    assert.equal(result.modelRun.status, "SUCCESS");
+    assert.equal(Object.hasOwn(result, "reason"), false);
   }
 });
 
@@ -436,11 +463,13 @@ test("answerStudentQuestion does not escalate a Terra transport failure to Sol",
   assert.equal(payloads.length, 1);
   assert.deepEqual(payloads.map((payload) => payload.model), ["gpt-5.6"]);
   assert.equal(result.available, false);
+  assert.equal(result.status, "unavailable");
   assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
   assert.equal(result.answer, result.studentAnswer);
   assert.equal(result.learningSignal, null);
   assert.equal(result.structureValid, false);
   assert.equal(result.modelRun.status, "ERROR");
+  assert.equal(Object.hasOwn(result, "reason"), false);
 });
 
 async function runSubmissionEscalationCase(workflow, primaryResponse, solResponse = null) {

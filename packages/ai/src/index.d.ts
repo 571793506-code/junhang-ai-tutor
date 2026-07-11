@@ -157,7 +157,6 @@ export interface QaRuntimeResult extends QaNormalizedOutput {
   mode: QaMode;
   answer: string;
   status?: "unavailable";
-  reason?: string;
   raw?: unknown;
   error?: string;
   modelRun: Record<string, unknown>;

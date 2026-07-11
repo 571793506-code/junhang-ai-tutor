@@ -192,7 +192,8 @@ test("normalizeQaModelOutput blocks embedded and fenced structured output", () =
     "Here is JSON: {\"studentAnswer\":42,\"learningSignal\":{\"knowledgePoints\":[\"prefix-secret\"]},\"provider\":\"Terra-prefix\"}",
     "模型响应如下：\n```json\n{\"studentAnswer\":\"fenced-secret\",\"learningSignal\":{}}\n```\n请查收",
     "说明在前。\nstudentAnswer: \"multiline-secret\"\nlearningSignal: {\n  knowledgePoints: [\"hidden-point\"]\n}\nprovider: Terra-multiline",
-    "结果是 {\"answer\":\"suffix-secret\"}，以上为内部输出。"
+    "结果是 {\"studentAnswer\":\"suffix-secret\"}，以上为内部输出。",
+    "模型返回： ``` JSON {'answer':'fence-secret'} ```"
   ];
 
   for (const fragment of fragments) {
@@ -204,6 +205,82 @@ test("normalizeQaModelOutput blocks embedded and fenced structured output", () =
       assert.equal(result.studentAnswer.includes(forbidden), false);
     }
   }
+});
+
+test("normalizeQaModelOutput preserves ordinary teaching text with a quoted pair", () => {
+  const text = "英语词典中常写成 \"apple\": \"苹果\"。";
+  const result = normalizeQaModelOutput(text);
+
+  assert.equal(result.studentAnswer, text);
+  assert.equal(result.structureValid, false);
+  assert.equal(result.learningSignal, null);
+});
+
+test("normalizeQaModelOutput removes internal fields with case and fullwidth separators", () => {
+  const result = normalizeQaModelOutput(JSON.stringify({
+    studentAnswer: "先理解小数意义。\nMODEL：gpt-5.6\nprovider＝Terra",
+    learningSignal: {
+      ...validPayload.learningSignal,
+      knowledgePoints: ["小数意义 MODEL：gpt-5.6"],
+      misconceptionHypotheses: ["需要观察 provider＝Terra"]
+    }
+  }));
+  const internalOnly = normalizeQaModelOutput(JSON.stringify({
+    studentAnswer: "MODEL：gpt-5.6\nprovider＝Terra",
+    learningSignal: validPayload.learningSignal
+  }));
+  const blocked = normalizeQaModelOutput(JSON.stringify({
+    studentAnswer: "unsafe answer",
+    learningSignal: {
+      ...validPayload.learningSignal,
+      safetyStatus: "blocked",
+      blockedReason: "unsafe-topic； DEBUG＝trace"
+    }
+  }));
+
+  assert.equal(result.studentAnswer, "先理解小数意义。");
+  assert.deepEqual(result.learningSignal.knowledgePoints, ["小数意义"]);
+  assert.deepEqual(result.learningSignal.misconceptionHypotheses, ["需要观察"]);
+  assert.equal(internalOnly.studentAnswer, QA_UNAVAILABLE_ANSWER);
+  assert.equal(internalOnly.learningSignal.profileEligibility, false);
+  assert.equal(blocked.learningSignal.blockedReason, "unsafe-topic");
+  for (const output of [result, internalOnly, blocked]) {
+    assert.equal(JSON.stringify(output).includes("gpt-5.6"), false);
+    assert.equal(JSON.stringify(output).includes("Terra"), false);
+    assert.equal(JSON.stringify(output).includes("trace"), false);
+  }
+});
+
+test("normalizeQaModelOutput caps by code points and repairs lone surrogates", () => {
+  const emoji = "😀";
+  const result = normalizeQaModelOutput(JSON.stringify({
+    studentAnswer: `${"a".repeat(1999)}${emoji}tail`,
+    learningSignal: {
+      ...validPayload.learningSignal,
+      knowledgePoints: [`${"k".repeat(79)}${emoji}tail`],
+      misconceptionHypotheses: [`${"h".repeat(159)}${emoji}tail`]
+    }
+  }));
+  const lone = normalizeQaModelOutput(JSON.stringify({
+    studentAnswer: "safe\ud800answer",
+    learningSignal: {
+      ...validPayload.learningSignal,
+      knowledgePoints: ["point\ud800value"],
+      misconceptionHypotheses: ["hypothesis\udfffvalue"]
+    }
+  }));
+
+  assert.equal(Array.from(result.studentAnswer).length, 2000);
+  assert.equal(result.studentAnswer.endsWith(emoji), true);
+  assert.equal(result.studentAnswer.isWellFormed(), true);
+  assert.equal(Array.from(result.learningSignal.knowledgePoints[0]).length, 80);
+  assert.equal(result.learningSignal.knowledgePoints[0].endsWith(emoji), true);
+  assert.equal(Array.from(result.learningSignal.misconceptionHypotheses[0]).length, 160);
+  assert.equal(result.learningSignal.misconceptionHypotheses[0].endsWith(emoji), true);
+  assert.equal(lone.studentAnswer, "safe�answer");
+  assert.equal(lone.studentAnswer.isWellFormed(), true);
+  assert.equal(lone.learningSignal.knowledgePoints[0].isWellFormed(), true);
+  assert.equal(lone.learningSignal.misconceptionHypotheses[0].isWellFormed(), true);
 });
 
 test("normalizeQaModelOutput does not over-block ordinary mathematical braces", () => {
