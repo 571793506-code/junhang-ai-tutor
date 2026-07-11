@@ -349,18 +349,43 @@ test("answerStudentQuestion requests and returns the exact structured learning s
   assert.equal(JSON.stringify(result.learningSignal).includes("must-not-leak"), false);
 });
 
-test("answerStudentQuestion returns the approved unavailable result without a provider call", async () => {
-  const result = await answerStudentQuestion({
-    GPT56_SOL_FALLBACK_ENABLED: "true",
-    GPT56_SOL_MODEL: "gpt-5.6-sol"
-  }, { question: "0.5 表示什么？", subject: "数学" });
+test("answerStudentQuestion makes zero provider calls when GPT-5.6 is unavailable", async () => {
+  let requestCount = 0;
+  const server = http.createServer((_req, res) => {
+    requestCount += 1;
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "must not be called" } }));
+  });
+  const address = await listen(server);
 
-  assert.equal(result.available, false);
-  assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
-  assert.equal(result.answer, result.studentAnswer);
-  assert.equal(result.learningSignal, null);
-  assert.equal(result.structureValid, false);
-  assert.equal(JSON.stringify(result).includes("gpt-5.6-sol"), false);
+  try {
+    const result = await answerStudentQuestion({
+      GPT56_BASE_URL: `http://127.0.0.1:${address.port}`,
+      GPT56_MODEL: "gpt-5.6",
+      GPT56_SOL_FALLBACK_ENABLED: "true",
+      GPT56_SOL_MODEL: "gpt-5.6-sol"
+    }, { question: "0.5 表示什么？", subject: "数学" });
+
+    assert.equal(requestCount, 0);
+    assert.equal(result.available, false);
+    assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+    assert.equal(result.answer, result.studentAnswer);
+    assert.equal(result.learningSignal, null);
+    assert.equal(result.structureValid, false);
+    assert.equal(JSON.stringify(result).includes("gpt-5.6-sol"), false);
+  } finally {
+    await close(server);
+  }
+});
+
+test("answerStudentQuestion infers a safe mode when input.mode is invalid", async () => {
+  const result = await answerStudentQuestion({}, {
+    mode: "INVALID_MODE",
+    question: "这道题怎么做？",
+    subject: "数学"
+  });
+
+  assert.equal(result.mode, "GUIDED_THINKING");
 });
 
 test("answerStudentQuestion keeps malformed and blocked outputs on one Terra call", async () => {

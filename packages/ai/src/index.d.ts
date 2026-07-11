@@ -163,6 +163,14 @@ export interface QaRuntimeResult extends QaNormalizedOutput {
   modelRun: Record<string, unknown>;
 }
 
+export interface QaQuestionInput extends Record<string, unknown> {
+  mode?: QaMode;
+  question?: string;
+  studentName?: string;
+  subject?: string;
+  context?: unknown;
+}
+
 export declare const QA_LEARNING_SIGNAL_SCHEMA_VERSION: "qa-learning-signal-v1";
 export declare const QA_UNAVAILABLE_ANSWER: "AI 问答暂时不可用，请稍后再试。";
 export declare const QA_BLOCKED_ANSWER: "这个问题暂时不能直接回答，请换一种安全、清楚的方式提问。";
@@ -190,7 +198,7 @@ export declare function callGpt55Chat(config: RuntimeConfigLike, messages: Array
 export declare function callGpt56Chat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>, options?: Record<string, unknown>): Promise<unknown>;
 export declare function extractChatText(body: unknown): string;
 export declare function inferClassroomQaMode(question?: string): QaMode;
-export declare function answerStudentQuestion(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<QaRuntimeResult>;
+export declare function answerStudentQuestion(config: RuntimeConfigLike, input?: QaQuestionInput): Promise<QaRuntimeResult>;
 export declare function generateVocabularyCard(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function draftTeacherTask(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function draftAssessment(

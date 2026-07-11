@@ -87,6 +87,8 @@ export function unavailableQaOutput(_reason) {
 export function normalizeQaModelOutput(text) {
   const source = String(text || "");
   const parsed = parseJsonObject(source);
+  const strippedSource = stripCodeFences(source).trimStart();
+  const structuredSource = strippedSource.startsWith("{") || strippedSource.startsWith("[");
   const signal = parsed?.learningSignal;
   const structureValid = typeof parsed?.studentAnswer === "string"
     && signal
@@ -101,6 +103,7 @@ export function normalizeQaModelOutput(text) {
         structureValid: false
       };
     }
+    if (structuredSource) return unavailableQaOutput("malformed-structured-output");
     const fallbackAnswer = sanitizeStudentAnswer(source);
     return fallbackAnswer
       ? { studentAnswer: fallbackAnswer, learningSignal: null, structureValid: false }

@@ -150,6 +150,53 @@ test("normalizeQaModelOutput sanitizes malformed plain text without creating an 
   assert.equal(JSON.stringify(result).includes("gpt-5.6"), false);
 });
 
+test("normalizeQaModelOutput never echoes parseable JSON with a non-string studentAnswer", () => {
+  const result = normalizeQaModelOutput(JSON.stringify({
+    studentAnswer: { text: "unsafe-object-answer" },
+    learningSignal: validPayload.learningSignal,
+    provider: "Terra-Secret",
+    model: "gpt-5.6-secret",
+    raw: "raw-secret",
+    prompt: "prompt-secret",
+    debug: "debug-secret"
+  }));
+
+  assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+  assert.equal(result.structureValid, false);
+  assert.equal(result.learningSignal, null);
+  for (const forbidden of [
+    "{",
+    "learningSignal",
+    "studentAnswer",
+    "provider",
+    "model",
+    "raw",
+    "prompt",
+    "debug",
+    "unsafe-object-answer",
+    "Terra-Secret",
+    "gpt-5.6-secret"
+  ]) {
+    assert.equal(result.studentAnswer.includes(forbidden), false);
+  }
+});
+
+test("normalizeQaModelOutput never treats structured fragments as plain-text answers", () => {
+  const fragments = [
+    "{\"studentAnswer\":[\"object-fragment-secret\"],\"learningSignal\":{\"knowledgePoints\":[\"secret\"]}",
+    "[{\"studentAnswer\":\"array-fragment-secret\",\"learningSignal\":"
+  ];
+
+  for (const fragment of fragments) {
+    const result = normalizeQaModelOutput(fragment);
+    assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+    assert.equal(result.structureValid, false);
+    assert.equal(result.learningSignal, null);
+    assert.equal(result.studentAnswer.includes("fragment-secret"), false);
+    assert.equal(result.studentAnswer.includes("learningSignal"), false);
+  }
+});
+
 test("normalizeQaModelOutput uses approved fallback copy when malformed text is unsafe or unreadable", () => {
   const blocked = normalizeQaModelOutput("safetyStatus: blocked\nraw: unsafe details");
   const unreadable = normalizeQaModelOutput("provider: Terra\nmodel: gpt-5.6\ndebug: trace");

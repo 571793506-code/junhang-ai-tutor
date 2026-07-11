@@ -508,7 +508,9 @@ function fallbackUnavailable(providerId, reason, fallback) {
 export async function answerStudentQuestion(config, input = {}) {
   const snapshot = buildAiStartupSnapshot(config);
   const provider = snapshot.providers.find((item) => item.id === "gpt56");
-  const mode = input.mode || inferClassroomQaMode(input.question);
+  const mode = input.mode === "GUIDED_THINKING" || input.mode === "KNOWLEDGE_EXPLANATION"
+    ? input.mode
+    : inferClassroomQaMode(input.question);
 
   if (provider?.status !== "ready") {
     const normalized = unavailableQaOutput(provider?.reason || "GPT-5.6 unavailable");
