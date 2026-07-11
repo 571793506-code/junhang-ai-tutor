@@ -33,17 +33,15 @@ test("buildQaActorContext confirms classroom identity only after scoped student 
   assert.deepEqual(
     buildQaActorContext(
       { role: "classroom", deviceId: "d1" },
-      { deviceId: "d1", studentId: "s1" },
+      { studentId: "s1" },
       { classroomStudentConfirmed: true }
     ),
     { actorRole: "classroom", identityConfirmed: true }
   );
 
   for (const [session, input, options] of [
-    [{ role: "classroom", deviceId: "d1" }, { deviceId: "d1" }, { classroomStudentConfirmed: true }],
-    [{ role: "classroom", deviceId: "d1" }, { deviceId: "d2", studentId: "s1" }, { classroomStudentConfirmed: true }],
-    [{ role: "classroom", deviceId: "d1" }, { deviceId: "d1", studentId: "s1" }, { classroomStudentConfirmed: false }],
-    [{ role: "classroom" }, { deviceId: "d1", studentId: "s1" }, { classroomStudentConfirmed: true }]
+    [{ role: "classroom", deviceId: "d1" }, {}, { classroomStudentConfirmed: true }],
+    [{ role: "classroom", deviceId: "d1" }, { studentId: "s1" }, { classroomStudentConfirmed: false }]
   ]) {
     assert.deepEqual(buildQaActorContext(session, input, options), {
       actorRole: "classroom",

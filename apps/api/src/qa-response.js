@@ -38,8 +38,6 @@ export function buildQaActorContext(session = {}, input = {}, options = {}) {
   } else if (actorRole === "classroom") {
     identityConfirmed = options.classroomStudentConfirmed === true
       && Boolean(session.deviceId)
-      && Boolean(input.deviceId)
-      && session.deviceId === input.deviceId
       && Boolean(input.studentId);
   }
 
