@@ -238,6 +238,47 @@ test("case-only drift with different bytes writes source bytes under source casi
   });
 });
 
+test("write rejects case-only parent directory drift before touching excluded target content", () => {
+  const { sourceRoot, targetRoot } = createWorkspace();
+  writeFile(sourceRoot, "Pages/Foo.js", "source bytes\n");
+  writeFile(targetRoot, "pages/foo.js", "target bytes\n");
+  writeFile(targetRoot, "pages/cache/keep.txt", "excluded bytes\n");
+  const plan = compareMiniprogramTrees(sourceRoot, targetRoot);
+
+  assert.deepEqual(plan, {
+    added: ["Pages/Foo.js"],
+    changed: [],
+    deleted: ["pages/foo.js"]
+  });
+  assert.throws(
+    () => applyMiniprogramSync(sourceRoot, targetRoot, plan),
+    /case-only parent directory drift/i
+  );
+
+  assert.deepEqual(fs.readdirSync(targetRoot), ["pages"]);
+  assert.deepEqual(fs.readdirSync(path.join(targetRoot, "pages")).sort(), ["cache", "foo.js"]);
+  assert.equal(fs.readFileSync(path.join(targetRoot, "pages", "foo.js"), "utf8"), "target bytes\n");
+  assert.equal(
+    fs.readFileSync(path.join(targetRoot, "pages", "cache", "keep.txt"), "utf8"),
+    "excluded bytes\n"
+  );
+});
+
+test("write conservatively rejects case-only parent directory drift without excluded children", () => {
+  const { sourceRoot, targetRoot } = createWorkspace();
+  writeFile(sourceRoot, "Pages/Foo.js", "source bytes\n");
+  writeFile(targetRoot, "pages/foo.js", "target bytes\n");
+  const plan = compareMiniprogramTrees(sourceRoot, targetRoot);
+
+  assert.throws(
+    () => applyMiniprogramSync(sourceRoot, targetRoot, plan),
+    /case-only parent directory drift/i
+  );
+  assert.deepEqual(fs.readdirSync(targetRoot), ["pages"]);
+  assert.deepEqual(fs.readdirSync(path.join(targetRoot, "pages")), ["foo.js"]);
+  assert.equal(fs.readFileSync(path.join(targetRoot, "pages", "foo.js"), "utf8"), "target bytes\n");
+});
+
 test("buildCaseFoldedPathMap rejects duplicate folded keys with different spelling", () => {
   assert.throws(
     () => syncLib.buildCaseFoldedPathMap(["pages/Foo.js", "pages/foo.js"]),

@@ -438,6 +438,35 @@ function assertTargetPathAbsent(targetRoot, relativePath) {
   }
 }
 
+function assertNoCaseOnlyParentDirectoryDrift(targetRoot, sourcePaths) {
+  for (const relativePath of sourcePaths) {
+    const parentSegments = relativePath.split("/").slice(0, -1);
+    let currentDirectory = targetRoot;
+    for (const expectedSegment of parentSegments) {
+      assertPathInside(targetRoot, currentDirectory);
+      assertNoSymbolicLinkPath(targetRoot, currentDirectory);
+      const matches = fs.readdirSync(currentDirectory, { withFileTypes: true }).filter(
+        (entry) => entry.name.toLowerCase() === expectedSegment.toLowerCase()
+      );
+      if (matches.length === 0) break;
+      if (matches.length > 1) {
+        throw new Error(`case-fold path collision in target directory: ${relativePath}`);
+      }
+
+      const [entry] = matches;
+      if (entry.name !== expectedSegment) {
+        throw new Error(
+          `case-only parent directory drift: expected ${expectedSegment}, found ${entry.name}`
+        );
+      }
+      if (!entry.isDirectory() || entry.isSymbolicLink()) {
+        throw new Error(`Target parent path is not a regular directory: ${entry.name}`);
+      }
+      currentDirectory = path.join(currentDirectory, entry.name);
+    }
+  }
+}
+
 function removeEmptyParentDirectories(targetRoot, deletedPaths) {
   const directories = new Set();
   for (const relativePath of deletedPaths) {
@@ -575,6 +604,10 @@ export function applyMiniprogramSync(sourceRoot, targetRoot, differences) {
     }
   }
   const allowedTargetFiles = new Set(listSyncFiles(resolvedTargetRoot));
+  assertNoCaseOnlyParentDirectoryDrift(
+    resolvedTargetRoot,
+    [...validatedDifferences.added, ...validatedDifferences.changed]
+  );
 
   const deletedPaths = validatedDifferences.deleted;
   const actuallyDeletedPaths = [];
