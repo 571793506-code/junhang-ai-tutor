@@ -43,6 +43,11 @@ import { checkDatabaseStatus, persistenceOptions, requireDatabase } from "./db-s
 import { createEncodingGuardMiddleware } from "./encoding-guard-middleware.js";
 import { loadRuntimeConfig, publicConfigSummary } from "./env.js";
 import { gradingQuestionReviewState, requireAllQuestionsReviewedForArchive } from "./grading-review-gates.js";
+import {
+  buildQaActorContext,
+  cleanClassroomQaResultForClient,
+  cleanQaResultForClient
+} from "./qa-response.js";
 import { createSessionToken, readBearerToken, requireSession, verifySessionToken } from "./session.js";
 import {
   buildStudentGrowthSnapshot,
@@ -966,19 +971,6 @@ function taskDisplayDetails(task, metadata = {}) {
   return {
     summary: summary || readableText(raw, ""),
     description: description || summary || readableText(raw, "")
-  };
-}
-
-function cleanQaResultForClient(result = {}) {
-  const parsedAnswer = parseStructuredDisplayText(result.answer);
-  const answer =
-    parsedAnswer && typeof parsedAnswer === "object" && !Array.isArray(parsedAnswer)
-      ? readableText(parsedAnswer.content || parsedAnswer.answer || parsedAnswer.text, result.answer)
-      : readableText(result.answer, "AI 问答已收到，老师稍后会协助复核。");
-  return {
-    available: Boolean(result.available),
-    mode: result.mode || "KNOWLEDGE_EXPLANATION",
-    answer
   };
 }
 
@@ -3053,8 +3045,11 @@ app.post("/api/ai/qa", requireSession(config, ["student", "teacher", "classroom"
     if (!assertClassroomDeviceScope({ session }, res, input.deviceId)) return;
     if (!(await assertClassroomStudentScope({ session }, res, input.studentId))) return;
   }
+  const actorContext = buildQaActorContext(session, input, {
+    classroomStudentConfirmed: session.role === "classroom" && Boolean(input.studentId)
+  });
   const { options, persistence } = await persistenceOptions(input);
-  const result = await answerStudentQuestionService(config, input, options);
+  const result = await answerStudentQuestionService(config, { ...input, ...actorContext }, options);
   res.json({ ok: true, persistence, result: cleanQaResultForClient(result) });
 }));
 
@@ -3583,19 +3578,14 @@ app.post("/api/classroom/voice-qa", requireDatabase, requireSession(config, ["cl
   if (!transcript) {
     return res.status(400).json({ ok: false, error: "TRANSCRIPT_REQUIRED", message: "请先提交学生语音问题。" });
   }
+  let classroomStudentConfirmed = false;
   if (input.studentId) {
-    const student = await prisma.student.findFirst({
-      where: {
-        id: input.studentId,
-        loginEnabled: true,
-        enrollmentStatus: { not: "WITHDRAWN" }
-      },
-      select: { id: true }
-    });
-    if (!student) {
-      return res.status(403).json({ ok: false, error: "STUDENT_NOT_ALLOWED", message: "该学生不属于当前平板可访问范围。" });
-    }
+    if (!(await assertClassroomStudentScope({ session: req.session }, res, input.studentId))) return;
+    classroomStudentConfirmed = true;
   }
+  const actorContext = buildQaActorContext(req.session, { ...input, deviceId }, {
+    classroomStudentConfirmed
+  });
 
   const { options, persistence } = await persistenceOptions({
     ...input,
@@ -3605,11 +3595,12 @@ app.post("/api/classroom/voice-qa", requireDatabase, requireSession(config, ["cl
   const qa = await answerStudentQuestionService(config, {
     ...input,
     deviceId,
-    question: transcript
+    question: transcript,
+    ...actorContext
   }, options);
 
   const speech = await createMiniMaxSpeechTask(config, {
-    text: qa.answer,
+    text: qa.studentAnswer || qa.answer,
     voiceId: input.voiceId,
     purpose: "classroom-answer"
   });
@@ -3630,19 +3621,7 @@ app.post("/api/classroom/voice-qa", requireDatabase, requireSession(config, ["cl
   res.json({
     ok: true,
     persistence,
-    result: {
-      available: qa.available,
-      mode: qa.mode,
-      transcript,
-      answer: qa.answer,
-      voice: {
-        available: speech.available,
-        status: speech.status,
-        audioUrl: speech.audioUrl || null,
-        reason: speech.reason || null
-      },
-      persisted: qa.persisted
-    }
+    result: cleanClassroomQaResultForClient({ qa, transcript, voice: speech })
   });
 }));
 

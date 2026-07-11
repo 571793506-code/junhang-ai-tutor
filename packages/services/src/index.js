@@ -24,6 +24,9 @@ import {
   recordVocabularyRecord,
   recordVoiceInteraction
 } from "@junhang/db";
+import { buildQaLearningRecord } from "./qa-learning-record.js";
+
+export { buildQaLearningRecord } from "./qa-learning-record.js";
 
 const workspaceRoot = findWorkspaceRoot();
 
@@ -414,6 +417,13 @@ async function persistRun(modelRun, options = {}) {
 function optionalText(value) {
   const text = value == null ? "" : String(value).trim();
   return text || null;
+}
+
+function safeQaAnswer(result = {}) {
+  for (const value of [result.studentAnswer, result.answer]) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
 }
 
 function optionalNumber(value) {
@@ -3720,8 +3730,11 @@ function shouldRunAssessmentModelReview(config = {}, input = {}, options = {}) {
 }
 
 export async function answerStudentQuestionService(config, input = {}, options = {}) {
-  const result = await answerStudentQuestion(config, input);
+  const qaRunner = options.qaRunner || answerStudentQuestion;
+  const result = await qaRunner(config, input);
   const modelRun = await persistRun(result.modelRun, options);
+  const learningRecord = buildQaLearningRecord(input, result);
+  const answer = safeQaAnswer(result);
 
   const qaSession =
     options.persist === false
@@ -3732,12 +3745,8 @@ export async function answerStudentQuestionService(config, input = {}, options =
             modelRunId: modelRun?.id || null,
             subject: input.subject || null,
             question: input.question,
-            answer: result.answer,
-            metadata: {
-              mode: result.mode,
-              providerId: result.providerId,
-              available: result.available
-            }
+            answer,
+            metadata: learningRecord
           },
           options
         );
@@ -3749,13 +3758,13 @@ export async function answerStudentQuestionService(config, input = {}, options =
             deviceId: input.deviceId,
             studentId: input.studentId || null,
             modelRunId: modelRun?.id || null,
-            mode: result.mode,
+            mode: learningRecord.mode,
             transcript: input.question,
-            answerSummary: result.answer,
+            answerSummary: answer,
             metadata: {
               qaSessionId: qaSession?.id || null,
-              providerId: result.providerId,
-              available: result.available
+              available: learningRecord.available,
+              mode: learningRecord.mode
             }
           },
           options
