@@ -125,6 +125,28 @@ test("Sol quality check injects forced Sol only through the internal draft runne
   assert.equal(Number.isFinite(summary.checks[0].latencyMs), true);
 });
 
+test("Sol quality check fails valid content that exceeds its declared total timeout", async () => {
+  const [baseSample] = buildSolQualityCases();
+  const sample = { ...baseSample, assessmentTotalTimeoutMs: 100 };
+  const result = validMathQuizResult();
+  let nowMs = 1000;
+  const summary = await runSolQualityCheck({}, {
+    cases: [sample],
+    now: () => nowMs,
+    draftAssessmentImpl: async () => ({ available: true }),
+    draftAssessmentServiceImpl: async (config, input, options) => {
+      await options.assessmentDraftRunner(config, input);
+      nowMs += 112;
+      return result;
+    }
+  });
+
+  assert.equal(summary.ok, false);
+  assert.equal(summary.checks[0].ok, false);
+  assert.equal(summary.checks[0].latencyMs, 112);
+  assert.ok(summary.checks[0].issues.includes("样本耗时 112ms 超过声明总预算 100ms。"));
+});
+
 test("Sol quality check rejects a local dynamic fallback result", async () => {
   const [sample] = buildSolQualityCases();
   const summary = await runSolQualityCheck({}, {

@@ -104,9 +104,7 @@ export async function runProbe(
         checks.push({ id: probe.id, ...classifyGpt56ProbeResult({ ok: false, status: response?.status || null, body, error: error instanceof Error ? error.message : String(error) }) });
       }
     }
-    const requiredCheckIds = target.role === "sol-fallback"
-      ? ["text", "json_object", "reasoning_effort", "json_schema", "project_grading_json"]
-      : ["text"];
+    const requiredCheckIds = ["text", "json_object", "reasoning_effort", "json_schema", "project_grading_json"];
     const targetOk = requiredCheckIds.every((id) => checks.some((item) => item.id === id && item.supported));
     if (target.required && !targetOk) requiredTargetsOk = false;
     targets.push({

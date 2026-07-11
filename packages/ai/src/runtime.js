@@ -916,7 +916,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
     role = "primary",
     model = runtime.gpt56Model,
     reasoningEffort = kind === "试卷" ? "high" : "medium",
-    timeoutMs = attemptTimeoutMs(assessmentTimeoutMs),
+    timeoutMs = attemptTimeoutMs(execution.timeoutMs || assessmentTimeoutMs),
     trigger = null
   } = {}) => {
     const partitionTokens = partitionTokenBudget(index);
@@ -944,8 +944,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
   const primaryCallOptions = {
     role: execution.role,
     model: primaryModel,
-    reasoningEffort: primaryReasoningEffort,
-    timeoutMs: execution.timeoutMs
+    reasoningEffort: primaryReasoningEffort
   };
   let partitionResults = await mapWithConcurrency(
     partitions,

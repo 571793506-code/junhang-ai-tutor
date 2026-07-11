@@ -781,6 +781,84 @@ test("draftAssessment forces high reasoning for direct internal Sol execution", 
   }
 });
 
+test("draftAssessment clips each direct Sol partition attempt to the remaining total budget", { timeout: 2000 }, async () => {
+  const assessmentTotalTimeoutMs = 300;
+  const executionTimeoutMs = 700;
+  const server = http.createServer(async (req, res) => {
+    const payload = await readJsonRequest(req);
+    setTimeout(() => sendChatContent(res, validPartitionContent(payload)), 500);
+  });
+  const address = await listen(server);
+
+  try {
+    const requestStartedAt = Date.now();
+    const result = await draftAssessment(
+      enabledSolConfig(`http://127.0.0.1:${address.port}`),
+      compactAssessmentInput({
+        kind: "试卷",
+        assessmentMaxTokens: 24000,
+        assessmentTotalTimeoutMs
+      }),
+      {
+        role: "sol-quality-check",
+        model: "gpt-5.6-sol",
+        timeoutMs: executionTimeoutMs,
+        disableSolEscalation: true
+      }
+    );
+    const elapsedMs = Date.now() - requestStartedAt;
+    const attempts = result.modelRun.metadata.attempts.filter((attempt) => attempt.role === "sol-quality-check");
+    const timeouts = attempts.map((attempt) => attempt.timeoutMs).sort((left, right) => left - right);
+
+    assert.equal(attempts.length, 4);
+    assert.equal(timeouts.every((timeoutMs) => timeoutMs <= assessmentTotalTimeoutMs), true);
+    assert.equal(timeouts.slice(0, 2).every((timeoutMs) => timeoutMs <= 5), true);
+    assert.equal(timeouts.slice(2).every((timeoutMs) => timeoutMs <= assessmentTotalTimeoutMs), true);
+    assert.ok(timeouts[1] < timeouts[2]);
+    assert.ok(elapsedMs < 600, `expected ${assessmentTotalTimeoutMs}ms total budget to stop before 600ms, took ${elapsedMs}ms`);
+  } finally {
+    server.closeAllConnections();
+    await close(server);
+  }
+});
+
+test("draftAssessment keeps direct Sol partition attempts within execution timeout", { timeout: 3000 }, async () => {
+  const assessmentTotalTimeoutMs = 2000;
+  const executionTimeoutMs = 100;
+  const server = http.createServer(async (req, res) => {
+    const payload = await readJsonRequest(req);
+    setTimeout(() => sendChatContent(res, validPartitionContent(payload)), 300);
+  });
+  const address = await listen(server);
+
+  try {
+    const requestStartedAt = Date.now();
+    const result = await draftAssessment(
+      enabledSolConfig(`http://127.0.0.1:${address.port}`),
+      compactAssessmentInput({
+        kind: "试卷",
+        assessmentMaxTokens: 24000,
+        assessmentTotalTimeoutMs
+      }),
+      {
+        role: "sol-quality-check",
+        model: "gpt-5.6-sol",
+        timeoutMs: executionTimeoutMs,
+        disableSolEscalation: true
+      }
+    );
+    const elapsedMs = Date.now() - requestStartedAt;
+    const directAttempts = result.modelRun.metadata.attempts.filter((attempt) => attempt.role === "sol-quality-check");
+
+    assert.equal(directAttempts.length, 4);
+    assert.equal(directAttempts.every((attempt) => attempt.timeoutMs <= executionTimeoutMs), true);
+    assert.ok(elapsedMs < 1000, `expected execution timeout to stop well before ${assessmentTotalTimeoutMs}ms, took ${elapsedMs}ms`);
+  } finally {
+    server.closeAllConnections();
+    await close(server);
+  }
+});
+
 test("draftAssessment stops queued Sol partitions when the new scenario budget is exhausted", async () => {
   const payloads = [];
   let nowMs = 0;

@@ -35,10 +35,11 @@ export async function runSolQualityCheck(
   {
     cases = buildSolQualityCases(),
     draftAssessmentImpl = draftAssessment,
-    draftAssessmentServiceImpl = draftAssessmentService
+    draftAssessmentServiceImpl = draftAssessmentService,
+    now = Date.now
   } = {}
 ) {
-  const startedAt = Date.now();
+  const startedAt = now();
   const runtime = normalizeRuntimeConfig(config);
   const execution = {
     ...buildSolExecutionOptions(),
@@ -54,16 +55,23 @@ export async function runSolQualityCheck(
   const checks = [];
 
   for (const sample of cases) {
-    const sampleStartedAt = Date.now();
+    const sampleStartedAt = now();
     progress(`start ${sample.name} (${runtime.gpt56SolModel}, high)`);
     const result = await draftAssessmentServiceImpl(config, sample, {
       persist: false,
       assessmentDraftRunner
     });
     const evaluated = evaluateGenerationQualityResult(sample, result);
-    const latencyMs = Date.now() - sampleStartedAt;
+    const latencyMs = now() - sampleStartedAt;
     const actualModel = evaluated.detail.model || null;
     const actualEffort = evaluated.detail.reasoningEffort || null;
+    const declaredTotalTimeouts = [
+      result?.generationPipeline?.model?.assessmentTotalTimeoutMs,
+      sample.assessmentTotalTimeoutMs
+    ].map(Number).filter((value) => Number.isFinite(value) && value > 0);
+    const declaredTotalTimeoutMs = declaredTotalTimeouts.length
+      ? Math.min(...declaredTotalTimeouts)
+      : null;
     const diagnosticIssues = [];
     if (!actualModel || !actualEffort) {
       diagnosticIssues.push("缺少实际模型或推理档位诊断。");
@@ -73,6 +81,9 @@ export async function runSolQualityCheck(
     }
     if (actualEffort && actualEffort !== execution.reasoningEffort) {
       diagnosticIssues.push("实际推理档位不是 high。");
+    }
+    if (declaredTotalTimeoutMs && latencyMs > declaredTotalTimeoutMs) {
+      diagnosticIssues.push(`样本耗时 ${latencyMs}ms 超过声明总预算 ${declaredTotalTimeoutMs}ms。`);
     }
     const issues = [...evaluated.detail.issues, ...diagnosticIssues];
     const ok = evaluated.ok && diagnosticIssues.length === 0;
@@ -100,7 +111,7 @@ export async function runSolQualityCheck(
     ok,
     status: ok ? "passed" : "failed",
     generatedAt: new Date().toISOString(),
-    durationMs: Date.now() - startedAt,
+    durationMs: now() - startedAt,
     verification: {
       scope: "sol-generation-quality",
       mode: "forced-sol-primary",

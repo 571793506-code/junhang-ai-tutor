@@ -123,6 +123,27 @@ test("GPT-5.6 capability check probes each required target and aggregates result
 });
 
 for (const failedProbeId of ["json_object", "reasoning_effort", "json_schema", "project_grading_json"]) {
+  test(`GPT-5.6 Terra fails when ${failedProbeId} is unsupported`, async () => {
+    const summary = await runProbe({
+      GPT56_API_KEY: "synthetic-key",
+      GPT56_MODEL: "gpt-5.6-terra",
+      GPT56_SOL_FALLBACK_ENABLED: "false"
+    }, {
+      fetchImpl: async (_url, options) => {
+        const payload = JSON.parse(options.body);
+        const probeId = identifyProbeId(payload);
+        return probeId === failedProbeId
+          ? syntheticResponse({ ok: false, status: 400, body: { error: { message: `Synthetic ${failedProbeId} failure` } } })
+          : syntheticResponse();
+      }
+    });
+    const terra = summary.targets.find((target) => target.role === "primary");
+
+    assert.equal(terra?.checks.find((check) => check.id === failedProbeId)?.supported, false);
+    assert.equal(terra?.ok, false);
+    assert.equal(summary.ok, false);
+  });
+
   test(`GPT-5.6 enabled Sol fails when ${failedProbeId} is unsupported`, async () => {
     const summary = await runProbe({
       GPT56_API_KEY: "synthetic-key",
@@ -147,6 +168,26 @@ for (const failedProbeId of ["json_object", "reasoning_effort", "json_schema", "
     assert.equal(summary.ok, false);
   });
 }
+
+test("GPT-5.6 Terra image input failure does not fail its required capability gate", async () => {
+  const summary = await runProbe({
+    GPT56_API_KEY: "synthetic-key",
+    GPT56_MODEL: "gpt-5.6-terra",
+    GPT56_SOL_FALLBACK_ENABLED: "false"
+  }, {
+    fetchImpl: async (_url, options) => {
+      const payload = JSON.parse(options.body);
+      return payload.messages[0]?.content instanceof Array
+        ? syntheticResponse({ ok: false, status: 400, body: { error: { message: "Synthetic image failure" } } })
+        : syntheticResponse();
+    }
+  });
+  const terra = summary.targets.find((target) => target.role === "primary");
+
+  assert.equal(terra?.checks.find((check) => check.id === "image_input")?.supported, false);
+  assert.equal(terra?.ok, true);
+  assert.equal(summary.ok, true);
+});
 
 test("GPT-5.6 Sol image input failure does not fail its required capability gate", async () => {
   const summary = await runProbe({
