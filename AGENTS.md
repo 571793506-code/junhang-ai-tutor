@@ -22,6 +22,7 @@
 - 小程序 UI 调整可参考 TencentCloudBase `ui-design`、Anthropic `frontend-design`、TDesign Miniprogram Skill 和 `tdesign-miniprogram`，但落地时必须读取 `skills/miniprogram-ui/SKILLS.md`，先确定学生端、教师端、课堂平板端的信息层级和状态，再决定组件或样式。
 - 教材资料处理可参考 MarkItDown、Docling、Marker、book-to-skill 和 education-agent-skills，但落地时必须读取 `skills/teaching-materials/SKILLS.md`；MarkItDown 作为默认普通资料转 Markdown 路线，Docling 只作为复杂 PDF、表格、图片增强候选，Marker 必须先审 license 和依赖风险。
 - 教育规则可参考 education-agent-skills 等教学设计经验，但只能吸收测评、学习反馈、课程结构和教师复核规则，不直接复制外部实现，不绕过本项目生成类和批改类 skill。
+- `grill-me`、`grilling`、`grill-all` 可作为方案拷问和计划审查的外部可选增强，是否可用以当前任务 Skills 列表为准；项目本地 `skills/project-grill-review/SKILLS.md` 是唯一必需入口。先查项目文档、代码和官方资料，再向用户追问产品取舍；每次只问一个问题，并给出推荐答案。
 
 ## Git 可追踪性规则
 
@@ -83,9 +84,13 @@ npm.cmd run check:api
 
 ## AI 生成与修复职责
 
-不要把模型输出直接传给学生、家长、教师或 PDF。服务层必须负责结构化、校验和修复。
+模型原始输出不得直接传给任何端或写入正式资产。服务层必须负责 parse、normalize、validate、repair、安全检查和按角色过滤字段，并按任务类型决定即时返回或进入教师复核。
 
-使用 `docs/41-prompt-context-engineering-playbook.md` 作为提示词、上下文工程、模型修复和教师复核流程的基准。
+- 学生 AI 问答完成结构解析、安全检查和普通端字段过滤后可以即时返回，不需要教师逐条预审。
+- 生成类和批改类输出仍是草稿，必须经过教师复核后才能发布、归档或正式导出。
+- 周/月档案、阶段报告、家长摘要和正式打印/PDF 必须经过教师确认。
+
+使用 `docs/41-prompt-context-engineering-playbook.md` 作为提示词、上下文工程、模型修复和任务级复核边界的基准。
 
 ## Prompt Engineering 与 Context Engineering 规则
 
@@ -97,8 +102,8 @@ Prompt engineering 负责“怎么说”，每次模型调用至少明确：
 - 任务类型：问答、今日任务、小测、练习、试卷、批改、档案反馈或资料摘要。
 - 输出格式：需要结构化结果时必须要求严格 JSON，不混入解释性文本。
 - 教学约束：学科、年级、题型、页数、是否听力、是否附加题、是否需要图形或四线格/田字格。
-- 审核边界：AI 只产出草稿，教师确认后才能发布、打印、归档或同步给学生/家长。
-- 可见性约束：学生、家长、课堂平板和公共屏不得看到供应商、模型名、内部 prompt、调试字段或未复核内容。
+- 审核边界：学生 AI 问答通过服务层处理后可即时返回；生成、批改和正式档案输出仍按草稿/复核流程处理。
+- 可见性约束：学生、家长、课堂平板和公共屏不得看到供应商、模型名、内部 prompt、调试字段或需要教师复核但尚未确认的内容。
 
 Context engineering 负责“给模型看什么”，服务端调用模型前应组装结构化上下文包，而不是只转发教师的一句话。生成类、批改类和档案类优先使用 `generationContext`，至少包含：
 
@@ -107,16 +112,18 @@ Context engineering 负责“给模型看什么”，服务端调用模型前应
 - `teaching`：教材、章节、知识点、教师重点、资料索引和 `contentContext`。
 - `studentSignals`：近期错题、学习任务、批改记录、档案摘要和薄弱点。
 - `output`：A4 页数、题型结构、答案解析、教师复核要求和学生可见标签。
-- `rules`：结构修复、乱码防护、供应商隐藏、未复核拦截和导出规则。
+- `rules`：结构修复、乱码防护、供应商隐藏、按任务拦截需要教师复核但尚未确认的内容和导出规则。
 
 禁止模式：
 
 - 不要只把教师自由文本直接传给 DeepSeek、MiniMax 或其他模型。
 - 不要把模型原始输出直接落库、导出 PDF 或展示给学生/家长。
 - 不要在前端页面中拼接核心 prompt 或临时上下文，核心组装逻辑必须放在接口、服务层、脚本或共享工具中。
-- 不要为了 Web 原型方便绕过教师复核、结构校验、乱码检查或多端可见性规则。
+- 不要为了 Web 原型方便绕过任务级复核边界、结构校验、乱码检查或多端可见性规则。
 
 模型输出进入持久化、导出或展示前，必须经过 parse、normalize、validate、repair 和 review-state handling。涉及资料上下文时，必须优先复用内容索引链路，把匹配结果写入 `generationContext.teaching.contentContext`，并保留教师复核状态。
+
+学生问答学习信号进入学生档案辅助分析前，还必须满足：学生身份已确认、安全检查通过、结构有效且问答成功返回。教师测试、匿名或身份未确认的课堂问答，以及失败、敏感或结构异常记录不得进入。单次问答只能作为低置信学习信号，不能据此形成“已掌握”“退步”或“薄弱点”等强结论。
 
 模型输出进入持久化、导出或展示前，至少检查：
 
