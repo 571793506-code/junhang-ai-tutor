@@ -355,8 +355,8 @@ test("Sol filtering preserves original question numbers when source arrays omit 
         { printedText: "选择题", studentAnswer: "C", confidence: 0.99 },
         { printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.99 }
       ],
-      assignmentItems: [{ prompt: "选择题" }, { prompt: "分析人物。" }]
-      ,questionLayoutManifest: { questions: [{ prompt: "选择题" }, { prompt: "分析人物。" }] }
+      assignmentItems: [{ prompt: "选择题" }, { prompt: "分析人物。" }],
+      questionLayoutManifest: { questions: [{ prompt: "选择题" }, { prompt: "分析人物。" }] }
     },
     {
       persist: false,
