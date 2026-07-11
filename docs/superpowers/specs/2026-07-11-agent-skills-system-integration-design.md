@@ -31,6 +31,7 @@
 - 让 Codex 能自动发现项目 Skills，同时保留现有 Playbook 路径，避免旧对话和文档失效。
 - 消除根规则、模块 Skill 和实际运行时之间的问答复核冲突。
 - 将问答转化为可校验、可过滤、可追踪的学生档案辅助信号。
+- 为 `miniapp-1 -> apps/miniprogram` 增加可检查、可显式执行的安全回写链路，避免双目录漂移和配置文件被覆盖。
 - 保持 Web、小程序、课堂平板复用相同 API、服务层和数据契约。
 - 增加轻量自动守卫，防止 Skill 路径、frontmatter、命令和阶段规则再次漂移。
 
@@ -52,9 +53,10 @@
 5. 使用非快进合并保留 Sol 分支边界：`git merge --no-ff codex/gpt56-sol-escalation`。
 6. 运行 Sol 分支已有的单元、服务、生成质量、批改、API 可见性、编码和差异检查；真实模型质量命令只按计划明确运行。
 7. 在合并后的统一基线上建立标准仓库级 Skills、兼容 Playbook 路由和 `check:skills`。
-8. 实施 AI 问答结构化输出、档案准入和学生档案聚合调整。
-9. 完成分层验证后移除本地 Sol worktree；远端 Sol 分支保留到最终 PR 完成。
-10. 以一个完整 PR 将集成分支合入 `main`。
+8. 实施小程序运行目录到仓库镜像的安全检查与显式回写命令。
+9. 实施 AI 问答结构化输出、档案准入和学生档案聚合调整。
+10. 完成分层验证后移除本地 Sol worktree；远端 Sol 分支保留到最终 PR 完成。
+11. 以一个完整 PR 将集成分支合入 `main`。
 
 ## Agent/Skills 架构
 
@@ -207,6 +209,25 @@ API 只向服务层提交必要字段。服务层组装问答上下文，优先�
 
 `profileEvidencePack`、完整问答正文、`learningSignal`、模型运行信息和内部阻断原因只对教师或内部服务可见，不进入学生/家长公开视图。
 
+## 小程序双目录同步
+
+保持现有产品决策：`C:\Users\86188\WeChatProjects\miniapp-1` 是微信开发者工具的实际开发和运行入口，`apps/miniprogram` 是进入 Git 的仓库镜像。现有 `scripts/sync-miniprogram-to-miniapp.mjs` 只用于从仓库恢复或更新运行目录，不承担开发完成后的回写。
+
+新增 `scripts/sync-miniapp-to-repo.mjs`，提供两种显式模式：
+
+- `--check`：只比较允许同步的非配置源码，发现差异时列出路径并返回非零状态，不写文件；
+- `--write`：仅在 `apps/miniprogram` 没有未提交改动时，把允许的运行目录源码新增、修改或删除同步到仓库镜像，随后再次比较确认一致。
+
+允许同步页面、组件、`utils/`、`styles/`、`assets/` 和普通小程序源码；必须排除 `project.config.json`、`project.private.config.json`、`project.miniapp.json`、`app.miniapp.json`、开发者工具私有状态、缓存和 `miniprogram_npm`。
+
+对应项目命令：
+
+- `check:miniprogram-sync`：运行只读差异检查；
+- `sync:miniprogram-from-miniapp`：显式回写允许文件；
+- `check:miniapp1`：继续检查实际运行目录结构、可见性和编码规则。
+
+回写脚本不得在普通验证命令中自动执行。执行前必须读取 `git status --short -- apps/miniprogram`；仓库镜像存在未提交改动时，只报告冲突并停止，不自动选择覆盖方向。所有删除必须经过允许根目录和解析后绝对路径检查，不能越过 `apps/miniprogram`。
+
 ## AI 视频退出边界
 
 - 删除项目 Grill 规则中的 AI 视频专属触发和生成工作流，不再把视频制作视为项目 Skill 模块。
@@ -232,6 +253,13 @@ API 只向服务层提交必要字段。服务层组装问答上下文，优先�
 - `check:skills` 覆盖缺失 Playbook、错误 frontmatter、绝对用户路径、无效 npm 命令和 AI 视频路由回归。
 - 使用触发场景验证 AI 问答、学生档案、生成、批改、小程序和 Grill 能加载正确 Playbook。
 
+### 小程序同步
+
+- `--check` 能发现新增、修改、删除和内容不同的允许文件，且不改变任一目录。
+- `--write` 只回写允许文件，并在完成后达到 `--check` 通过状态。
+- 四类项目配置和开发者工具私有文件不会被复制、删除或覆盖。
+- `apps/miniprogram` 存在未提交改动时进入冲突状态，不执行自动覆盖。
+
 ### AI 问答
 
 - 学生端成功问答无需教师状态即可返回。
@@ -256,6 +284,7 @@ API 只向服务层提交必要字段。服务层组装问答上下文，优先�
 - `check:api`；
 - `check:services`；
 - `check:miniprogram-js` 与 `check:miniapp1`；
+- `check:miniprogram-sync`；
 - AI 问答和学生档案定向测试；
 - 资料上下文或正式生成边界被修改时再运行对应内容链路检查。
 
@@ -267,9 +296,10 @@ API 只向服务层提交必要字段。服务层组装问答上下文，优先�
 2. 根规则与项目 Grill 规则收口；
 3. Sol 分支合并提交；
 4. `.agents/skills` 和 `check:skills`；
-5. AI 问答结构化学习信号；
-6. 学生档案准入和聚合；
-7. 文档、兼容路由和最终验证收口。
+5. 小程序反向同步守卫；
+6. AI 问答结构化学习信号；
+7. 学生档案准入和聚合；
+8. 文档、兼容路由和最终验证收口。
 
 每组只显式 stage 对应路径，不使用 `git add .`。
 
@@ -278,6 +308,7 @@ API 只向服务层提交必要字段。服务层组装问答上下文，优先�
 - 集成分支包含 Sol 已验证实现，原 Sol worktree 可安全移除。
 - Codex 能自动发现项目 Skills，旧 Playbook 路径继续有效。
 - 项目活动 Skills 中没有 AI 视频模块或路由。
+- `miniapp-1` 的允许源码可以安全检查并显式回写到 `apps/miniprogram`，项目配置和私有文件不被覆盖。
 - 学生成功问答无需教师预审即可返回。
 - 只有身份确认、安全通过且结构有效的成功问答进入学生档案辅助分析。
 - 问答信号不会单独形成强档案结论，家长可见档案仍经过教师确认。
