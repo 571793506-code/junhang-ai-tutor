@@ -1,0 +1,5 @@
+<view class="launch-page">
+  <text class="launch-title">君航 AI 助教</text>
+  <text class="launch-note">正在进入三端登录入口</text>
+  <button class="launch-button" bindtap="goRole">进入</button>
+</view>
