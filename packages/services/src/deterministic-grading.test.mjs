@@ -4,6 +4,7 @@ import { gradeSubmissionService } from "./index.js";
 
 test("fully objective grading uses known answers without remote grading", async () => {
   let gradingCalls = 0;
+  let solCalls = 0;
   const result = await gradeSubmissionService(
     {},
     {
@@ -19,15 +20,66 @@ test("fully objective grading uses known answers without remote grading", async 
       gradingRunner: async () => {
         gradingCalls += 1;
         throw new Error("remote grading should not run");
+      },
+      solGradingRunner: async () => {
+        solCalls += 1;
+        throw new Error("Sol grading should not run");
       }
     }
   );
 
   assert.equal(gradingCalls, 0);
+  assert.equal(solCalls, 0);
   assert.equal(result.referenceAnswer.mode, "answer_key");
   assert.equal(result.persisted.referenceModelRunId, null);
   assert.equal(result.structured.score, 10);
   assert.deepEqual(result.structured.questionResults.map((item) => item.status), ["correct", "correct"]);
+});
+
+test("low-confidence generated references retry once with Sol only when printed evidence exists", async () => {
+  const executions = [];
+  const referenceAnswerRunner = async (_config, _input, execution) => {
+    executions.push(execution || null);
+    const isSol = execution?.role === "sol-reference-escalation";
+    return {
+      available: true,
+      providerId: "gpt56",
+      referenceText: JSON.stringify({
+        referenceAnswers: [{ questionNo: "1", prompt: "1+1=?", correctAnswer: "2", confidence: isSol ? 0.99 : 0.5 }],
+        confidence: isSol ? 0.99 : 0.5,
+        needsTeacherReview: !isSol
+      }),
+      modelRun: { provider: "gpt56", model: isSol ? "gpt-5.6-sol" : "gpt-5.6", status: "SUCCESS" }
+    };
+  };
+  const commonOptions = {
+    persist: false,
+    referenceAnswerRunner,
+    gradingRunner: async () => ({
+      available: true,
+      providerId: "gpt56",
+      gradingText: JSON.stringify({ score: 5, questionResults: [{ questionNo: "1", status: "correct", score: 5, maxScore: 5, confidence: 0.95 }] })
+    })
+  };
+
+  const result = await gradeSubmissionService(
+    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol", GPT56_SOL_FALLBACK_TIMEOUT_MS: "180000" },
+    { subject: "数学", totalScore: 5, printedText: "1. 1+1=?", studentAnswerText: "1. 2" },
+    commonOptions
+  );
+  assert.equal(executions.length, 2);
+  assert.equal(executions[1].model, "gpt-5.6-sol");
+  assert.equal(executions[1].reasoningEffort, "high");
+  assert.equal(executions[1].timeoutMs, 180000);
+  assert.equal(result.referenceAnswer.confidence, 0.99);
+
+  executions.length = 0;
+  await gradeSubmissionService(
+    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+    { subject: "数学", ocrText: "混合OCR内容", studentAnswerText: "1. 2" },
+    commonOptions
+  );
+  assert.equal(executions.length, 1);
 });
 
 test("objective comparison keeps unsafe multi-answer text unresolved", async () => {

@@ -118,6 +118,14 @@ export interface AssessmentExecutionOptions {
   now?: () => number;
 }
 
+export interface SubmissionExecutionOptions {
+  role?: string;
+  model?: string;
+  reasoningEffort?: string;
+  timeoutMs?: number;
+  disableSolEscalation?: boolean;
+}
+
 export declare function buildAiStartupSnapshot(config?: RuntimeConfigLike): AiStartupSnapshot;
 export declare function createDemoAiSnapshot(): AiStartupSnapshot;
 export declare function routeCapability(capabilityId: string, snapshot?: AiStartupSnapshot): AiFeatureSnapshot;
@@ -147,8 +155,8 @@ export declare function draftAssessment(
   input?: Record<string, unknown>,
   execution?: AssessmentExecutionOptions
 ): Promise<Record<string, unknown>>;
-export declare function generateSubmissionReferenceAnswers(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
-export declare function gradeSubmissionText(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
+export declare function generateSubmissionReferenceAnswers(config: RuntimeConfigLike, input?: Record<string, unknown>, execution?: SubmissionExecutionOptions): Promise<Record<string, unknown>>;
+export declare function gradeSubmissionText(config: RuntimeConfigLike, input?: Record<string, unknown>, execution?: SubmissionExecutionOptions): Promise<Record<string, unknown>>;
 export declare function draftStudentProfileNarrative(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function reviewWithMiniMax(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function reviewWithGpt55(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;

@@ -255,6 +255,95 @@ test("callGpt56Chat classifies a successful non-JSON upstream response", async (
   }
 });
 
+async function runSubmissionEscalationCase(workflow, primaryResponse) {
+  const payloads = [];
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      const payload = JSON.parse(body);
+      payloads.push(payload);
+      if (payload.model === "gpt-5.6") {
+        res.writeHead(primaryResponse.status, { "Content-Type": primaryResponse.contentType });
+        res.end(primaryResponse.body);
+        return;
+      }
+      const content = workflow === "reference"
+        ? JSON.stringify({ referenceAnswers: [{ questionNo: "1", correctAnswer: "2", confidence: 0.99 }] })
+        : JSON.stringify({ score: 5, questionResults: [{ questionNo: "1", status: "correct", confidence: 0.99 }] });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { content } }] }));
+    });
+  });
+  const address = await listen(server);
+  const config = {
+    GPT56_API_KEY: "test-key",
+    GPT56_BASE_URL: `http://127.0.0.1:${address.port}`,
+    GPT56_MODEL: "gpt-5.6",
+    GPT56_REASONING_EFFORT_ENABLED: "true",
+    GPT56_SOL_FALLBACK_ENABLED: "true",
+    GPT56_SOL_MODEL: "gpt-5.6-sol",
+    GPT56_SOL_FALLBACK_TIMEOUT_MS: "180000"
+  };
+  try {
+    const result = workflow === "reference"
+      ? await generateSubmissionReferenceAnswers(config, { printedText: "1. 1+1=?" })
+      : await gradeSubmissionText(config, { printedText: "1. 1+1=?", studentAnswerText: "1. 2" });
+    return { payloads, result };
+  } finally {
+    await close(server);
+  }
+}
+
+for (const workflow of ["reference", "grading"]) {
+  test(`${workflow} retries a Terra 524 once with Sol high and an independent timeout`, async () => {
+    const { payloads, result } = await runSubmissionEscalationCase(workflow, {
+      status: 524,
+      contentType: "text/plain",
+      body: "upstream timeout"
+    });
+
+    assert.equal(payloads.length, 2);
+    assert.deepEqual(payloads.map((item) => item.model), ["gpt-5.6", "gpt-5.6-sol"]);
+    assert.equal(payloads[1].reasoning_effort, "high");
+    assert.equal(result.available, true);
+    assert.equal(result.model, "gpt-5.6-sol");
+    assert.equal(result.modelRun.metadata.usedModelEscalation, true);
+    assert.equal(result.modelRun.metadata.attempts.length, 2);
+    assert.equal(result.modelRun.metadata.attempts[1].role, "sol-escalation");
+    assert.equal(result.modelRun.metadata.attempts[1].timeoutMs, 180000);
+    assert.equal(result.modelRun.metadata.attempts[1].reasoningEffort, "high");
+  });
+
+  test(`${workflow} does not escalate authentication or quota failures`, async () => {
+    for (const response of [
+      { status: 401, contentType: "application/json", body: JSON.stringify({ error: { message: "invalid key", code: "invalid_api_key" } }) },
+      { status: 429, contentType: "application/json", body: JSON.stringify({ error: { message: "quota exhausted", code: "insufficient_quota" } }) }
+    ]) {
+      const { payloads, result } = await runSubmissionEscalationCase(workflow, response);
+      assert.equal(payloads.length, 1);
+      assert.equal(result.available, false);
+      assert.equal(result.modelRun.metadata.usedModelEscalation, false);
+    }
+  });
+}
+
+test("submission runtime does not treat malformed model content as an availability failure", async () => {
+  const response = {
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ choices: [{ message: { content: "not-json" } }] })
+  };
+  const { payloads, result } = await runSubmissionEscalationCase("grading", response);
+  assert.equal(payloads.length, 1);
+  assert.equal(result.available, true);
+  assert.equal(result.gradingText, "not-json");
+  assert.equal(result.modelRun.metadata.usedModelEscalation, false);
+});
+
 test("Junhang text workflows use GPT-5.6 as their primary provider", async () => {
   const payloads = [];
   const server = http.createServer((req, res) => {

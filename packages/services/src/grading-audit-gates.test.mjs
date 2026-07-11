@@ -265,3 +265,168 @@ test("gradeSubmissionService does not run risk review for a clean grading result
 
   assert.equal(reviewCalls, 0);
 });
+
+function riskyTwoQuestionResult(overrides = {}) {
+  return {
+    available: true,
+    providerId: "gpt56",
+    gradingText: JSON.stringify({
+      score: 7,
+      summary: "其中一道题需复核。",
+      questionResults: [
+        { questionNo: "1", status: "correct", score: 4, maxScore: 4, studentAnswer: "C", correctAnswer: "C", confidence: 0.98 },
+        { questionNo: "2", status: "uncertain", score: 3, maxScore: 6, studentAnswer: "人物很勇敢。", correctAnswer: "结合文本说明", confidence: 0.5, ...overrides }
+      ]
+    }),
+    modelRun: { provider: "gpt56", model: "gpt-5.6", status: "SUCCESS" }
+  };
+}
+
+test("Sol regrades only risky questions, replaces only those results, and recomputes total score", async () => {
+  const solInputs = [];
+  let premiumCalls = 0;
+  const result = await gradeSubmissionService(
+    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol", GPT56_SOL_FALLBACK_TIMEOUT_MS: "180000" },
+    {
+      subject: "语文",
+      totalScore: 10,
+      referenceAnswers: [
+        { questionNo: "1", prompt: "选择题", correctAnswer: "C", score: 4, confidence: 1 },
+        { questionNo: "2", prompt: "结合文本说明人物品质。", correctAnswer: "勇敢并结合文本", score: 6, confidence: 1 }
+      ],
+      ocrQuestions: [
+        { questionNo: "1", printedText: "选择题", studentAnswer: "C", confidence: 0.99 },
+        { questionNo: "2", printedText: "结合文本说明人物品质。", studentAnswer: "人物很勇敢。", confidence: 0.95 }
+      ]
+    },
+    {
+      persist: false,
+      gradingRunner: async () => riskyTwoQuestionResult(),
+      solGradingRunner: async (_config, input, execution) => {
+        solInputs.push({ input, execution });
+        return {
+          available: true,
+          providerId: "gpt56",
+          gradingText: JSON.stringify({
+            score: 5,
+            summary: "复核完成。",
+            questionResults: [{ questionNo: "2", status: "partial", score: 5, maxScore: 6, studentAnswer: "人物很勇敢。", correctAnswer: "勇敢并结合文本", confidence: 0.9 }]
+          }),
+          modelRun: { provider: "gpt56", model: "gpt-5.6-sol", status: "SUCCESS" }
+        };
+      },
+      gradingReviewers: { premium: async () => { premiumCalls += 1; return { available: true, reviewText: "{}" }; } }
+    }
+  );
+
+  assert.equal(solInputs.length, 1);
+  assert.deepEqual(solInputs[0].input.ocrQuestions.map((item) => item.questionNo), ["2"]);
+  assert.deepEqual(solInputs[0].input.referenceAnswers.map((item) => item.questionNo), ["2"]);
+  assert.deepEqual(solInputs[0].input.questionLayoutManifest.questions.map((item) => item.questionNo), ["2"]);
+  assert.equal(solInputs[0].execution.reasoningEffort, "high");
+  assert.equal(premiumCalls, 0);
+  assert.equal(result.structured.questionResults[0].modelEscalated, undefined);
+  assert.equal(result.structured.questionResults[1].modelEscalated, true);
+  assert.equal(result.structured.score, 9);
+});
+
+test("Sol selection includes low confidence, answer conflict, and locatable score mismatch only", async () => {
+  const cases = [
+    { overrides: { status: "correct", confidence: 0.4 }, expected: ["2"] },
+    { overrides: { status: "correct", confidence: 0.95, correctAnswer: "另一个答案" }, expected: ["2"] },
+    { overrides: { status: "correct", confidence: 0.95, score: 7, maxScore: 6 }, expected: ["2"] }
+  ];
+  for (const sample of cases) {
+    const selected = [];
+    await gradeSubmissionService(
+      { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+      {
+        subject: "语文",
+        totalScore: 10,
+        referenceAnswers: [
+          { questionNo: "1", prompt: "选择题", correctAnswer: "C", score: 4, confidence: 1 },
+          { questionNo: "2", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }
+        ],
+        ocrQuestions: [
+          { questionNo: "1", printedText: "选择题", studentAnswer: "C", confidence: 0.99 },
+          { questionNo: "2", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.99 }
+        ]
+      },
+      {
+        persist: false,
+        gradingRunner: async () => riskyTwoQuestionResult(sample.overrides),
+        solGradingRunner: async (_config, input) => {
+          selected.push(...input.ocrQuestions.map((item) => item.questionNo));
+          return riskyTwoQuestionResult({ status: "correct", confidence: 0.95, score: 6, maxScore: 6, correctAnswer: "勇敢" });
+        }
+      }
+    );
+    assert.deepEqual(selected, sample.expected);
+  }
+});
+
+test("insufficient grading evidence never calls Sol", async () => {
+  const cases = [
+    { imageQuality: { status: "poor" } },
+    { imageQuality: { status: "needs_review" } },
+    { studentAnswerText: "", ocrQuestions: [{ questionNo: "1", printedText: "1+1=?", studentAnswer: "" }] },
+    { printedText: "", ocrQuestions: [{ questionNo: "1", printedText: "", studentAnswer: "2" }] },
+    { ocrStatus: "UNSEPARATED" }
+  ];
+  for (const evidence of cases) {
+    let solCalls = 0;
+    await gradeSubmissionService(
+      { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+      {
+        subject: "数学",
+        totalScore: 5,
+        referenceAnswers: [{ questionNo: "1", prompt: "1+1=?", correctAnswer: "2", score: 5, confidence: 1 }],
+        printedText: "1. 1+1=?",
+        studentAnswerText: "1. 2",
+        ocrQuestions: [{ questionNo: "1", printedText: "1+1=?", studentAnswer: "2", confidence: 0.95 }],
+        ...evidence
+      },
+      {
+        persist: false,
+        gradingRunner: async () => riskyTwoQuestionResult(),
+        solGradingRunner: async () => { solCalls += 1; return riskyTwoQuestionResult(); },
+        gradingReviewers: { premium: async () => ({ available: false, reviewText: "" }) }
+      }
+    );
+    assert.equal(solCalls, 0, JSON.stringify(evidence));
+  }
+});
+
+test("unresolved Sol preserves provisional score, blocks audit, and does not chain a Terra reviewer", async () => {
+  let premiumCalls = 0;
+  const result = await gradeSubmissionService(
+    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+    {
+      subject: "语文",
+      totalScore: 6,
+      referenceAnswers: [{ questionNo: "1", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }],
+      ocrQuestions: [{ questionNo: "1", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.95 }]
+    },
+    {
+      persist: false,
+      gradingRunner: async () => ({
+        available: true,
+        providerId: "gpt56",
+        gradingText: JSON.stringify({ score: 3, questionResults: [{ questionNo: "1", status: "uncertain", score: 3, maxScore: 6, confidence: 0.5 }] })
+      }),
+      solGradingRunner: async () => ({
+        available: true,
+        providerId: "gpt56",
+        gradingText: JSON.stringify({ score: 3, questionResults: [{ questionNo: "1", status: "uncertain", score: 3, maxScore: 6, confidence: 0.55 }] })
+      }),
+      gradingReviewers: { premium: async () => { premiumCalls += 1; return { available: true, reviewText: "{}" }; } }
+    }
+  );
+
+  assert.equal(premiumCalls, 0);
+  assert.equal(result.structured.score, null);
+  assert.equal(result.structured.provisionalScore, 3);
+  assert.equal(result.structured.gradingAudit.required, true);
+  assert.equal(result.structured.gradingAudit.scoreReliable, false);
+  assert.equal(result.structured.gradingAudit.archiveAllowed, false);
+});
