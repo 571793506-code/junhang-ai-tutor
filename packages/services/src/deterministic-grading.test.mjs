@@ -82,6 +82,81 @@ test("low-confidence generated references retry once with Sol only when printed 
   assert.equal(executions.length, 1);
 });
 
+test("failed Sol reference regeneration keeps Terra content and tracks both persisted runs", async () => {
+  let callCount = 0;
+  let runId = 0;
+  const result = await gradeSubmissionService(
+    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+    { assignmentId: "existing-assignment", subject: "数学", printedText: "1. 1+1=?", studentAnswerText: "1. 2" },
+    {
+      prisma: { modelRun: { create: async ({ data }) => ({ id: `run-${++runId}`, ...data }) } },
+      referenceAnswerRunner: async (_config, _input, execution) => {
+        callCount += 1;
+        if (execution?.role === "sol-reference-escalation") {
+          return {
+            available: false,
+            providerId: "gpt56",
+            referenceText: "",
+            error: "MODEL_TIMEOUT",
+            modelRun: { provider: "gpt56", model: "gpt-5.6-sol", skill: "submission-reference-answer", status: "ERROR" }
+          };
+        }
+        return {
+          available: true,
+          providerId: "gpt56",
+          referenceText: JSON.stringify({ referenceAnswers: [{ questionNo: "1", prompt: "1+1=?", correctAnswer: "2", confidence: 0.5 }] }),
+          modelRun: { provider: "gpt56", model: "gpt-5.6", skill: "submission-reference-answer", status: "SUCCESS" }
+        };
+      },
+      gradingRunner: async () => ({
+        available: true,
+        providerId: "gpt56",
+        gradingText: JSON.stringify({ score: 5, questionResults: [{ questionNo: "1", status: "correct", score: 5, maxScore: 5, confidence: 0.95 }] })
+      })
+    }
+  );
+
+  assert.equal(callCount, 2);
+  assert.equal(result.referenceAnswer.referenceAnswers[0].correctAnswer, "2");
+  assert.equal(result.referenceAnswer.modelRunId, "run-1");
+  assert.equal(result.referenceAnswer.escalationModelRunId, "run-2");
+  assert.equal(result.referenceAnswer.solAttempted, true);
+  assert.equal(result.referenceAnswer.usedModelEscalation, false);
+});
+
+test("successful runtime reference escalation uses one consistent persisted Sol run", async () => {
+  let runId = 0;
+  const result = await gradeSubmissionService(
+    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+    { assignmentId: "existing-assignment", subject: "数学", printedText: "1. 1+1=?", studentAnswerText: "1. 2" },
+    {
+      prisma: { modelRun: { create: async ({ data }) => ({ id: `run-${++runId}`, ...data }) } },
+      referenceAnswerRunner: async () => ({
+        available: true,
+        providerId: "gpt56",
+        referenceText: JSON.stringify({ referenceAnswers: [{ questionNo: "1", correctAnswer: "2", confidence: 0.99 }] }),
+        modelRun: {
+          provider: "gpt56",
+          model: "gpt-5.6-sol",
+          skill: "submission-reference-answer",
+          status: "SUCCESS",
+          metadata: { solAttempted: true, usedModelEscalation: true }
+        }
+      }),
+      gradingRunner: async () => ({
+        available: true,
+        providerId: "gpt56",
+        gradingText: JSON.stringify({ score: 5, questionResults: [{ questionNo: "1", status: "correct", score: 5, maxScore: 5, confidence: 0.95 }] })
+      })
+    }
+  );
+
+  assert.equal(result.referenceAnswer.modelRunId, "run-1");
+  assert.equal(result.referenceAnswer.escalationModelRunId, "run-1");
+  assert.equal(result.referenceAnswer.solAttempted, true);
+  assert.equal(result.referenceAnswer.usedModelEscalation, true);
+});
+
 test("objective comparison keeps unsafe multi-answer text unresolved", async () => {
   let runnerInput = null;
   await gradeSubmissionService(

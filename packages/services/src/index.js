@@ -630,6 +630,10 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
   };
   let result = await referenceAnswerRunner(config, runnerInput);
   let modelRun = await persistRun(result.modelRun, options);
+  let escalationModelRun = null;
+  let solAttempted = result.modelRun?.metadata?.solAttempted === true;
+  let usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
+  if (usedModelEscalation) escalationModelRun = modelRun;
   let parsed = parseJsonObjectText(result.referenceText) || {};
   let rawAnswers = Array.isArray(parsed.referenceAnswers)
     ? parsed.referenceAnswers
@@ -667,6 +671,8 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
       .map(normalizeReferenceAnswerItem)
       .filter((item) => item.correctAnswer || item.prompt);
     const solModelRun = await persistRun(solResult.modelRun, options);
+    escalationModelRun = solModelRun;
+    solAttempted = true;
     if (solResult.available && solAnswers.length) {
       result = solResult;
       parsed = solParsed;
@@ -674,6 +680,7 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
       normalizedAnswers = solAnswers;
       averageConfidence = solAnswers.reduce((sum, item) => sum + Number(item.confidence || 0), 0) / solAnswers.length;
       modelRun = solModelRun;
+      usedModelEscalation = true;
     }
   }
   const referenceAnswers = normalizedAnswers;
@@ -686,6 +693,9 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
     confidence: Number(averageConfidence.toFixed(3)),
     needsTeacherReview: Boolean(parsed.needsTeacherReview ?? averageConfidence < 0.72),
     modelRunId: modelRun?.id || null,
+    escalationModelRunId: escalationModelRun?.id || null,
+    solAttempted,
+    usedModelEscalation,
     summary: String(parsed.summary || result.error || "AI已尝试生成参考答案。").trim(),
     rawText: result.referenceText || "",
     error: result.error || null
@@ -1540,20 +1550,37 @@ function selectSolGradingQuestionNos(structured = {}, input = {}, ocr = {}, refe
 
 function buildSolGradingInput(input = {}, questionNos = []) {
   const selected = new Set(questionNos.map(String));
-  const questions = (input.ocrQuestions || []).filter((item, index) => selected.has(String(item.questionNo || item.no || index + 1)));
-  const references = (input.referenceAnswers || []).filter((item, index) => selected.has(String(item.questionNo || item.no || index + 1)));
+  const withQuestionNo = (items = []) => items.map((item, index) => ({
+    ...item,
+    questionNo: String(item.questionNo || item.no || index + 1)
+  }));
+  const questions = withQuestionNo(input.ocrQuestions || []).filter((item) => selected.has(item.questionNo));
+  const references = withQuestionNo(input.referenceAnswers || []).filter((item) => selected.has(item.questionNo));
+  const assignmentItems = withQuestionNo(input.assignmentItems || []).filter((item) => selected.has(item.questionNo));
+  const questionLayoutManifest = input.questionLayoutManifest
+    ? filterQuestionLayoutManifest({
+        ...input.questionLayoutManifest,
+        questions: withQuestionNo(input.questionLayoutManifest.questions || [])
+      }, selected)
+    : null;
+  const answerKey = parseAnswerKeyReferenceAnswers(input.answerKey)
+    .filter((item) => selected.has(String(item.questionNo || "")))
+    .map((item) => `${item.questionNo}. ${item.correctAnswer}`)
+    .join(" ") || null;
   const numberedText = (field) => questions
-    .map((item, index) => `${item.questionNo || index + 1}. ${String(item[field] || "").trim()}`)
+    .map((item) => `${item.questionNo}. ${String(item[field] || "").trim()}`)
     .join(" ");
   return {
     ...input,
-    answerKey: null,
+    answerKey,
     ocrQuestions: questions,
     referenceAnswers: references,
+    assignmentItems,
     printedText: numberedText("printedText"),
     ocrText: numberedText("printedText"),
     studentAnswerText: numberedText("studentAnswer"),
-    questionLayoutManifest: filterQuestionLayoutManifest(input.questionLayoutManifest, selected)
+    manualText: numberedText("studentAnswer"),
+    questionLayoutManifest
   };
 }
 
@@ -4051,7 +4078,7 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
   const selectedSolQuestionNos = solEnabled
     ? selectSolGradingQuestionNos(initialStructured, gradingInput, ocr, reference)
     : [];
-  let actualSolAttempt = result.modelRun?.metadata?.usedModelEscalation === true;
+  let actualSolAttempt = result.modelRun?.metadata?.solAttempted === true || result.modelRun?.metadata?.usedModelEscalation === true;
   if (!actualSolAttempt && selectedSolQuestionNos.length) {
     actualSolAttempt = true;
     const solGradingRunner = options.solGradingRunner || gradeSubmissionText;

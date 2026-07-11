@@ -294,10 +294,16 @@ test("Sol regrades only risky questions, replaces only those results, and recomp
         { questionNo: "1", prompt: "选择题", correctAnswer: "C", score: 4, confidence: 1 },
         { questionNo: "2", prompt: "结合文本说明人物品质。", correctAnswer: "勇敢并结合文本", score: 6, confidence: 1 }
       ],
+      answerKey: "1=C;2=勇敢并结合文本",
       ocrQuestions: [
         { questionNo: "1", printedText: "选择题", studentAnswer: "C", confidence: 0.99 },
         { questionNo: "2", printedText: "结合文本说明人物品质。", studentAnswer: "人物很勇敢。", confidence: 0.95 }
-      ]
+      ],
+      assignmentItems: [
+        { prompt: "选择题", metadata: { localOnly: "q1" } },
+        { prompt: "结合文本说明人物品质。", metadata: { localOnly: "q2" } }
+      ],
+      manualText: "1. C 2. 人物很勇敢。"
     },
     {
       persist: false,
@@ -323,11 +329,54 @@ test("Sol regrades only risky questions, replaces only those results, and recomp
   assert.deepEqual(solInputs[0].input.ocrQuestions.map((item) => item.questionNo), ["2"]);
   assert.deepEqual(solInputs[0].input.referenceAnswers.map((item) => item.questionNo), ["2"]);
   assert.deepEqual(solInputs[0].input.questionLayoutManifest.questions.map((item) => item.questionNo), ["2"]);
+  assert.deepEqual(solInputs[0].input.assignmentItems.map((item) => item.questionNo), ["2"]);
+  assert.equal(solInputs[0].input.answerKey, "2. 勇敢并结合文本");
+  assert.doesNotMatch(solInputs[0].input.manualText, /\bC\b/);
+  assert.match(solInputs[0].input.manualText, /^2\./);
   assert.equal(solInputs[0].execution.reasoningEffort, "high");
   assert.equal(premiumCalls, 0);
   assert.equal(result.structured.questionResults[0].modelEscalated, undefined);
   assert.equal(result.structured.questionResults[1].modelEscalated, true);
   assert.equal(result.structured.score, 9);
+});
+
+test("Sol filtering preserves original question numbers when source arrays omit questionNo", async () => {
+  let solInput = null;
+  const result = await gradeSubmissionService(
+    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+    {
+      subject: "语文",
+      totalScore: 10,
+      referenceAnswers: [
+        { prompt: "选择题", correctAnswer: "C", score: 4, confidence: 1 },
+        { prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }
+      ],
+      ocrQuestions: [
+        { printedText: "选择题", studentAnswer: "C", confidence: 0.99 },
+        { printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.99 }
+      ],
+      assignmentItems: [{ prompt: "选择题" }, { prompt: "分析人物。" }]
+      ,questionLayoutManifest: { questions: [{ prompt: "选择题" }, { prompt: "分析人物。" }] }
+    },
+    {
+      persist: false,
+      gradingRunner: async () => riskyTwoQuestionResult(),
+      solGradingRunner: async (_config, input) => {
+        solInput = input;
+        return {
+          available: true,
+          providerId: "gpt56",
+          gradingText: JSON.stringify({ questionResults: [{ questionNo: "2", status: "partial", score: 5, maxScore: 6, confidence: 0.9 }] })
+        };
+      }
+    }
+  );
+
+  assert.deepEqual(solInput.ocrQuestions.map((item) => item.questionNo), ["2"]);
+  assert.deepEqual(solInput.referenceAnswers.map((item) => item.questionNo), ["2"]);
+  assert.deepEqual(solInput.assignmentItems.map((item) => item.questionNo), ["2"]);
+  assert.deepEqual(solInput.questionLayoutManifest.questions.map((item) => item.questionNo), ["2"]);
+  assert.equal(result.structured.questionResults.find((item) => item.questionNo === "2").modelEscalated, true);
 });
 
 test("Sol selection includes low confidence, answer conflict, and locatable score mismatch only", async () => {
@@ -429,4 +478,37 @@ test("unresolved Sol preserves provisional score, blocks audit, and does not cha
   assert.equal(result.structured.gradingAudit.required, true);
   assert.equal(result.structured.gradingAudit.scoreReliable, false);
   assert.equal(result.structured.gradingAudit.archiveAllowed, false);
+});
+
+test("a failed runtime Sol attempt does not chain a Terra risk reviewer", async () => {
+  let premiumCalls = 0;
+  const result = await gradeSubmissionService(
+    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+    {
+      subject: "语文",
+      totalScore: 6,
+      referenceAnswers: [{ questionNo: "1", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }],
+      ocrQuestions: [{ questionNo: "1", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.95 }]
+    },
+    {
+      persist: false,
+      gradingRunner: async () => ({
+        available: false,
+        providerId: "gpt56",
+        gradingText: "",
+        modelRun: {
+          provider: "gpt56",
+          model: "gpt-5.6-sol",
+          status: "ERROR",
+          metadata: { solAttempted: true, usedModelEscalation: false }
+        }
+      }),
+      solGradingRunner: async () => { throw new Error("must not attempt Sol twice"); },
+      gradingReviewers: { premium: async () => { premiumCalls += 1; return { available: true, reviewText: "{}" }; } }
+    }
+  );
+
+  assert.equal(premiumCalls, 0);
+  assert.equal(result.structured.score, null);
+  assert.equal(result.structured.gradingAudit.scoreReliable, false);
 });

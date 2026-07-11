@@ -255,7 +255,7 @@ test("callGpt56Chat classifies a successful non-JSON upstream response", async (
   }
 });
 
-async function runSubmissionEscalationCase(workflow, primaryResponse) {
+async function runSubmissionEscalationCase(workflow, primaryResponse, solResponse = null) {
   const payloads = [];
   const server = http.createServer((req, res) => {
     let body = "";
@@ -269,6 +269,11 @@ async function runSubmissionEscalationCase(workflow, primaryResponse) {
       if (payload.model === "gpt-5.6") {
         res.writeHead(primaryResponse.status, { "Content-Type": primaryResponse.contentType });
         res.end(primaryResponse.body);
+        return;
+      }
+      if (solResponse) {
+        res.writeHead(solResponse.status, { "Content-Type": solResponse.contentType });
+        res.end(solResponse.body);
         return;
       }
       const content = workflow === "reference"
@@ -312,6 +317,7 @@ for (const workflow of ["reference", "grading"]) {
     assert.equal(result.available, true);
     assert.equal(result.model, "gpt-5.6-sol");
     assert.equal(result.modelRun.metadata.usedModelEscalation, true);
+    assert.equal(result.modelRun.metadata.solAttempted, true);
     assert.equal(result.modelRun.metadata.attempts.length, 2);
     assert.equal(result.modelRun.metadata.attempts[1].role, "sol-escalation");
     assert.equal(result.modelRun.metadata.attempts[1].timeoutMs, 180000);
@@ -343,6 +349,25 @@ test("submission runtime does not treat malformed model content as an availabili
   assert.equal(result.gradingText, "not-json");
   assert.equal(result.modelRun.metadata.usedModelEscalation, false);
 });
+
+for (const workflow of ["reference", "grading"]) {
+  test(`${workflow} records an unsuccessful Sol attempt without claiming model escalation`, async () => {
+    for (const solResponse of [
+      { status: 524, contentType: "text/plain", body: "Sol timeout" },
+      { status: 200, contentType: "application/json", body: JSON.stringify({ choices: [{ message: { content: "not-json" } }] }) },
+      { status: 200, contentType: "application/json", body: JSON.stringify({ choices: [{ message: { content: "{}" } }] }) }
+    ]) {
+      const { payloads, result } = await runSubmissionEscalationCase(workflow, {
+        status: 524,
+        contentType: "text/plain",
+        body: "Terra timeout"
+      }, solResponse);
+      assert.equal(payloads.length, 2);
+      assert.equal(result.modelRun.metadata.solAttempted, true);
+      assert.equal(result.modelRun.metadata.usedModelEscalation, false);
+    }
+  });
+}
 
 test("Junhang text workflows use GPT-5.6 as their primary provider", async () => {
   const payloads = [];

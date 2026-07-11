@@ -1222,6 +1222,12 @@ export async function generateSubmissionReferenceAnswers(config, input = {}, exe
     });
   }
   const text = result.body ? extractChatText(result.body) : "";
+  const parsed = parseJsonObjectText(text);
+  const solAttempted = attempts.some((attempt) => attempt.role === "sol-escalation");
+  const usedModelEscalation = solAttempted && result.status === "SUCCESS" && Boolean(
+    (Array.isArray(parsed?.referenceAnswers) && parsed.referenceAnswers.length) ||
+    (Array.isArray(parsed?.answers) && parsed.answers.length)
+  );
 
   return {
     available: result.status === "SUCCESS",
@@ -1242,7 +1248,8 @@ export async function generateSubmissionReferenceAnswers(config, input = {}, exe
         studentId: input.studentId || null,
         subject: input.subject || null,
         imageCount: input.imageNames?.length || 0,
-        usedModelEscalation: attempts.some((attempt) => attempt.role === "sol-escalation"),
+        solAttempted,
+        usedModelEscalation,
         attempts
       }
     }
@@ -1335,6 +1342,12 @@ export async function gradeSubmissionText(config, input = {}, execution = {}) {
     });
   }
   const text = result.body ? extractChatText(result.body) : "";
+  const parsed = parseJsonObjectText(text);
+  const solAttempted = attempts.some((attempt) => attempt.role === "sol-escalation");
+  const usedModelEscalation = solAttempted && result.status === "SUCCESS" && (
+    (Array.isArray(parsed?.questionResults) && parsed.questionResults.length > 0) ||
+    (Array.isArray(parsed?.questions) && parsed.questions.length > 0)
+  );
 
   return {
     available: result.status === "SUCCESS",
@@ -1355,7 +1368,8 @@ export async function gradeSubmissionText(config, input = {}, execution = {}) {
         studentId: input.studentId || null,
         subject: input.subject || null,
         imageCount: input.imageNames?.length || 0,
-        usedModelEscalation: attempts.some((attempt) => attempt.role === "sol-escalation"),
+        solAttempted,
+        usedModelEscalation,
         attempts
       }
     }
