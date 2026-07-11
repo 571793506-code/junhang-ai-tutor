@@ -207,13 +207,49 @@ test("normalizeQaModelOutput blocks embedded and fenced structured output", () =
   }
 });
 
-test("normalizeQaModelOutput preserves ordinary teaching text with a quoted pair", () => {
-  const text = "英语词典中常写成 \"apple\": \"苹果\"。";
-  const result = normalizeQaModelOutput(text);
+test("normalizeQaModelOutput rejects complete JSON values outside the exact contract", () => {
+  const values = [
+    "{\"answer\":\"object-secret\"}",
+    "[{\"answer\":\"array-secret\"}]",
+    "{\"student\\u0041nswer\":\"escaped-secret\"}"
+  ];
 
-  assert.equal(result.studentAnswer, text);
-  assert.equal(result.structureValid, false);
-  assert.equal(result.learningSignal, null);
+  for (const value of values) {
+    const result = normalizeQaModelOutput(value);
+    assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+    assert.equal(result.structureValid, false);
+    assert.equal(result.learningSignal, null);
+    assert.equal(result.studentAnswer.includes("secret"), false);
+  }
+});
+
+test("normalizeQaModelOutput rejects embedded parseable JSON containers with unknown keys", () => {
+  const values = [
+    "前缀说明 {\"answer\":\"embedded-object-secret\"} 后缀说明",
+    "前缀说明 [{\"answer\":\"embedded-array-secret\"}] 后缀说明"
+  ];
+
+  for (const value of values) {
+    const result = normalizeQaModelOutput(value);
+    assert.equal(result.studentAnswer, QA_UNAVAILABLE_ANSWER);
+    assert.equal(result.structureValid, false);
+    assert.equal(result.learningSignal, null);
+    assert.equal(result.studentAnswer.includes("secret"), false);
+  }
+});
+
+test("normalizeQaModelOutput preserves ordinary teaching text with a quoted pair", () => {
+  const examples = [
+    "英语词典中常写成 \"apple\": \"苹果\"。",
+    "英语课上可把 \"model\": \"模型\" 作为词义示例。"
+  ];
+
+  for (const text of examples) {
+    const result = normalizeQaModelOutput(text);
+    assert.equal(result.studentAnswer, text);
+    assert.equal(result.structureValid, false);
+    assert.equal(result.learningSignal, null);
+  }
 });
 
 test("normalizeQaModelOutput removes internal fields with case and fullwidth separators", () => {

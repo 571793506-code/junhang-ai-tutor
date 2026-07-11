@@ -6,12 +6,15 @@ const QUESTION_INTENTS = new Set(["concept", "method", "error_reasoning", "expre
 const DIFFICULTY_SIGNALS = new Set(["none", "possible", "clear"]);
 const CONFIDENCE_LEVELS = new Set(["low", "medium", "high"]);
 const SAFETY_STATUSES = new Set(["pass", "blocked"]);
-const INTERNAL_FIELD_LINE = /^\s*"?(?:provider|model|raw|prompt|debug)"?\s*[=:：＝]/i;
-const INTERNAL_FIELD_FRAGMENT = /\s*(?:[,;，；]\s*)?"?(?:provider|model|raw|prompt|debug)"?\s*[=:：＝][\s\S]*$/i;
+const INTERNAL_FIELD_LINE = /^\s*(?:provider|model|raw|prompt|debug)\s*[=:：＝]/i;
+const INTERNAL_FIELD_FRAGMENT = /\s*(?:[,;，；]\s*)?(?:provider|model|raw|prompt|debug)\s*[=:：＝][\s\S]*$/i;
+const QUOTED_INTERNAL_FIELD_LINE = /^\s*["'](?:provider|model|raw|prompt|debug)["']\s*[=:：＝]\s*["']?\s*(?:gpt(?:-\d)?|terra|sol|deepseek|minimax|openai|https?:\/\/|wss?:\/\/|[\[{])/i;
+const QUOTED_INTERNAL_FIELD_FRAGMENT = /\s*(?:[,;，；]\s*)?["'](?:provider|model|raw|prompt|debug)["']\s*[=:：＝]\s*["']?\s*(?:gpt(?:-\d)?|terra|sol|deepseek|minimax|openai|https?:\/\/|wss?:\/\/|[\[{])[\s\S]*$/i;
 const STRUCTURE_FIELD_LINE = /^\s*"?(?:studentAnswer|learningSignal|knowledgePoints|questionIntent|difficultySignal|misconceptionHypotheses|followUpNeeded|confidence|safetyStatus|profileEligibility|blockedReason)"?\s*[:=]/i;
 const BLOCKED_STATUS = /(?:^|[\s"'<{,])safetyStatus["']?\s*[:=]\s*["']?blocked\b/i;
 const JSON_CODE_FENCE = /```\s*json\b/i;
-const KNOWN_STRUCTURE_LABEL = /\b(?:studentAnswer|learningSignal|knowledgePoints|questionIntent|difficultySignal|misconceptionHypotheses|followUpNeeded|confidence|safetyStatus|profileEligibility|blockedReason|provider|model|raw|prompt|debug)\b["']?\s*[=:：＝]/i;
+const KNOWN_SCHEMA_LABEL = /\b(?:studentAnswer|learningSignal|knowledgePoints|questionIntent|difficultySignal|misconceptionHypotheses|followUpNeeded|confidence|safetyStatus|profileEligibility|blockedReason)\b["']?\s*[=:：＝]/i;
+const UNQUOTED_INTERNAL_LABEL = /(?:^|[\s,;，；])(?:provider|model|raw|prompt|debug)\s*[=:：＝]/i;
 
 function toWellFormedText(value) {
   return String(value || "").toWellFormed();
@@ -28,11 +31,37 @@ function stripCodeFences(value) {
     .replace(/\r?\n?\s*```\s*$/i, "");
 }
 
+function isJsonValue(value) {
+  if (!value) return false;
+  try {
+    JSON.parse(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasEmbeddedJsonContainer(value) {
+  for (const [open, close] of [["{", "}"], ["[", "]"]]) {
+    const start = value.indexOf(open);
+    const end = value.lastIndexOf(close);
+    if (start < 0 || end <= start) continue;
+    try {
+      const parsed = JSON.parse(value.slice(start, end + 1));
+      if (parsed && typeof parsed === "object") return true;
+    } catch {
+      // Not a JSON container; ordinary mathematical braces remain eligible for text fallback.
+    }
+  }
+  return false;
+}
+
 function sanitizeRestrictedText(value, maxLength) {
   if (typeof value !== "string") return "";
   const text = stripCodeFences(value)
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/<\/?(?:studentAnswer|learningSignal)>/gi, "")
+    .replace(QUOTED_INTERNAL_FIELD_FRAGMENT, "")
     .replace(INTERNAL_FIELD_FRAGMENT, "")
     .trim();
   return trimAndCap(text, maxLength);
@@ -56,9 +85,13 @@ function sanitizeStudentAnswer(value) {
     .replace(/<\/?(?:studentAnswer|learningSignal)>/gi, "")
     .split(/\r?\n/)
     .filter((line) => !INTERNAL_FIELD_LINE.test(line))
+    .filter((line) => !QUOTED_INTERNAL_FIELD_LINE.test(line))
     .filter((line) => extracted || !STRUCTURE_FIELD_LINE.test(line))
     .filter((line) => !/^\s*[{}\[\],]+\s*$/.test(line))
-    .map((line) => line.replace(INTERNAL_FIELD_FRAGMENT, "").trim())
+    .map((line) => line
+      .replace(QUOTED_INTERNAL_FIELD_FRAGMENT, "")
+      .replace(INTERNAL_FIELD_FRAGMENT, "")
+      .trim())
     .filter(Boolean);
   const answer = trimAndCap(lines.join("\n"), 2000);
   return /[\p{L}\p{N}]/u.test(answer) ? answer : "";
@@ -94,10 +127,13 @@ export function unavailableQaOutput(_reason) {
 export function normalizeQaModelOutput(text) {
   const source = toWellFormedText(text);
   const parsed = parseJsonObject(source);
-  const strippedSource = stripCodeFences(source).trimStart();
-  const structuredSource = strippedSource === "null"
+  const strippedSource = stripCodeFences(source).trim();
+  const structuredSource = isJsonValue(strippedSource)
+    || hasEmbeddedJsonContainer(strippedSource)
     || JSON_CODE_FENCE.test(source)
-    || KNOWN_STRUCTURE_LABEL.test(source);
+    || KNOWN_SCHEMA_LABEL.test(source)
+    || UNQUOTED_INTERNAL_LABEL.test(source)
+    || QUOTED_INTERNAL_FIELD_FRAGMENT.test(source);
   const signal = parsed?.learningSignal;
   const structureValid = typeof parsed?.studentAnswer === "string"
     && signal
