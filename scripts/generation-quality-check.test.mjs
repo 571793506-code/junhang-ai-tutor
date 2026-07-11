@@ -164,6 +164,50 @@ test("generation quality verification evaluates repaired draft items", () => {
   assert.ok(check.detail.itemTypes.includes("reading"));
 });
 
+test("generation quality verification accepts a valid Sol escalation sample", () => {
+  const sample = buildGenerationQualityCases("formal").find((item) => item.name === "语文-阅读表达练习");
+  const items = [
+    ...Array.from({ length: 4 }, (_, index) => ({
+      itemType: "fill",
+      prompt: `基础填空第 ${index + 1} 题`,
+      answer: "参考答案",
+      analysisSteps: ["审清题意。"],
+      knowledgePoint: "基础知识"
+    })),
+    ...Array.from({ length: 4 }, (_, index) => ({
+      itemType: "reading",
+      prompt: `阅读理解第 ${index + 1} 题`,
+      answer: "参考答案",
+      analysisSteps: ["定位原文依据。"],
+      knowledgePoint: "阅读理解"
+    }))
+  ];
+  const check = evaluateGenerationQualityResult(sample, {
+    modelAvailable: true,
+    draftAvailable: true,
+    usedModelEscalation: true,
+    usedDynamicFallback: false,
+    totalScore: 60,
+    audit: { status: "passed", itemCount: 8, issues: [] },
+    generationPipeline: {
+      model: {
+        model: "gpt-5.6-sol",
+        escalationModel: "gpt-5.6-sol",
+        usedModelEscalation: true,
+        generationProfile: "formal-full",
+        assessmentTotalTimeoutMs: 240000,
+        assessmentMaxTokens: 24000
+      },
+      repair: { usedDynamicFallback: false, itemCount: 8, totalScore: 60 },
+      audit: { status: "passed" }
+    },
+    parsedDraft: { sections: [{ title: "阅读与基础", items }] }
+  });
+
+  assert.equal(check.ok, true);
+  assert.equal(check.detail.usedModelEscalation, true);
+});
+
 test("generation quality verification metadata is separate from link guard e2e", () => {
   assert.deepEqual(buildGenerationQualityVerification("quiz"), {
     verificationScope: "generation-quality-sample",

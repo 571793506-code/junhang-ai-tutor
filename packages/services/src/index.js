@@ -3402,6 +3402,7 @@ function normalizeAssessmentDraft(result = {}, input = {}) {
       ? parsed.items
       : sectionItems;
   const items = rawItems.map(normalizeAssessmentItem).filter((item) => item.prompt);
+  const usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
   const usedDynamicFallback = !result.available || !items.length || result.modelRun?.metadata?.partialGeneration === true;
   const review = reviewAndRepairAssessmentItems(items.length ? items : buildFallbackAssessmentItems(input), input);
   const safeItems = review.items;
@@ -3426,6 +3427,7 @@ function normalizeAssessmentDraft(result = {}, input = {}) {
     items: safeItems,
     answerKey: parsed.answerKey || parsed.answers || null,
     totalScore: review.totalScore,
+    usedModelEscalation,
     usedDynamicFallback,
     printNotes,
     audit,
@@ -3449,6 +3451,7 @@ function buildAssessmentGenerationPipeline({ result = {}, draft = {}, input = {}
     : "skipped";
   const modelStatus = result.modelRun?.status || (result.available ? "SUCCESS" : "ERROR");
   const modelAvailable = Boolean(result.available);
+  const usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
   const usedDynamicFallback = Boolean(draft.usedDynamicFallback);
   return {
     version: "assessment-generation-pipeline-v1",
@@ -3471,6 +3474,11 @@ function buildAssessmentGenerationPipeline({ result = {}, draft = {}, input = {}
       generationProfile: input.generationProfile || result.modelRun?.metadata?.generationProfile || null,
       assessmentTotalTimeoutMs: input.assessmentTotalTimeoutMs || result.modelRun?.metadata?.assessmentTotalTimeoutMs || null,
       assessmentMaxTokens: input.assessmentMaxTokens || result.modelRun?.metadata?.assessmentMaxTokens || null,
+      primaryModel: result.modelRun?.metadata?.primaryModel || null,
+      escalationModel: result.modelRun?.metadata?.escalationModel || null,
+      escalationTriggered: result.modelRun?.metadata?.escalationTriggered === true,
+      usedModelEscalation,
+      escalationScopes: Array.isArray(result.modelRun?.metadata?.escalationScopes) ? result.modelRun.metadata.escalationScopes : [],
       fallbackProvider: result.modelRun?.metadata?.fallbackProvider || null,
       primaryError: result.modelRun?.metadata?.primaryError || null,
       secondaryError: result.modelRun?.metadata?.secondaryError || null,
@@ -3834,6 +3842,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     draftItems: draft.items,
     audit: draft.audit,
     totalScore: draft.totalScore,
+    usedModelEscalation: draft.usedModelEscalation,
     usedDynamicFallback: draft.usedDynamicFallback,
     layoutTemplate,
     printProfile,

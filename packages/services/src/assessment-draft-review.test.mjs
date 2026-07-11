@@ -91,6 +91,81 @@ test("draftAssessmentService treats partial GPT-5.6 partition output as dynamic 
   assert.equal(result.generationPipeline.audit.status, "needs_teacher_review");
 });
 
+test("draftAssessmentService reports successful Sol escalation separately from dynamic repair", async () => {
+  const result = await draftAssessmentService(
+    {},
+    { subject: "英语", kind: "小测", grade: "五年级", requirement: "Unit 4" },
+    {
+      persist: false,
+      assessmentDraftRunner: async () => ({
+        ...fakeAssessmentResult(),
+        providerId: "gpt56",
+        modelRun: {
+          provider: "gpt56",
+          model: "gpt-5.6-sol",
+          skill: "assessment-draft",
+          status: "SUCCESS",
+          metadata: {
+            attempts: [
+              { role: "primary", model: "gpt-5.6", status: "ERROR" },
+              { role: "escalation", model: "gpt-5.6-sol", status: "SUCCESS" }
+            ],
+            primaryModel: "gpt-5.6",
+            escalationModel: "gpt-5.6-sol",
+            escalationTriggered: true,
+            usedModelEscalation: true,
+            escalationScopes: ["quiz-core"],
+            partialGeneration: false
+          }
+        }
+      })
+    }
+  );
+
+  assert.equal(result.usedModelEscalation, true);
+  assert.equal(result.usedDynamicFallback, false);
+  assert.equal(result.generationPipeline.model.escalationModel, "gpt-5.6-sol");
+  assert.equal(result.generationPipeline.model.usedModelEscalation, true);
+  assert.equal(result.generationPipeline.repair.usedDynamicFallback, false);
+});
+
+test("draftAssessmentService uses final validation state after an unusable Sol response", async () => {
+  const result = await draftAssessmentService(
+    {},
+    { subject: "英语", kind: "小测", grade: "五年级", requirement: "Unit 4" },
+    {
+      persist: false,
+      assessmentDraftRunner: async () => ({
+        available: true,
+        providerId: "gpt56",
+        draftText: "{}",
+        modelRun: {
+          provider: "gpt56",
+          model: "gpt-5.6",
+          skill: "assessment-draft",
+          status: "SUCCESS",
+          metadata: {
+            attempts: [
+              { role: "primary", model: "gpt-5.6", status: "ERROR" },
+              { role: "escalation", model: "gpt-5.6-sol", status: "SUCCESS" }
+            ],
+            escalationModel: "gpt-5.6-sol",
+            escalationTriggered: true,
+            usedModelEscalation: false,
+            partialGeneration: true
+          }
+        }
+      })
+    }
+  );
+
+  assert.equal(result.usedModelEscalation, false);
+  assert.equal(result.usedDynamicFallback, true);
+  assert.equal(result.generationPipeline.model.usedModelEscalation, false);
+  assert.equal(result.generationPipeline.repair.usedDynamicFallback, true);
+  assert.equal(result.generationPipeline.audit.status, "needs_teacher_review");
+});
+
 test("draftAssessmentService can run model review when explicitly requested", async () => {
   let reviewCallCount = 0;
   const reviewer = async () => {
