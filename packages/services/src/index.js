@@ -526,12 +526,12 @@ function mergeReferenceAnswerGroups(...groups) {
 
 function normalizeReferenceAnswerItem(item, index) {
   const source = typeof item === "string" ? { correctAnswer: item } : item || {};
-  const questionNo = String(source.questionNo || source.no || source.index || index + 1);
+  const questionNo = String(source.questionNo ?? source.no ?? source.orderIndex ?? source.index ?? index + 1);
   const analysisSteps = toStringArray(source.analysisSteps || source.steps || source.analysis || source.explanation);
   return {
     questionNo,
-    prompt: String(source.prompt || source.question || source.printedPrompt || "").trim(),
-    correctAnswer: String(source.correctAnswer || source.answer || source.standardAnswer || source.expectedAnswer || "").trim(),
+    prompt: String(source.prompt ?? source.question ?? source.printedPrompt ?? "").trim(),
+    correctAnswer: String(source.correctAnswer ?? source.answer ?? source.standardAnswer ?? source.expectedAnswer ?? "").trim(),
     analysisSteps,
     knowledgePoint: String(source.knowledgePoint || source.point || source.skill || "").trim(),
     score: optionalNumber(source.score),
@@ -631,6 +631,7 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
   let result = await referenceAnswerRunner(config, runnerInput);
   let modelRun = await persistRun(result.modelRun, options);
   let escalationModelRun = null;
+  let escalationPersistenceError = null;
   let solAttempted = result.modelRun?.metadata?.solAttempted === true;
   let usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
   if (usedModelEscalation) escalationModelRun = modelRun;
@@ -670,10 +671,17 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
     const solAnswers = solRawAnswers
       .map(normalizeReferenceAnswerItem)
       .filter((item) => item.correctAnswer || item.prompt);
-    const solModelRun = await persistRun(solResult.modelRun, options);
-    escalationModelRun = solModelRun;
     solAttempted = true;
-    if (solResult.available && solAnswers.length) {
+    let solModelRun = null;
+    let solPersistenceAvailable = true;
+    try {
+      solModelRun = await persistRun(solResult.modelRun, options);
+      escalationModelRun = solModelRun;
+    } catch (error) {
+      solPersistenceAvailable = false;
+      escalationPersistenceError = String(error?.message || error || "Sol escalation persistence failed");
+    }
+    if (solPersistenceAvailable && solResult.available && solAnswers.length) {
       result = solResult;
       parsed = solParsed;
       rawAnswers = solRawAnswers;
@@ -694,6 +702,7 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
     needsTeacherReview: Boolean(parsed.needsTeacherReview ?? averageConfidence < 0.72),
     modelRunId: modelRun?.id || null,
     escalationModelRunId: escalationModelRun?.id || null,
+    escalationPersistenceError,
     solAttempted,
     usedModelEscalation,
     summary: String(parsed.summary || result.error || "AI已尝试生成参考答案。").trim(),
@@ -1234,7 +1243,7 @@ function summarizeQuestionLayoutManifestForAudit(manifest = null) {
 function normalizeQuestionResult(item, index, input = {}, total = 1) {
   const source = typeof item === "string" ? { explanation: item } : item || {};
   const status = normalizeQuestionStatus(source.status || source.result || source.correctness);
-  const questionNo = String(source.questionNo || source.no || source.index || index + 1);
+  const questionNo = String(source.questionNo ?? source.no ?? source.orderIndex ?? source.index ?? index + 1);
   const manifest = manifestQuestionFor(input, questionNo);
   const process = toStringArray(source.studentProcess || source.process || source.steps || source.reasoning);
   const explanation = String(source.explanation || source.analysis || source.correctProcess || source.reason || "").trim();
@@ -1251,7 +1260,7 @@ function normalizeQuestionResult(item, index, input = {}, total = 1) {
     questionNo,
     status,
     studentAnswer: String(source.studentAnswer || source.answer || source.studentWork || "").trim(),
-    correctAnswer: String(source.correctAnswer || source.expectedAnswer || source.standardAnswer || manifest?.answer || "").trim(),
+    correctAnswer: String(source.correctAnswer ?? source.expectedAnswer ?? source.standardAnswer ?? manifest?.answer ?? "").trim(),
     studentProcess: process,
     errorStep,
     explanation: explanation || (Array.isArray(manifest?.analysisSteps) ? manifest.analysisSteps.join("；") : ""),
@@ -1532,7 +1541,7 @@ function hasSufficientSolGradingEvidence(input = {}, ocr = {}, reference = {}) {
 function selectSolGradingQuestionNos(structured = {}, input = {}, ocr = {}, reference = {}) {
   if (!hasSufficientSolGradingEvidence(input, ocr, reference)) return [];
   const references = new Map((reference.referenceAnswers || []).map((item) => [String(item.questionNo || ""), item]));
-  const normalizeAnswer = (value) => String(value || "").normalize("NFKC").replace(/\s+/g, "").trim().toLowerCase();
+  const normalizeAnswer = (value) => String(value ?? "").normalize("NFKC").replace(/\s+/g, "").trim().toLowerCase();
   const questions = Array.isArray(structured.questionResults) ? structured.questionResults : [];
   const selected = questions.filter((item) => {
     const referenceItem = references.get(String(item.questionNo || ""));
@@ -1552,7 +1561,7 @@ function buildSolGradingInput(input = {}, questionNos = []) {
   const selected = new Set(questionNos.map(String));
   const withQuestionNo = (items = []) => items.map((item, index) => ({
     ...item,
-    questionNo: String(item.questionNo || item.no || index + 1)
+    questionNo: String(item.questionNo ?? item.no ?? item.orderIndex ?? item.index ?? index + 1)
   }));
   const questions = withQuestionNo(input.ocrQuestions || []).filter((item) => selected.has(item.questionNo));
   const references = withQuestionNo(input.referenceAnswers || []).filter((item) => selected.has(item.questionNo));
@@ -4067,7 +4076,10 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
       }
     : await gradingRunner(config, remoteGradingInput);
   const result = mergeDeterministicGradingResult(remoteResult, deterministicPlan.deterministicResults, gradingInput);
-  const modelRun = await persistRun(result.modelRun, options);
+  const primaryModelRun = await persistRun(result.modelRun, options);
+  let effectiveResult = result;
+  let effectiveModelRun = primaryModelRun;
+  let escalationModelRun = result.modelRun?.metadata?.usedModelEscalation === true ? primaryModelRun : null;
   let initialStructured = normalizeGradingResult(result, gradingInput, ocr);
   let auditModelRun = null;
   let premiumAuditModelRun = null;
@@ -4093,9 +4105,12 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
         disableSolEscalation: true
       }
     );
-    await persistRun(solResult.modelRun, options);
+    const solModelRun = await persistRun(solResult.modelRun, options);
+    escalationModelRun = solModelRun;
     if (solResult.available) {
       const mergedSolResult = mergeSolGradingResult(initialStructured, solResult, gradingInput, selectedSolQuestionNos);
+      effectiveResult = mergedSolResult;
+      effectiveModelRun = solModelRun;
       initialStructured = normalizeGradingResult(mergedSolResult, gradingInput, ocr);
     }
   }
@@ -4238,7 +4253,7 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
             assignmentId: assignment.id,
             studentId: input.studentId,
             subject: input.subject,
-            modelRunId: modelRun?.id || null,
+            modelRunId: effectiveModelRun?.id || primaryModelRun?.id || null,
             content: {
               ocrText: input.ocrText || null,
               studentAnswerText: input.studentAnswerText || null,
@@ -4259,9 +4274,9 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
             },
             result: {
               ...structured,
-              rawText: result.gradingText,
-              providerId: result.providerId,
-              available: result.available,
+              rawText: effectiveResult.gradingText,
+              providerId: effectiveResult.providerId,
+              available: effectiveResult.available,
               referenceAnswer: reference,
               questionLayoutManifest,
               gradingAuditModelRunId: auditModelRun?.id || null,
@@ -4275,12 +4290,14 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
         );
 
   return {
-    ...result,
+    ...effectiveResult,
     referenceAnswer: reference,
     gradingAudit: structured.gradingAudit,
     structured,
     persisted: {
-      modelRunId: modelRun?.id || null,
+      modelRunId: effectiveModelRun?.id || primaryModelRun?.id || null,
+      primaryModelRunId: primaryModelRun?.id || null,
+      escalationModelRunId: escalationModelRun?.id || null,
       referenceModelRunId: reference.modelRunId || null,
       gradingAuditModelRunId: auditModelRun?.id || null,
       premiumAuditModelRunId: premiumAuditModelRun?.id || null,

@@ -157,6 +157,60 @@ test("successful runtime reference escalation uses one consistent persisted Sol 
   assert.equal(result.referenceAnswer.usedModelEscalation, true);
 });
 
+test("optional Sol reference persistence failure preserves the persisted Terra source", async () => {
+  let persistCalls = 0;
+  const result = await gradeSubmissionService(
+    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+    { assignmentId: "existing-assignment", subject: "数学", printedText: "1. 1+1=?", studentAnswerText: "1. 2" },
+    {
+      prisma: {
+        modelRun: {
+          create: async ({ data }) => {
+            persistCalls += 1;
+            if (persistCalls === 2) throw new Error("optional Sol persistence failed");
+            return { id: "terra-run", ...data };
+          }
+        }
+      },
+      referenceAnswerRunner: async (_config, _input, execution) => ({
+        available: true,
+        providerId: "gpt56",
+        referenceText: JSON.stringify({
+          referenceAnswers: [{ questionNo: "1", correctAnswer: execution ? "Sol answer" : "Terra answer", confidence: execution ? 0.99 : 0.5 }]
+        }),
+        modelRun: { provider: "gpt56", model: execution ? "gpt-5.6-sol" : "gpt-5.6", skill: "submission-reference-answer", status: "SUCCESS" }
+      }),
+      gradingRunner: async () => ({
+        available: true,
+        providerId: "gpt56",
+        gradingText: JSON.stringify({ score: 5, questionResults: [{ questionNo: "1", status: "correct", score: 5, maxScore: 5, confidence: 0.95 }] })
+      })
+    }
+  );
+
+  assert.equal(result.referenceAnswer.referenceAnswers[0].correctAnswer, "Terra answer");
+  assert.equal(result.referenceAnswer.modelRunId, "terra-run");
+  assert.equal(result.referenceAnswer.escalationModelRunId, null);
+  assert.equal(result.referenceAnswer.escalationPersistenceError, "optional Sol persistence failed");
+  assert.equal(result.referenceAnswer.solAttempted, true);
+  assert.equal(result.referenceAnswer.usedModelEscalation, false);
+});
+
+test("reference normalization preserves numeric and boolean prompt or answer values", async () => {
+  const result = await gradeSubmissionService(
+    {},
+    {
+      subject: "数学",
+      referenceAnswers: [{ questionNo: "1", prompt: false, correctAnswer: 0, score: 5, confidence: 1 }],
+      ocrQuestions: [{ questionNo: "1", printedText: "判断结果", studentAnswer: "0", confidence: 0.99 }]
+    },
+    { persist: false }
+  );
+
+  assert.equal(result.referenceAnswer.referenceAnswers[0].prompt, "false");
+  assert.equal(result.referenceAnswer.referenceAnswers[0].correctAnswer, "0");
+});
+
 test("objective comparison keeps unsafe multi-answer text unresolved", async () => {
   let runnerInput = null;
   await gradeSubmissionService(

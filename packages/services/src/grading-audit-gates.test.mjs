@@ -340,6 +340,44 @@ test("Sol regrades only risky questions, replaces only those results, and recomp
   assert.equal(result.structured.score, 9);
 });
 
+test("quality Sol success returns and persists the effective merged result with both run ids", async () => {
+  let runId = 0;
+  const result = await gradeSubmissionService(
+    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+    {
+      assignmentId: "existing-assignment",
+      subject: "语文",
+      totalScore: 10,
+      referenceAnswers: [
+        { questionNo: "1", prompt: "选择题", correctAnswer: "C", score: 4, confidence: 1 },
+        { questionNo: "2", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }
+      ],
+      ocrQuestions: [
+        { questionNo: "1", printedText: "选择题", studentAnswer: "C", confidence: 0.99 },
+        { questionNo: "2", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.99 }
+      ]
+    },
+    {
+      prisma: { modelRun: { create: async ({ data }) => ({ id: `run-${++runId}`, ...data }) } },
+      gradingRunner: async () => riskyTwoQuestionResult(),
+      solGradingRunner: async () => ({
+        available: true,
+        providerId: "sol-provider",
+        gradingText: JSON.stringify({ questionResults: [{ questionNo: "2", status: "partial", score: 5, maxScore: 6, correctAnswer: "勇敢", confidence: 0.9 }] }),
+        modelRun: { provider: "gpt56", model: "gpt-5.6-sol", status: "SUCCESS" }
+      })
+    }
+  );
+
+  const effective = JSON.parse(result.gradingText);
+  assert.deepEqual(effective.questionResults.map((item) => item.questionNo), ["1", "2"]);
+  assert.equal(result.providerId, "sol-provider");
+  assert.equal(result.available, true);
+  assert.equal(result.persisted.modelRunId, "run-2");
+  assert.equal(result.persisted.primaryModelRunId, "run-1");
+  assert.equal(result.persisted.escalationModelRunId, "run-2");
+});
+
 test("Sol filtering preserves original question numbers when source arrays omit questionNo", async () => {
   let solInput = null;
   const result = await gradeSubmissionService(
@@ -348,15 +386,15 @@ test("Sol filtering preserves original question numbers when source arrays omit 
       subject: "语文",
       totalScore: 10,
       referenceAnswers: [
-        { prompt: "选择题", correctAnswer: "C", score: 4, confidence: 1 },
-        { prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }
+        { orderIndex: "2", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 },
+        { orderIndex: "1", prompt: "选择题", correctAnswer: "C", score: 4, confidence: 1 }
       ],
       ocrQuestions: [
-        { printedText: "选择题", studentAnswer: "C", confidence: 0.99 },
-        { printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.99 }
+        { orderIndex: "2", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.99 },
+        { orderIndex: "1", printedText: "选择题", studentAnswer: "C", confidence: 0.99 }
       ],
-      assignmentItems: [{ prompt: "选择题" }, { prompt: "分析人物。" }],
-      questionLayoutManifest: { questions: [{ prompt: "选择题" }, { prompt: "分析人物。" }] }
+      assignmentItems: [{ index: "2", prompt: "分析人物。" }, { index: "1", prompt: "选择题" }],
+      questionLayoutManifest: { questions: [{ orderIndex: "2", prompt: "分析人物。" }, { orderIndex: "1", prompt: "选择题" }] }
     },
     {
       persist: false,
@@ -411,6 +449,42 @@ test("Sol selection includes low confidence, answer conflict, and locatable scor
       }
     );
     assert.deepEqual(selected, sample.expected);
+  }
+});
+
+test("answer conflict selection preserves numeric and boolean answers", async () => {
+  for (const sample of [
+    { referenceAnswer: 0, modelAnswer: false, expectedCalls: 1 },
+    { referenceAnswer: 0, modelAnswer: 0, expectedCalls: 0 },
+    { referenceAnswer: false, modelAnswer: 0, expectedCalls: 1 },
+    { referenceAnswer: false, modelAnswer: false, expectedCalls: 0 }
+  ]) {
+    let solCalls = 0;
+    await gradeSubmissionService(
+      { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
+      {
+        subject: "数学",
+        totalScore: 5,
+        referenceAnswers: [{ questionNo: "1", prompt: "说明判断结果", correctAnswer: sample.referenceAnswer, score: 5, confidence: 1 }],
+        ocrQuestions: [{ questionNo: "1", printedText: "说明判断结果", studentAnswer: "0", confidence: 0.99 }]
+      },
+      {
+        persist: false,
+        gradingRunner: async () => ({
+          available: true,
+          providerId: "gpt56",
+          gradingText: JSON.stringify({
+            score: 5,
+            questionResults: [{ questionNo: "1", status: "correct", score: 5, maxScore: 5, correctAnswer: sample.modelAnswer, confidence: 0.95 }]
+          })
+        }),
+        solGradingRunner: async () => {
+          solCalls += 1;
+          return { available: true, providerId: "gpt56", gradingText: JSON.stringify({ questionResults: [{ questionNo: "1", status: "correct", score: 5, maxScore: 5, correctAnswer: sample.referenceAnswer, confidence: 0.95 }] }) };
+        }
+      }
+    );
+    assert.equal(solCalls, sample.expectedCalls);
   }
 });
 
