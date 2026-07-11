@@ -24,9 +24,9 @@ import {
   recordVocabularyRecord,
   recordVoiceInteraction
 } from "@junhang/db";
-import { buildQaLearningRecord } from "./qa-learning-record.js";
+import { buildQaLearningRecord, sanitizeQaAnswer } from "./qa-learning-record.js";
 
-export { buildQaLearningRecord } from "./qa-learning-record.js";
+export { buildQaLearningRecord, sanitizeQaAnswer, sanitizeQaText } from "./qa-learning-record.js";
 
 const workspaceRoot = findWorkspaceRoot();
 
@@ -419,11 +419,14 @@ function optionalText(value) {
   return text || null;
 }
 
-function safeQaAnswer(result = {}) {
-  for (const value of [result.studentAnswer, result.answer]) {
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return null;
+function canonicalQaAnswer(result = {}) {
+  const studentAnswer = Object.hasOwn(result, "studentAnswer") ? result.studentAnswer : undefined;
+  const source = typeof studentAnswer === "string" && !studentAnswer.trim()
+    ? result.answer
+    : studentAnswer === undefined
+      ? result.answer
+      : studentAnswer;
+  return sanitizeQaAnswer(source);
 }
 
 function optionalNumber(value) {
@@ -3733,8 +3736,15 @@ export async function answerStudentQuestionService(config, input = {}, options =
   const qaRunner = options.qaRunner || answerStudentQuestion;
   const result = await qaRunner(config, input);
   const modelRun = await persistRun(result.modelRun, options);
-  const learningRecord = buildQaLearningRecord(input, result);
-  const answer = safeQaAnswer(result);
+  const canonicalAnswer = canonicalQaAnswer(result);
+  const normalizedResult = {
+    ...result,
+    studentAnswer: canonicalAnswer.text,
+    answer: canonicalAnswer.text,
+    available: result.available === true && canonicalAnswer.contentAvailable
+  };
+  const learningRecord = buildQaLearningRecord(input, normalizedResult);
+  const answer = normalizedResult.studentAnswer;
 
   const qaSession =
     options.persist === false
@@ -3772,7 +3782,7 @@ export async function answerStudentQuestionService(config, input = {}, options =
       : null;
 
   return {
-    ...result,
+    ...normalizedResult,
     persisted: {
       modelRunId: modelRun?.id || null,
       qaSessionId: qaSession?.id || null,

@@ -1,29 +1,34 @@
-import { normalizeDisplayText } from "@junhang/core";
+import { sanitizeQaAnswer, sanitizeQaText } from "@junhang/services";
 
 const ACTOR_ROLES = new Set(["student", "teacher", "classroom"]);
 const QA_MODES = new Set(["GUIDED_THINKING", "KNOWLEDGE_EXPLANATION"]);
-const DEFAULT_ANSWER = "AI 问答已收到，老师稍后会协助复核。";
+const VOICE_STATUSES = new Set([
+  "ready",
+  "queued",
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+  "unavailable",
+  "error",
+  "success"
+]);
 
-function displayText(value, fallback = "") {
-  if (typeof value !== "string") return fallback;
-  const text = normalizeDisplayText(value).trim();
-  return text && !/\?{2,}/.test(text) ? text : fallback;
+function qaAnswerSource(result) {
+  const studentAnswer = Object.hasOwn(result, "studentAnswer") ? result.studentAnswer : undefined;
+  if (typeof studentAnswer === "string" && !studentAnswer.trim()) return result.answer;
+  return studentAnswer === undefined ? result.answer : studentAnswer;
 }
 
-function displayAnswer(value) {
-  const text = displayText(value, "");
-  if (!text) return DEFAULT_ANSWER;
-  const jsonText = text
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-  if (!jsonText.startsWith("{") && !jsonText.startsWith("[")) return text;
+function safeAudioUrl(value) {
+  const text = sanitizeQaText(value, { maxLength: 2048 });
+  if (!text || /[\s\\]/.test(text)) return null;
+  if (/^\/(?!\/)/.test(text)) return text;
   try {
-    const parsed = JSON.parse(jsonText);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return DEFAULT_ANSWER;
-    return displayText(parsed.content || parsed.answer || parsed.text, DEFAULT_ANSWER);
+    const url = new URL(text);
+    return url.protocol === "http:" || url.protocol === "https:" ? text : null;
   } catch {
-    return DEFAULT_ANSWER;
+    return null;
   }
 }
 
@@ -45,23 +50,25 @@ export function buildQaActorContext(session = {}, input = {}, options = {}) {
 }
 
 export function cleanQaResultForClient(result = {}) {
-  const answerSource = displayText(result.studentAnswer, "") ? result.studentAnswer : result.answer;
+  const answer = sanitizeQaAnswer(qaAnswerSource(result));
   return {
-    available: result.available === true,
+    available: result.available === true && answer.contentAvailable,
     mode: QA_MODES.has(result.mode) ? result.mode : "KNOWLEDGE_EXPLANATION",
-    answer: displayAnswer(answerSource)
+    answer: answer.text
   };
 }
 
 export function cleanClassroomQaResultForClient({ qa = {}, transcript, voice = {} } = {}) {
+  const status = sanitizeQaText(voice.status, { maxLength: 32 });
+  const reason = sanitizeQaText(voice.reason, { maxLength: 240 });
   return {
     ...cleanQaResultForClient(qa),
-    transcript: displayText(transcript, ""),
+    transcript: sanitizeQaText(transcript, { maxLength: 2000 }),
     voice: {
       available: voice.available === true,
-      status: displayText(voice.status, "") || null,
-      audioUrl: displayText(voice.audioUrl, "") || null,
-      reason: displayText(voice.reason, "") || null
+      status: VOICE_STATUSES.has(status) ? status : null,
+      audioUrl: safeAudioUrl(voice.audioUrl),
+      reason: reason || null
     }
   };
 }

@@ -14,6 +14,8 @@ const validLearningSignal = {
   profileEligibility: true,
   blockedReason: null
 };
+const unavailableAnswer = "AI 问答暂时不可用，请稍后再试。";
+const blockedAnswer = "这个问题暂时不能直接回答，请换一种安全、清楚的方式提问。";
 
 function buildInput(overrides = {}) {
   return {
@@ -141,6 +143,108 @@ test("buildQaLearningRecord rejects a missing learning signal even when structur
   assert.equal(record.learningSignal, null);
 });
 
+test("buildQaLearningRecord rejects inherited and non-plain learning signals", () => {
+  const inheritedSignal = Object.create(validLearningSignal);
+  const nullPrototypeSignal = Object.assign(Object.create(null), validLearningSignal);
+
+  for (const learningSignal of [inheritedSignal, new Map(Object.entries(validLearningSignal))]) {
+    const record = buildQaLearningRecord(buildInput(), buildResult({ learningSignal }));
+    assert.equal(record.profileEligibility, false);
+    assert.equal(record.blockedReason, "malformed-output");
+    assert.equal(record.learningSignal, null);
+  }
+
+  assert.equal(
+    buildQaLearningRecord(buildInput(), buildResult({ learningSignal: nullPrototypeSignal })).profileEligibility,
+    true
+  );
+});
+
+test("buildQaLearningRecord treats invalid safety enums as malformed, not explicitly blocked", () => {
+  const record = buildQaLearningRecord(buildInput(), buildResult({
+    learningSignal: { ...validLearningSignal, safetyStatus: "unknown" }
+  }));
+
+  assert.equal(record.profileEligibility, false);
+  assert.equal(record.blockedReason, "malformed-output");
+  assert.equal(record.learningSignal.safetyStatus, "blocked");
+});
+
+test("buildQaLearningRecord caps signal arrays by well-formed code points and marks oversized input invalid", () => {
+  const record = buildQaLearningRecord(buildInput(), buildResult({
+    learningSignal: {
+      ...validLearningSignal,
+      knowledgePoints: Array.from({ length: 10 }, (_, index) => `${"😀".repeat(99)}${index}\uD800`),
+      misconceptionHypotheses: Array.from({ length: 7 }, (_, index) => `${"乙".repeat(199)}${index}\uD800`)
+    }
+  }));
+
+  assert.equal(record.profileEligibility, false);
+  assert.equal(record.blockedReason, "malformed-output");
+  assert.equal(record.learningSignal.knowledgePoints.length, 8);
+  assert.equal(record.learningSignal.knowledgePoints.every((item) => Array.from(item).length <= 80), true);
+  assert.equal(record.learningSignal.misconceptionHypotheses.length, 5);
+  assert.equal(record.learningSignal.misconceptionHypotheses.every((item) => Array.from(item).length <= 160), true);
+  assert.equal(JSON.stringify(record.learningSignal).includes("\uD800"), false);
+});
+
+test("buildQaLearningRecord drops internal labels and embedded JSON from signal text", () => {
+  const record = buildQaLearningRecord(buildInput(), buildResult({
+    learningSignal: {
+      ...validLearningSignal,
+      knowledgePoints: [
+        "小数意义",
+        "provider: secret-provider",
+        "model=gpt-secret",
+        "前缀 {\"raw\":\"secret-raw\"} 后缀"
+      ],
+      misconceptionHypotheses: [
+        "继续观察",
+        "prompt: secret-prompt",
+        "debug=secret-debug"
+      ]
+    }
+  }));
+
+  assert.deepEqual(record.learningSignal.knowledgePoints, ["小数意义"]);
+  assert.deepEqual(record.learningSignal.misconceptionHypotheses, ["继续观察"]);
+  assert.equal(record.profileEligibility, false);
+  assert.equal(record.blockedReason, "malformed-output");
+  assert.equal(JSON.stringify(record).includes("secret"), false);
+});
+
+test("answerStudentQuestionService never persists oversized runner signals as eligible", async () => {
+  let qaSessionData = null;
+  const qaRunner = async () => ({
+    ...buildResult({
+      learningSignal: {
+        ...validLearningSignal,
+        knowledgePoints: Array.from({ length: 10 }, () => "知".repeat(100)),
+        misconceptionHypotheses: Array.from({ length: 7 }, () => "误".repeat(200))
+      }
+    }),
+    studentAnswer: "安全回答",
+    answer: "安全回答",
+    modelRun: null
+  });
+  const prisma = {
+    qaSession: {
+      create: async ({ data }) => {
+        qaSessionData = data;
+        return { id: "qa1" };
+      }
+    }
+  };
+
+  await answerStudentQuestionService({}, buildInput({ question: "问题" }), { qaRunner, prisma });
+
+  assert.equal(qaSessionData.metadata.profileEligibility, false);
+  assert.equal(qaSessionData.metadata.learningSignal.knowledgePoints.length, 8);
+  assert.equal(qaSessionData.metadata.learningSignal.knowledgePoints.every((item) => Array.from(item).length <= 80), true);
+  assert.equal(qaSessionData.metadata.learningSignal.misconceptionHypotheses.length, 5);
+  assert.equal(qaSessionData.metadata.learningSignal.misconceptionHypotheses.every((item) => Array.from(item).length <= 160), true);
+});
+
 test("answerStudentQuestionService persists only approved QA metadata", async () => {
   const writes = { modelRuns: [], qaSessions: [], voiceInteractions: [] };
   const qaRunner = async () => ({
@@ -210,25 +314,92 @@ test("answerStudentQuestionService uses the safe legacy answer and honors persis
   });
 });
 
-test("answerStudentQuestionService never persists a non-string injected answer", async () => {
-  let qaSessionData = null;
+test("answerStudentQuestionService canonicalizes malicious runner answers before persistence and return", async () => {
+  const cases = [
+    '{"content":"safe","provider":"secret-provider","raw":"secret-raw"}',
+    '回答前缀 {"content":"safe","provider":"secret-provider"} 回答后缀',
+    { raw: "secret-object" }
+  ];
+
+  for (const studentAnswer of cases) {
+    const writes = { qaSession: null, voiceInteraction: null };
+    const qaRunner = async () => ({
+      ...buildResult(),
+      studentAnswer,
+      answer: "不应回退的兼容回答",
+      modelRun: null
+    });
+    const prisma = {
+      qaSession: {
+        create: async ({ data }) => {
+          writes.qaSession = data;
+          return { id: "qa1" };
+        }
+      },
+      voiceInteraction: {
+        create: async ({ data }) => {
+          writes.voiceInteraction = data;
+          return { id: "voice1" };
+        }
+      }
+    };
+
+    const result = await answerStudentQuestionService({}, {
+      ...buildInput({ question: "问题" }),
+      deviceId: "d1"
+    }, { qaRunner, prisma });
+
+    assert.equal(writes.qaSession.answer, unavailableAnswer);
+    assert.equal(writes.qaSession.metadata.available, false);
+    assert.equal(writes.qaSession.metadata.profileEligibility, false);
+    assert.equal(writes.voiceInteraction.answerSummary, unavailableAnswer);
+    assert.equal(writes.voiceInteraction.metadata.available, false);
+    assert.equal(result.studentAnswer, unavailableAnswer);
+    assert.equal(result.answer, unavailableAnswer);
+    assert.equal(result.available, false);
+    assert.equal(JSON.stringify({ writes, result }).includes("secret"), false);
+    assert.equal(JSON.stringify({ writes, result }).includes("不应回退"), false);
+  }
+});
+
+test("answerStudentQuestionService preserves plain and blocked canonical answers", async () => {
+  const cases = [
+    ["正常回答", validLearningSignal, true],
+    ["A model helps us explain a math pattern.", validLearningSignal, true],
+    [blockedAnswer, { ...validLearningSignal, safetyStatus: "blocked" }, true]
+  ];
+
+  for (const [studentAnswer, learningSignal, available] of cases) {
+    const qaRunner = async () => ({
+      ...buildResult({ learningSignal }),
+      studentAnswer,
+      answer: studentAnswer,
+      modelRun: null
+    });
+    const result = await answerStudentQuestionService({}, buildInput({ question: "问题" }), {
+      qaRunner,
+      persist: false
+    });
+    assert.equal(result.studentAnswer, studentAnswer);
+    assert.equal(result.answer, studentAnswer);
+    assert.equal(result.available, available);
+  }
+});
+
+test("answerStudentQuestionService caps canonical answers by well-formed code points", async () => {
   const qaRunner = async () => ({
     ...buildResult(),
-    studentAnswer: { raw: "unsafe-object" },
-    answer: "兼容安全回答",
+    studentAnswer: `答\uD800${"😀".repeat(2100)}`,
+    answer: "不应使用",
     modelRun: null
   });
-  const prisma = {
-    qaSession: {
-      create: async ({ data }) => {
-        qaSessionData = data;
-        return { id: "qa1" };
-      }
-    }
-  };
+  const result = await answerStudentQuestionService({}, buildInput({ question: "问题" }), {
+    qaRunner,
+    persist: false
+  });
 
-  await answerStudentQuestionService({}, buildInput({ question: "问题" }), { qaRunner, prisma });
-
-  assert.equal(qaSessionData.answer, "兼容安全回答");
-  assert.equal(JSON.stringify(qaSessionData).includes("unsafe-object"), false);
+  assert.equal(Array.from(result.studentAnswer).length, 2000);
+  assert.equal(result.studentAnswer.includes("\uD800"), false);
+  assert.equal(result.answer, result.studentAnswer);
+  assert.equal(result.available, true);
 });

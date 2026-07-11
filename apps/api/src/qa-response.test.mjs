@@ -83,17 +83,37 @@ test("cleanQaResultForClient returns the exact learner response whitelist", () =
   assert.equal(JSON.stringify(result).includes("secret"), false);
 });
 
-test("cleanQaResultForClient safely supports the legacy answer field", () => {
+test("cleanQaResultForClient safely supports a plain legacy answer field", () => {
   assert.deepEqual(cleanQaResultForClient({
-    available: 1,
+    available: true,
     mode: "UNTRUSTED_MODE",
     studentAnswer: "",
-    answer: JSON.stringify({ answer: "兼容安全回答", provider: "secret-provider" })
+    answer: "兼容安全回答"
   }), {
-    available: false,
+    available: true,
     mode: "KNOWLEDGE_EXPLANATION",
     answer: "兼容安全回答"
   });
+});
+
+test("cleanQaResultForClient caps answers and rejects structured internal content", () => {
+  const longResult = cleanQaResultForClient({
+    available: true,
+    studentAnswer: "答".repeat(5000)
+  });
+  assert.equal(Array.from(longResult.answer).length, 2000);
+  assert.equal(longResult.available, true);
+
+  for (const studentAnswer of [
+    '{"content":"safe","provider":"secret-provider"}',
+    '回答前缀 {"content":"safe","raw":"secret-raw"} 回答后缀'
+  ]) {
+    assert.deepEqual(cleanQaResultForClient({ available: true, studentAnswer }), {
+      available: false,
+      mode: "KNOWLEDGE_EXPLANATION",
+      answer: "AI 问答暂时不可用，请稍后再试。"
+    });
+  }
 });
 
 test("cleanClassroomQaResultForClient adds only transcript and approved voice fields", () => {
@@ -134,6 +154,82 @@ test("cleanClassroomQaResultForClient adds only transcript and approved voice fi
   assert.equal(JSON.stringify(result).includes("secret"), false);
 });
 
+test("cleanClassroomQaResultForClient validates voice values and caps visible text", () => {
+  const result = cleanClassroomQaResultForClient({
+    qa: { available: true, studentAnswer: "安全回答" },
+    transcript: "问".repeat(2500),
+    voice: {
+      available: true,
+      status: '{"status":"ready"}',
+      audioUrl: "javascript:alert(1)",
+      reason: "provider: secret-provider"
+    }
+  });
+
+  assert.equal(Array.from(result.transcript).length, 2000);
+  assert.deepEqual(result.voice, {
+    available: true,
+    status: null,
+    audioUrl: null,
+    reason: null
+  });
+
+  const longReason = cleanClassroomQaResultForClient({
+    qa: { available: true, studentAnswer: "安全回答" },
+    voice: { reason: "稍后重试".repeat(100) }
+  }).voice.reason;
+  assert.equal(Array.from(longReason).length, 240);
+});
+
+test("cleanClassroomQaResultForClient allows only explicit statuses and safe audio URLs", () => {
+  const allowedStatuses = [
+    "ready",
+    "queued",
+    "pending",
+    "processing",
+    "completed",
+    "failed",
+    "unavailable",
+    "error",
+    "success"
+  ];
+  for (const status of allowedStatuses) {
+    const result = cleanClassroomQaResultForClient({
+      qa: { available: true, studentAnswer: "安全回答" },
+      voice: { status }
+    });
+    assert.equal(result.voice.status, status);
+  }
+  for (const status of ["unknown", "READY", "{\"ready\":true}"]) {
+    const result = cleanClassroomQaResultForClient({
+      qa: { available: true, studentAnswer: "安全回答" },
+      voice: { status }
+    });
+    assert.equal(result.voice.status, null);
+  }
+
+  for (const audioUrl of ["/generated/a.mp3", "http://example.com/a.mp3", "https://example.com/a.mp3"]) {
+    const result = cleanClassroomQaResultForClient({
+      qa: { available: true, studentAnswer: "安全回答" },
+      voice: { audioUrl }
+    });
+    assert.equal(result.voice.audioUrl, audioUrl);
+  }
+  for (const audioUrl of [
+    "//evil.example/a.mp3",
+    "javascript:alert(1)",
+    "data:audio/mp3;base64,AAAA",
+    "file:///secret.mp3",
+    "generated/a.mp3"
+  ]) {
+    const result = cleanClassroomQaResultForClient({
+      qa: { available: true, studentAnswer: "安全回答" },
+      voice: { audioUrl }
+    });
+    assert.equal(result.voice.audioUrl, null);
+  }
+});
+
 test("QA routes use server-confirmed actor context and response cleaners", () => {
   const source = readFileSync(new URL("./server.js", import.meta.url), "utf8");
   const qaRoute = source.slice(
@@ -152,4 +248,7 @@ test("QA routes use server-confirmed actor context and response cleaners", () =>
   assert.doesNotMatch(classroomRoute, /prisma\.student\.findFirst/);
   assert.match(classroomRoute, /text: qa\.studentAnswer \|\| qa\.answer/);
   assert.match(classroomRoute, /cleanClassroomQaResultForClient/);
+  const qaServiceIndex = classroomRoute.indexOf("const qa = await answerStudentQuestionService");
+  const speechIndex = classroomRoute.indexOf("const speech = await createMiniMaxSpeechTask");
+  assert.equal(qaServiceIndex >= 0 && speechIndex > qaServiceIndex, true);
 });
