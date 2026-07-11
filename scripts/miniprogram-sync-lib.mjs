@@ -175,6 +175,7 @@ export function applyMiniprogramSync(sourceRoot, targetRoot, differences) {
   const allowedTargetFiles = new Set(listSyncFiles(resolvedTargetRoot));
 
   const deletedPaths = differences.deleted.map(validateRelativeSyncPath);
+  const actuallyDeletedPaths = [];
   for (const relativePath of deletedPaths) {
     const targetPath = filePath(resolvedTargetRoot, relativePath);
     assertPathInside(resolvedTargetRoot, targetPath);
@@ -184,8 +185,9 @@ export function applyMiniprogramSync(sourceRoot, targetRoot, differences) {
       throw new Error(`Refusing to delete non-sync target file: ${relativePath}`);
     }
     fs.unlinkSync(targetPath);
+    actuallyDeletedPaths.push(relativePath);
   }
-  removeEmptyParentDirectories(resolvedTargetRoot, deletedPaths);
+  removeEmptyParentDirectories(resolvedTargetRoot, actuallyDeletedPaths);
 
   for (const relativePath of [...differences.added, ...differences.changed].map(validateRelativeSyncPath)) {
     const sourcePath = filePath(resolvedSourceRoot, relativePath);

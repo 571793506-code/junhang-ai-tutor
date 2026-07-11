@@ -108,6 +108,20 @@ test("write mirrors allowed files and leaves the next check clean", () => {
   });
 });
 
+test("write preserves an existing empty directory for a stale deleted path", () => {
+  const { sourceRoot, targetRoot } = createWorkspace();
+  const existingEmptyDirectory = path.join(targetRoot, "already-empty");
+  fs.mkdirSync(existingEmptyDirectory, { recursive: true });
+
+  applyMiniprogramSync(sourceRoot, targetRoot, {
+    added: [],
+    changed: [],
+    deleted: ["already-empty/missing.js"]
+  });
+
+  assert.equal(fs.existsSync(existingEmptyDirectory), true);
+});
+
 test("listSyncFiles excludes private root files and generated directories", () => {
   const { sourceRoot } = createWorkspace();
   writeFile(sourceRoot, "app.js", "app\n");
