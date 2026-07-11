@@ -180,6 +180,10 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
   const itemCount = Number(result.audit?.itemCount || result.generationPipeline?.repair?.itemCount || items.length || 0);
   const model = result.generationPipeline?.model || {};
   const modelDiagnostics = {
+    model: model.model || null,
+    reasoningEffort: Array.isArray(model.attempts)
+      ? model.attempts.find((attempt) => attempt?.reasoningEffort)?.reasoningEffort || null
+      : null,
     primaryError: model.primaryError || null,
     secondaryError: model.secondaryError || null,
     fallbackProvider: model.fallbackProvider || null,
@@ -216,7 +220,7 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
       }
     };
   }
-  if (result.audit?.status && result.audit.status !== "passed") {
+  if (result.audit?.status !== "passed") {
     issues.push("服务层本地审查未通过。");
   }
   if (sample.kind === "试卷" && totalScore !== 100) issues.push("试卷质量样本总分应为 100。");
