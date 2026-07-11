@@ -228,7 +228,9 @@ test("normalizeQaModelOutput rejects embedded parseable JSON containers with unk
     "前缀说明 {\"answer\":\"embedded-object-secret\"} 后缀说明",
     "前缀说明 [{\"answer\":\"embedded-array-secret\"}] 后缀说明",
     "Set {1, 2} is invalid JSON. Internal {\"answer\":\"container-secret\"}",
-    "First {\"answer\":\"one-secret\"}, second {\"answer\":\"two-secret\"}."
+    "First {\"answer\":\"one-secret\"}, second {\"answer\":\"two-secret\"}.",
+    "The symbol \"{\" is a brace. Internal {\"answer\":\"quoted-brace-secret\"}",
+    "Notation {x, {\"answer\":\"nested-secret\"}} is shown."
   ];
 
   for (const value of values) {

@@ -17,6 +17,7 @@ const BLOCKED_STATUS = /(?:^|[\s"'<{,])safetyStatus["']?\s*[:=]\s*["']?blocked\b
 const JSON_CODE_FENCE = /```\s*json\b/i;
 const KNOWN_SCHEMA_LABEL = /\b(?:studentAnswer|learningSignal|knowledgePoints|questionIntent|difficultySignal|misconceptionHypotheses|followUpNeeded|confidence|safetyStatus|profileEligibility|blockedReason)\b["']?\s*[=:：＝]/i;
 const UNQUOTED_INTERNAL_LABEL = /(?:^|[\s,;，；])(?:provider|model|raw|prompt|debug)\s*[=:：＝]/i;
+const MAX_EMBEDDED_JSON_CANDIDATES = 256;
 
 function toWellFormedText(value) {
   return String(value || "").toWellFormed();
@@ -43,21 +44,13 @@ function isJsonValue(value) {
   }
 }
 
-function hasEmbeddedJsonContainer(value) {
-  const stack = [];
-  let candidateStart = -1;
+function findBalancedContainerEnd(value, start) {
+  const stack = [value[start]];
   let inString = false;
   let escaped = false;
 
-  for (let index = 0; index < value.length; index += 1) {
+  for (let index = start + 1; index < value.length; index += 1) {
     const character = value[index];
-    if (stack.length === 0) {
-      if (character === "{" || character === "[") {
-        candidateStart = index;
-        stack.push(character);
-      }
-      continue;
-    }
     if (inString) {
       if (escaped) {
         escaped = false;
@@ -78,22 +71,27 @@ function hasEmbeddedJsonContainer(value) {
     }
     if (character !== "}" && character !== "]") continue;
     const expectedOpen = character === "}" ? "{" : "[";
-    if (stack.at(-1) !== expectedOpen) {
-      stack.length = 0;
-      candidateStart = -1;
-      continue;
-    }
+    if (stack.at(-1) !== expectedOpen) return -1;
     stack.pop();
-    if (stack.length > 0) continue;
+    if (stack.length === 0) return index;
+  }
+  return -1;
+}
+
+function hasEmbeddedJsonContainer(value) {
+  let candidateCount = 0;
+  for (let start = 0; start < value.length; start += 1) {
+    if (value[start] !== "{" && value[start] !== "[") continue;
+    candidateCount += 1;
+    if (candidateCount > MAX_EMBEDDED_JSON_CANDIDATES) return true;
+    const end = findBalancedContainerEnd(value, start);
+    if (end < 0) continue;
     try {
-      const parsed = JSON.parse(value.slice(candidateStart, index + 1));
+      const parsed = JSON.parse(value.slice(start, end + 1));
       if (parsed && typeof parsed === "object") return true;
     } catch {
-      // Continue scanning after a balanced non-JSON container such as a mathematical set.
+      // Each later opening index is still evaluated independently.
     }
-    candidateStart = -1;
-    inString = false;
-    escaped = false;
   }
   return false;
 }
