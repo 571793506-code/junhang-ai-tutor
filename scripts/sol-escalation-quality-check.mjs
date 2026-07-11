@@ -46,7 +46,10 @@ export async function runSolQualityCheck(
     timeoutMs: runtime.gpt56SolFallbackTimeoutMs
   };
   const assessmentDraftRunner = (runnerConfig, input) => (
-    draftAssessmentImpl(runnerConfig, input, execution)
+    draftAssessmentImpl({
+      ...runnerConfig,
+      GPT56_REASONING_EFFORT_ENABLED: "true"
+    }, input, execution)
   );
   const checks = [];
 
@@ -59,21 +62,37 @@ export async function runSolQualityCheck(
     });
     const evaluated = evaluateGenerationQualityResult(sample, result);
     const latencyMs = Date.now() - sampleStartedAt;
+    const actualModel = evaluated.detail.model || null;
+    const actualEffort = evaluated.detail.reasoningEffort || null;
+    const diagnosticIssues = [];
+    if (!actualModel || !actualEffort) {
+      diagnosticIssues.push("缺少实际模型或推理档位诊断。");
+    }
+    if (actualModel && actualModel !== runtime.gpt56SolModel) {
+      diagnosticIssues.push("实际模型不是 Sol。");
+    }
+    if (actualEffort && actualEffort !== execution.reasoningEffort) {
+      diagnosticIssues.push("实际推理档位不是 high。");
+    }
+    const issues = [...evaluated.detail.issues, ...diagnosticIssues];
+    const ok = evaluated.ok && diagnosticIssues.length === 0;
     checks.push({
       case: sample.name,
-      model: evaluated.detail.model || runtime.gpt56SolModel,
-      effort: evaluated.detail.reasoningEffort || execution.reasoningEffort,
+      model: actualModel,
+      effort: actualEffort,
+      expectedModel: runtime.gpt56SolModel,
+      expectedEffort: execution.reasoningEffort,
       role: execution.role,
       mode: "forced-sol-primary",
       latencyMs,
-      ok: evaluated.ok,
-      status: evaluated.ok ? "passed" : "failed",
-      issues: evaluated.detail.issues,
+      ok,
+      status: ok ? "passed" : "failed",
+      issues,
       usedModelEscalation: result.usedModelEscalation === true,
       usedDynamicFallback: result.usedDynamicFallback === true,
       detail: evaluated.detail
     });
-    progress(`${evaluated.ok ? "pass" : "fail"} ${sample.name}: ${latencyMs}ms`);
+    progress(`${ok ? "pass" : "fail"} ${sample.name}: ${latencyMs}ms`);
   }
 
   const ok = checks.every((check) => check.ok);
