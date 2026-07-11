@@ -79,7 +79,52 @@ export declare function normalizeRuntimeConfig(config?: RuntimeConfigLike): {
   gpt56GradingTimeoutMs: number;
   gpt56ReviewTimeoutMs: number;
   gpt56ReasoningEffortEnabled: boolean;
+  gpt56SolFallbackEnabled: boolean;
+  gpt56SolModel: string;
+  gpt56SolFallbackTimeoutMs: number;
 };
+
+export declare function describeModelError(error?: unknown): {
+  message: string;
+  status: number | null;
+  code: string | null;
+};
+export declare function classifySolEscalationError(error?: unknown): {
+  allowed: boolean;
+  triggerClass: "availability" | "configuration";
+  triggerCode: string;
+};
+export declare function solEscalationEnabled(runtime?: {
+  gpt56SolFallbackEnabled?: boolean;
+  gpt56ReasoningEffortEnabled?: boolean;
+  gpt56SolModel?: string;
+}): boolean;
+export declare function validateAssessmentPartition(
+  parsed?: Record<string, unknown>,
+  partition?: { id?: string; itemTypes?: string[] }
+): {
+  valid: boolean;
+  codes: string[];
+  issues: string[];
+};
+
+export interface AssessmentExecutionOptions {
+  role?: string;
+  model?: string;
+  reasoningEffort?: string;
+  timeoutMs?: number;
+  disableSolEscalation?: boolean;
+  evidenceSufficient?: boolean;
+  now?: () => number;
+}
+
+export interface SubmissionExecutionOptions {
+  role?: string;
+  model?: string;
+  reasoningEffort?: string;
+  timeoutMs?: number;
+  disableSolEscalation?: boolean;
+}
 
 export declare function buildAiStartupSnapshot(config?: RuntimeConfigLike): AiStartupSnapshot;
 export declare function createDemoAiSnapshot(): AiStartupSnapshot;
@@ -105,9 +150,13 @@ export declare function inferClassroomQaMode(question?: string): "GUIDED_THINKIN
 export declare function answerStudentQuestion(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function generateVocabularyCard(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function draftTeacherTask(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
-export declare function draftAssessment(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
-export declare function generateSubmissionReferenceAnswers(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
-export declare function gradeSubmissionText(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
+export declare function draftAssessment(
+  config: RuntimeConfigLike,
+  input?: Record<string, unknown>,
+  execution?: AssessmentExecutionOptions
+): Promise<Record<string, unknown>>;
+export declare function generateSubmissionReferenceAnswers(config: RuntimeConfigLike, input?: Record<string, unknown>, execution?: SubmissionExecutionOptions): Promise<Record<string, unknown>>;
+export declare function gradeSubmissionText(config: RuntimeConfigLike, input?: Record<string, unknown>, execution?: SubmissionExecutionOptions): Promise<Record<string, unknown>>;
 export declare function draftStudentProfileNarrative(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function reviewWithMiniMax(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function reviewWithGpt55(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;

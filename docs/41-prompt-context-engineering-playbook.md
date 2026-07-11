@@ -109,6 +109,17 @@
 
 默认总预算为：小测 120 秒 / 16000 tokens，练习 150 秒 / 16000 tokens，试卷和个性化练习 240 秒 / 24000 tokens。timeout 与 token 必须分开控制，分区请求共享同一个总预算；小测/练习的 2 个紧凑分区单区最多 8000 tokens，试卷的 4 个分区按默认预算各 6000 tokens。
 
+### 3.1 Terra 到 Sol 的受控升级
+
+- Terra 默认档位遵循项目类型：小测、普通练习和个性化练习为 `medium`，正式试卷、参考答案和主批改为 `high`。
+- 只允许两类触发：超时、524、短时限流、网络中断等可恢复 availability 故障；以及结构缺失、答案或解析缺失、批改冲突、证据充分但低置信等明确 quality 故障。
+- configuration 故障（配置、鉴权、模型或参数不支持）不得升级；evidence 故障（资料上下文、OCR、题干、作答或参考证据不足）不得调用 Sol，直接标记教师复核。
+- 生成按最小失败分区、批改按最小失败题升级，每个单元最多一次 `gpt-5.6-sol/high`。只有 Terra 完全没有可用生成分区时才整项重做。
+- 局部生成升级使用独立 180 秒预算，token 继承原分区；局部参考答案和批改使用 180 秒 / 12000 tokens；整项生成重做继承小测 120 秒、普通练习 150 秒、试卷或个性化练习 240 秒的场景预算。
+- Sol 成功时内部记录 `usedModelEscalation=true`，不得误记为 `usedDynamicFallback=true`。强制 Sol 质量命令以 Sol 作为主调用，因此不要求 `usedModelEscalation=true`。
+- Sol 后不自动串接 DeepSeek 或第三个文本模型。Sol 输出仍须经过 parse、normalize、validate、repair、项目审查和教师复核；模型、档位、触发原因、预算和升级元数据不得进入学生、家长、课堂平板或公共屏。
+- `check:generation:quality:sol` 使用六个项目样本证明强制 Sol 主调用的 availability 和合成生成质量门禁，不证明批改正确率；批改准确率只能通过教师确认的 gold 数据评估。
+
 用于 `POST /api/assessments/draft` 的任务提示：
 
 ```text

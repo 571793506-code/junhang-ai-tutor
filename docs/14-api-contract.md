@@ -221,8 +221,11 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - `check:content-context` 中的低预算 E2E 已降级为 `link-guard`，只验证资料上下文、预算退出、教师复核和 PDF 导出链路，不作为生成内容质量验收。
   - 默认规则：小测/练习两页 A4，试卷四页 A4。
   - 服务层模型链路：GPT-5.6 按三科和 `kind` 蓝图分区生成，小测/练习为 2 个并行分区、试卷为 4 个分区且最多 2 路并发；失败分区最多重试一次。MiniMax 不承担文本组卷，DeepSeek 不进入默认路由。
+  - 默认主模型为 `gpt-5.6-terra`：小测、普通练习和个性化练习使用 `medium`，正式试卷使用 `high`。只有可恢复 availability 故障或明确 quality 故障允许把最小失败分区升级到一次 `gpt-5.6-sol/high`；configuration 故障和教学证据不足的 evidence 故障不升级，后者直接进入教师复核。
+  - 局部 Sol 生成使用独立 180 秒预算，token 继承原分区；Terra 完全没有可用分区时才允许整项 Sol 重做，并继承小测 120 秒、普通练习 150 秒、试卷或个性化练习 240 秒的场景预算。Sol 后不串接第三个文本模型。
   - 部分分区失败或使用动态修复时必须写入 `usedDynamicFallback=true`，本地审查状态为 `needs_teacher_review`。默认不执行深度模型审查；显式传入 `runModelReview=true` 或服务端配置开启时，正常路径只调用一次 GPT-5.6 风险审查。
   - 返回和落库 `generationPipeline`，记录当前阶段、模型尝试、修复状态、模型审查是否执行、打印闸门和导出资产。Web、小程序、课堂平板只读取该结构，不自行重建生成链路。
+  - `model`、`reasoningEffort`、`usedModelEscalation`、触发原因和预算均为服务端内部诊断字段；前端请求不得提交模型或档位，学生、家长、课堂平板和公共屏响应不得暴露这些字段。任何 Sol 结果仍是结构化草稿，必须通过服务层校验和教师复核。
 - `POST /api/assessments/:assignmentId/draft-export`
   - 将已生成内容导出为“内容审查 PDF 草稿”，只供教师打开 PDF 审查，不在 Web/小程序内展示完整题面。
   - 返回 `asset.url`、`reviewStatus=pending_teacher_review` 和更新后的 `generationPipeline`。
@@ -244,6 +247,8 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 若关联作业含 `questionLayoutManifest`，服务层必须优先使用该清单进行逐题参考答案、分值、解析和近似图片标注位置对齐，避免把整页 OCR 文本重新猜分题。
   - 单一明确答案的选择、短填空和数值题优先在服务层保守比较；混合题只把未解决题目发送给 GPT-5.6。外部材料没有答案键时由 GPT-5.6 生成参考答案和评分点。
   - `uncertain`、低置信、答案冲突、图形证据不足或模型顶层分数与逐题汇总不一致时，只触发一次 GPT-5.6 风险审查；失败时进入教师复核，不继续串行调用多个模型。
+  - Terra 参考答案或批改出现可恢复 availability 故障，或在证据充分时出现答案/解析缺失、结论冲突、低置信等明确 quality 故障，可将最小失败题升级一次到 `gpt-5.6-sol/high`。configuration 故障不升级；OCR、题干、作答或参考证据不足时不调用 Sol，直接教师复核。
+  - 局部 Sol 参考答案或批改预算为 180 秒 / 12000 tokens；Sol 后不串接第三个文本模型。内部升级元数据不得进入普通端，所有 Sol 结果仍须教师逐题确认。Sol availability 或合成质量检查不构成批改正确率证明，正确率必须由教师确认的 gold 数据评估。
   - 总分由服务层按逐题得分计算，模型顶层 `score` 不得覆盖逐题结果。
   - API 在 OCR 前执行本地图片质量检查，记录 `imageQuality`；分辨率、亮度、对比度或清晰度不达标时进入教师复核。
   - 视觉 OCR 会尽量生成 `ocrQuestions[]`，每项包含 `questionNo`, `printedPrompt`, `studentAnswer`, `observedWork`, `bbox`, `confidence`，用于逐题批改和图片标注。

@@ -38,6 +38,7 @@
     "check:generation:blueprint": "node scripts/generation-blueprint-check.mjs",
     "check:generation:quality:quiz": "node scripts/run-with-env.mjs node scripts/generation-quality-check.mjs",
     "check:generation:quality:formal": "node scripts/run-with-env.mjs node scripts/generation-quality-check.mjs --formal",
+    "check:generation:quality:sol": "node scripts/run-with-env.mjs node scripts/sol-escalation-quality-check.mjs",
     "check:gpt56": "node scripts/gpt56-capability-check.mjs",
     "check:grading:quality": "node scripts/grading-quality-check.mjs",
     "check:generation:layout": "node scripts/generation-layout-check.mjs",

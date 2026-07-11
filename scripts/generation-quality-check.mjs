@@ -180,6 +180,10 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
   const itemCount = Number(result.audit?.itemCount || result.generationPipeline?.repair?.itemCount || items.length || 0);
   const model = result.generationPipeline?.model || {};
   const modelDiagnostics = {
+    model: model.model || null,
+    reasoningEffort: Array.isArray(model.attempts)
+      ? model.attempts.find((attempt) => attempt?.reasoningEffort)?.reasoningEffort || null
+      : null,
     primaryError: model.primaryError || null,
     secondaryError: model.secondaryError || null,
     fallbackProvider: model.fallbackProvider || null,
@@ -188,8 +192,8 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
     attempts: Array.isArray(model.attempts) ? model.attempts : []
   };
 
-  if (!result.modelAvailable) issues.push("质量样本必须来自可用模型。");
-  if (result.usedDynamicFallback) issues.push("质量样本必须来自真实模型生成，不能使用动态兜底。");
+  if (result.modelAvailable !== true) issues.push("质量样本必须来自可用模型。");
+  if (result.usedDynamicFallback !== false) issues.push("质量样本必须来自真实模型生成，不能使用动态兜底。");
   if (!result.draftAvailable) issues.push("质量样本必须形成结构化草稿。");
   if (model.generationProfile && model.generationProfile !== sample.generationProfile) {
     issues.push(`生成 profile 应为 ${sample.generationProfile}，实际为 ${model.generationProfile}。`);
@@ -197,7 +201,7 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
   if (model.assessmentMaxTokens && Number(model.assessmentMaxTokens) < Number(sample.assessmentMaxTokens)) {
     issues.push(`模型 token 上限低于样本预算 ${sample.assessmentMaxTokens}。`);
   }
-  if (!result.modelAvailable || result.usedDynamicFallback || !result.draftAvailable) {
+  if (result.modelAvailable !== true || result.usedDynamicFallback !== false || !result.draftAvailable) {
     return {
       name: sample.name,
       ok: false,
@@ -206,6 +210,7 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
         kind: sample.kind,
         generationProfile: model.generationProfile || sample.generationProfile,
         modelAvailable: Boolean(result.modelAvailable),
+        usedModelEscalation: result.usedModelEscalation === true,
         usedDynamicFallback: Boolean(result.usedDynamicFallback),
         itemCount,
         totalScore,
@@ -215,7 +220,7 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
       }
     };
   }
-  if (result.audit?.status && result.audit.status !== "passed") {
+  if (result.audit?.status !== "passed") {
     issues.push("服务层本地审查未通过。");
   }
   if (sample.kind === "试卷" && totalScore !== 100) issues.push("试卷质量样本总分应为 100。");
@@ -260,6 +265,7 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
       kind: sample.kind,
       generationProfile: model.generationProfile || sample.generationProfile,
       modelAvailable: Boolean(result.modelAvailable),
+      usedModelEscalation: result.usedModelEscalation === true,
       usedDynamicFallback: Boolean(result.usedDynamicFallback),
       itemCount,
       totalScore,

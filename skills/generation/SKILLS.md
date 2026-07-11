@@ -18,6 +18,9 @@
 - 教师确认前不发布、不打印正式卷、不进入学生端或家长端。
 - 默认草稿生成链路使用 GPT-5.6 按项目蓝图分区生成，最多 2 路并发；随后执行服务层结构修复、本地审查和教师复核门禁。深度模型审查必须显式开启，正常路径只调用一次 GPT-5.6，不能阻塞默认草稿返回。
 - `gpt-5.6-terra` 推理档位按任务固定：小测、普通练习和个性化练习使用 `medium`，正式试卷使用 `high`；问答、今日任务和档案草稿继续使用 `low`，词汇卡继续使用 `none`。
+- 只有两类失败允许把最小失败分区升级到 `gpt-5.6-sol` 的 `high`：可恢复的 availability 故障（超时、524、短时限流、网络中断等），以及结构、答案、解析或项目质量门禁明确不合格的 quality 故障。配置、鉴权、模型不支持等 configuration 故障不能升级；`generationContext` 或教学证据不足属于 evidence 故障，直接进入教师复核。
+- 每个失败分区最多尝试一次 Sol；Terra 完全没有可用分区时才允许整项 Sol 重做。局部生成升级独立预算为 180 秒，token 继承原分区上限；整项重做仍受原场景总预算约束：小测 120 秒、普通练习 150 秒、试卷或个性化练习 240 秒。
+- Sol 结果仍必须经过 parse、normalize、validate、repair、本地审查和教师复核。Sol 失败后不得再串接 DeepSeek 或第三个文本模型；`usedModelEscalation`、模型名、档位、触发原因和预算只保留为内部元数据，不进入学生、家长、课堂平板或公共屏。
 - E2E、联调或低延迟入口可以传 `assessmentTotalTimeoutMs` / `generationTimeoutMs` 给服务层；预算耗尽后必须走结构化动态兜底草稿和教师复核，不能让接口长时间等待模型。
 - timeout 预算和 token 上限必须分开处理：timeout 防止生成长时间不收口，`assessmentMaxTokens` / `generationMaxTokens` 给真实模型保留输出空间，不能用提高 token 上限替代超时边界。
 - 生成预算默认由服务层推导：E2E/联调可用短预算；小测走 `quiz-standard`，默认 120s / 16000 tokens；普通练习走 `practice-standard`，默认 150s / 16000 tokens；试卷和个性化练习走 `formal-full`，默认 240s / 24000 tokens。小测/练习的 2 个紧凑分区单区最多 8000 tokens，试卷的 4 个分区按默认预算各 6000 tokens。
@@ -25,6 +28,7 @@
 - DeepSeek 不进入默认生成链路，只作为受控紧急回滚候选；MiniMax 不承担文本组卷，只保留视觉 OCR 和语音能力。
 - `check:content-context` 低预算 E2E 只作为 `link-guard` 链路守卫，证明资料上下文、预算退出、动态兜底、教师复核和导出链路能收口；不得用它判断题目原创性、教师要求贴合度、个性化程度、解析质量或 PDF 视觉质量。
 - `check:generation:quality:quiz` 和 `check:generation:quality:formal` 才用于真实模型生成内容质量样本；质量样本必须 `modelAvailable=true`、`usedDynamicFallback=false`，否则不能通过。
+- `check:generation:quality:sol` 强制以 Sol `high` 作为主调用运行同一组六个项目质量样本，并禁止内部再次升级；它证明 Sol 可用且能通过当前合成生成门禁，不代表真实批改正确率，批改准确率只能由教师确认的 gold 数据评估。
 
 ## 教育规则 Skill 参考
 
@@ -98,6 +102,7 @@
 - 修改生成模板、三科题型蓝图、兜底题池、默认页数、总分或基础审查规则时，优先运行 `cmd /c npm.cmd run check:generation:blueprint`。
 - 验证小测真实模型内容质量时运行 `cmd /c npm.cmd run check:generation:quality:quiz`；该命令使用中预算样本，不导出 PDF。
 - 验证试卷或个性化练习真实模型内容质量时运行 `cmd /c npm.cmd run check:generation:quality:formal`；该命令使用正式预算样本，不导出 PDF，耗时高于 quiz。
+- 验证 Sol 强制主调用和项目生成门禁时运行 `cmd /c npm.cmd run check:generation:quality:sol`；该命令会真实调用模型，日常单测不得运行，且结果不能替代教师 gold 批改评测。
 - 修改生成服务并涉及资料上下文、教师复核或导出边界时，运行 `cmd /c npm.cmd run check:content-context`。
 - 修改 GPT-5.6 中转配置或请求参数时，先运行 `cmd /c npm.cmd run check:gpt56`；该检查只使用合成输入，不得发送学生数据。
 - 同时涉及资料上传、生成草稿、草稿导出、教师确认和正式学生卷/解析卷导出时，才运行 `cmd /c npm.cmd run check:teaching-content:full`。

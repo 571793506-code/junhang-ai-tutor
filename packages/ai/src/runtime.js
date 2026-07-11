@@ -1,4 +1,10 @@
 import { buildAssessmentPartitions, mapWithConcurrency } from "./assessment-partitions.js";
+import {
+  classifySolEscalationError,
+  describeModelError,
+  solEscalationEnabled,
+  validateAssessmentPartition
+} from "./model-escalation.js";
 
 export const providerCatalog = [
   {
@@ -136,7 +142,10 @@ export function normalizeRuntimeConfig(config = {}) {
     gpt56GenerationTimeoutMs: Number(config.GPT56_GENERATION_TIMEOUT_MS || config.gpt56GenerationTimeoutMs || config.GPT56_ASSESSMENT_TIMEOUT_MS || config.gpt56AssessmentTimeoutMs || config.GPT55_ASSESSMENT_TIMEOUT_MS || config.gpt55AssessmentTimeoutMs || 90000),
     gpt56GradingTimeoutMs: Number(config.GPT56_GRADING_TIMEOUT_MS || config.gpt56GradingTimeoutMs || config.GPT56_ASSESSMENT_TIMEOUT_MS || config.gpt56AssessmentTimeoutMs || config.GPT55_ASSESSMENT_TIMEOUT_MS || config.gpt55AssessmentTimeoutMs || 90000),
     gpt56ReviewTimeoutMs: Number(config.GPT56_REVIEW_TIMEOUT_MS || config.gpt56ReviewTimeoutMs || config.GPT55_REVIEW_TIMEOUT_MS || config.gpt55ReviewTimeoutMs || 60000),
-    gpt56ReasoningEffortEnabled: String(config.GPT56_REASONING_EFFORT_ENABLED ?? config.gpt56ReasoningEffortEnabled ?? "false").toLowerCase() === "true"
+    gpt56ReasoningEffortEnabled: String(config.GPT56_REASONING_EFFORT_ENABLED ?? config.gpt56ReasoningEffortEnabled ?? "false").toLowerCase() === "true",
+    gpt56SolFallbackEnabled: String(config.GPT56_SOL_FALLBACK_ENABLED ?? config.gpt56SolFallbackEnabled ?? "false").toLowerCase() === "true",
+    gpt56SolModel: config.GPT56_SOL_MODEL || config.gpt56SolModel || "gpt-5.6-sol",
+    gpt56SolFallbackTimeoutMs: Number(config.GPT56_SOL_FALLBACK_TIMEOUT_MS || config.gpt56SolFallbackTimeoutMs || 180000)
   };
 }
 
@@ -316,11 +325,28 @@ export async function callOpenAiCompatibleChat({
   } finally {
     if (timeout) clearTimeout(timeout);
   }
-  const body = text ? JSON.parse(text) : {};
+  let body = {};
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch (error) {
+      if (response.ok) {
+        const responseError = new Error(`Invalid upstream response: ${error.message}`, {
+          cause: error
+        });
+        responseError.status = response.status;
+        responseError.code = "invalid_upstream_response";
+        throw responseError;
+      }
+    }
+  }
 
   if (!response.ok) {
-    const message = body?.error?.message || body?.message || response.statusText;
-    throw new Error(`${response.status} ${message}`);
+    const message = body?.error?.message || body?.message || text.trim() || response.statusText;
+    const requestError = new Error(`${response.status} ${message}`);
+    requestError.status = response.status;
+    requestError.code = body?.error?.code || body?.code || null;
+    throw requestError;
   }
 
   return body;
@@ -435,11 +461,13 @@ async function timedCall(run) {
     const body = await run();
     return { body, latencyMs: Date.now() - started, status: "SUCCESS" };
   } catch (error) {
+    const errorDetails = describeModelError(error);
     return {
       body: null,
       latencyMs: Date.now() - started,
       status: "ERROR",
-      error: error instanceof Error ? error.message : String(error)
+      error: errorDetails.message,
+      errorDetails
     };
   }
 }
@@ -544,6 +572,37 @@ function parseJsonObjectText(text) {
       return null;
     }
   }
+}
+
+function hasUsableReferenceAnswerStructure(parsed = {}) {
+  const source = parsed && typeof parsed === "object" ? parsed : {};
+  const answers = Array.isArray(source.referenceAnswers)
+    ? source.referenceAnswers
+    : Array.isArray(source.answers)
+      ? source.answers
+      : [];
+  return answers.some((item) => {
+    const source = item && typeof item === "object" ? item : {};
+    const answer = source.correctAnswer ?? source.answer ?? source.standardAnswer ?? source.expectedAnswer;
+    const prompt = source.prompt ?? source.question ?? source.printedPrompt ?? source.text;
+    return Boolean(String(answer ?? "").trim() || String(prompt ?? "").trim());
+  });
+}
+
+function hasUsableGradingQuestionStructure(parsed = {}) {
+  const source = parsed && typeof parsed === "object" ? parsed : {};
+  const questions = Array.isArray(source.questionResults)
+    ? source.questionResults
+    : Array.isArray(source.questions)
+      ? source.questions
+      : [];
+  const allowedStatuses = new Set(["correct", "wrong", "partial", "uncertain"]);
+  return questions.some((item) => {
+    const source = item && typeof item === "object" ? item : {};
+    const questionNo = String(source.questionNo || source.no || "").trim();
+    const status = String(source.status || "").trim().toLowerCase();
+    return Boolean(questionNo) && allowedStatuses.has(status);
+  });
 }
 
 function normalizeVocabularyCard(input = {}, parsed = {}) {
@@ -695,7 +754,7 @@ export async function draftTeacherTask(config, input = {}) {
   };
 }
 
-export async function draftAssessment(config, input = {}) {
+export async function draftAssessment(config, input = {}, execution = {}) {
   const snapshot = buildAiStartupSnapshot(config);
   const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const runtime = normalizeRuntimeConfig(config);
@@ -818,55 +877,173 @@ export async function draftAssessment(config, input = {}) {
     const allocated = basePartitionTokens + (index < extraPartitionTokens ? 1 : 0);
     return kind === "试卷" ? allocated : Math.min(allocated, 8000);
   };
+  const primaryModel = execution.model || runtime.gpt56Model;
+  const primaryReasoningEffort = primaryModel === runtime.gpt56SolModel
+    ? "high"
+    : execution.reasoningEffort || (kind === "试卷" ? "high" : "medium");
+  const solGateOpen = (
+    solEscalationEnabled(runtime) &&
+    execution.disableSolEscalation !== true &&
+    execution.evidenceSufficient !== false &&
+    primaryModel !== runtime.gpt56SolModel
+  );
   const attempts = [];
-  const recordAttempt = (role, partition, attemptResult) => {
+  const recordAttempt = (role, partition, attemptResult, options = {}) => {
     markBudgetFromResult(attemptResult);
+    const trigger = options.trigger || null;
     attempts.push({
       role,
       partitionId: partition.id,
       providerId: "gpt56",
-      model: runtime.gpt56Model,
+      model: options.model,
+      reasoningEffort: options.reasoningEffort,
+      timeoutMs: options.timeoutMs,
+      maxTokens: options.maxTokens,
+      trigger: trigger ? {
+        triggerClass: trigger.triggerClass,
+        triggerCode: trigger.triggerCode,
+        issues: trigger.issues || []
+      } : null,
+      triggerClass: trigger?.triggerClass || null,
+      triggerCode: trigger?.triggerCode || null,
+      triggerIssues: trigger?.issues || [],
       status: attemptResult.status,
       latencyMs: attemptResult.latencyMs ?? null,
       error: attemptResult.error || null
     });
   };
-  const callPartition = async (partition, index, role = "primary") => {
+  const callPartition = async (partition, index, {
+    role = "primary",
+    model = runtime.gpt56Model,
+    reasoningEffort = kind === "试卷" ? "high" : "medium",
+    timeoutMs = attemptTimeoutMs(assessmentTimeoutMs),
+    trigger = null
+  } = {}) => {
     const partitionTokens = partitionTokenBudget(index);
     const partitionMessages = messages.map((message) => message.role !== "user" ? message : {
       ...message,
-      content: `${message.content}\n\n本次只生成分区：${partition.title}。允许题型：${partition.itemTypes.join(", ")}。不要生成其他分区。顶层仍返回 {title,layout,sections,printNotes}，sections 只包含本分区。请精简输出，避免重复规则和冗长说明；优先保证 JSON 完整，并让每题的答案、解析步骤、考点、易错点和分值字段齐全。`
+      content: `${message.content}\n\n本次只生成分区：${partition.title}。允许题型：${partition.itemTypes.join(", ")}。不要生成其他分区。顶层仍返回 {title,layout,sections,printNotes}，sections 只包含本分区。请精简输出，避免重复规则和冗长说明；优先保证 JSON 完整，并让每题的答案、解析步骤、考点、易错点和分值字段齐全。${trigger?.issues?.length ? `必须修复：${trigger.issues.join("；")}。` : ""}`
     });
     const result = await timedCall(() => callGpt56Chat(config, partitionMessages, {
-      model: runtime.gpt56Model,
+      model,
       temperature: 0.2,
       responseFormat: { type: "json_object" },
       maxTokens: partitionTokens,
-      timeoutMs: attemptTimeoutMs(assessmentTimeoutMs),
-      reasoningEffort: kind === "试卷" ? "high" : "medium"
+      timeoutMs,
+      reasoningEffort
     }));
-    recordAttempt(role, partition, result);
+    recordAttempt(role, partition, result, {
+      model,
+      reasoningEffort,
+      timeoutMs,
+      maxTokens: partitionTokens,
+      trigger
+    });
     return { partition, index, partitionTokens, result };
   };
-  let partitionResults = await mapWithConcurrency(partitions, 2, (partition, index) => callPartition(partition, index));
+  const primaryCallOptions = {
+    role: execution.role,
+    model: primaryModel,
+    reasoningEffort: primaryReasoningEffort,
+    timeoutMs: execution.timeoutMs
+  };
+  let partitionResults = await mapWithConcurrency(
+    partitions,
+    2,
+    (partition, index) => callPartition(partition, index, primaryCallOptions)
+  );
   const reserveMs = assessmentTotalTimeoutMs ? Math.max(1000, Math.floor(assessmentTotalTimeoutMs * 0.15)) : 0;
-  const retryable = partitionResults.filter((entry) => entry.result.status !== "SUCCESS");
+  const retryable = partitionResults.filter((entry) => {
+    if (entry.result.status === "SUCCESS") return false;
+    const classification = classifySolEscalationError(entry.result.errorDetails || { message: entry.result.error });
+    return !(solGateOpen && classification.allowed);
+  });
   if (retryable.length && hasBudget() && (remainingBudgetMs() == null || remainingBudgetMs() > reserveMs)) {
-    const retries = await mapWithConcurrency(retryable, 2, (entry) => callPartition(entry.partition, entry.index, "partition-retry"));
+    const retries = await mapWithConcurrency(retryable, 2, (entry) => callPartition(entry.partition, entry.index, {
+      ...primaryCallOptions,
+      role: "partition-retry"
+    }));
     const retryByIndex = new Map(retries.map((entry) => [entry.index, entry]));
     partitionResults = partitionResults.map((entry) => retryByIndex.get(entry.index) || entry);
   }
-  const parsedPartitions = partitionResults.map((entry) => {
+  const parsePartition = (entry) => {
     const text = entry.result.body ? extractChatText(entry.result.body) : "";
-    return { ...entry, text, parsed: parseJsonObjectText(text) };
+    const parsed = parseJsonObjectText(text);
+    let validation = null;
+    let trigger = null;
+    if (entry.result.status !== "SUCCESS") {
+      trigger = classifySolEscalationError(entry.result.errorDetails || { message: entry.result.error });
+    } else if (!parsed) {
+      const issues = [`partition:${entry.partition.id}:malformed_json`];
+      validation = { valid: false, codes: ["malformed_json"], issues };
+      trigger = {
+        allowed: true,
+        triggerClass: "quality",
+        triggerCode: "partition_validation",
+        issues
+      };
+    } else {
+      validation = validateAssessmentPartition(parsed, entry.partition);
+      if (!validation.valid) {
+        trigger = {
+          allowed: true,
+          triggerClass: "quality",
+          triggerCode: "partition_validation",
+          issues: validation.issues
+        };
+      }
+    }
+    return {
+      ...entry,
+      text,
+      parsed,
+      validation,
+      trigger,
+      usable: entry.result.status === "SUCCESS" && Boolean(parsed) && validation?.valid === true
+    };
+  };
+  const parsedTerraPartitions = partitionResults.map(parsePartition);
+  const eligibleFailures = solGateOpen
+    ? parsedTerraPartitions.filter((entry) => !entry.usable && entry.trigger?.allowed === true)
+    : [];
+  const allTerraUnusable = parsedTerraPartitions.every((entry) => !entry.usable);
+  const solScenarioBudgetMs = kind === "小测"
+    ? 120000
+    : kind === "试卷" || input.generationProfile === "formal-full"
+      ? 240000
+      : 150000;
+  const solTotalBudgetMs = eligibleFailures.length > 0 && allTerraUnusable ? solScenarioBudgetMs : null;
+  const solNow = typeof execution.now === "function" ? execution.now : Date.now;
+  const solStartedAt = solNow();
+  const solAttemptTimeoutMs = () => {
+    if (!solTotalBudgetMs) return runtime.gpt56SolFallbackTimeoutMs;
+    const remaining = Math.max(0, solTotalBudgetMs - (solNow() - solStartedAt));
+    return Math.min(runtime.gpt56SolFallbackTimeoutMs, remaining);
+  };
+  const escalatedPartitions = await mapWithConcurrency(eligibleFailures, 2, async (entry) => {
+    const timeoutMs = solAttemptTimeoutMs();
+    if (timeoutMs <= 0) return entry;
+    return callPartition(entry.partition, entry.index, {
+      role: "sol-escalation",
+      model: runtime.gpt56SolModel,
+      reasoningEffort: "high",
+      timeoutMs,
+      trigger: entry.trigger
+    }).then(parsePartition);
   });
-  let successfulPartitions = parsedPartitions.filter((entry) => entry.result.status === "SUCCESS" && entry.parsed);
+  const escalatedByIndex = new Map(escalatedPartitions.map((entry) => [entry.index, entry]));
+  const finalPartitions = parsedTerraPartitions.map((entry) => escalatedByIndex.get(entry.index) || entry);
+  let successfulPartitions = finalPartitions.filter((entry) => entry.usable);
+  const solAttempts = attempts.filter((attempt) => attempt.role === "sol-escalation");
+  const escalationTriggered = solAttempts.length > 0;
+  const usedModelEscalation = escalatedPartitions.some((entry) => entry.usable);
+  const escalationScopes = solAttempts.map((attempt) => attempt.partitionId);
   let usedProvider = "gpt56";
-  let usedModel = runtime.gpt56Model;
+  let usedModel = usedModelEscalation ? runtime.gpt56SolModel : primaryModel;
   let fallbackProvider = null;
   let fallbackBody = null;
   const emergencyFallbackEnabled = String(config.DEEPSEEK_EMERGENCY_FALLBACK_ENABLED ?? config.deepseekEmergencyFallbackEnabled ?? "false").toLowerCase() === "true";
-  if (!successfulPartitions.length && emergencyFallbackEnabled && runtime.deepseekApiKey && hasBudget()) {
+  if (!successfulPartitions.length && !escalationTriggered && emergencyFallbackEnabled && runtime.deepseekApiKey && hasBudget()) {
     const fallbackResult = await timedCall(() => callDeepSeekChat(config, messages, {
       model: runtime.deepseekEmergencyFallbackModel,
       temperature: 0.2,
@@ -907,7 +1084,7 @@ export async function draftAssessment(config, input = {}) {
   } : null;
   const text = mergedDraft ? JSON.stringify(mergedDraft) : "";
   const status = successfulPartitions.length ? "SUCCESS" : "ERROR";
-  const failedPartitions = fallbackProvider ? [] : parsedPartitions.filter((entry) => entry.result.status !== "SUCCESS" || !entry.parsed);
+  const failedPartitions = fallbackProvider ? [] : finalPartitions.filter((entry) => !entry.usable);
   const latencyMs = Date.now() - totalStartedAt;
   const primaryError = failedPartitions[0]?.result.error || null;
   if (!successfulPartitions.length && assessmentTotalTimeoutMs && latencyMs >= assessmentTotalTimeoutMs - 5) totalBudgetExhausted = true;
@@ -933,6 +1110,19 @@ export async function draftAssessment(config, input = {}) {
         defaultPages,
         primaryAssessmentModel: runtime.gpt56Model,
         fallbackAssessmentModel: null,
+        primaryModel,
+        escalationModel: runtime.gpt56SolModel,
+        escalationTriggered,
+        usedModelEscalation,
+        usedDynamicFallback: false,
+        escalationScopes,
+        solFallbackTimeoutMs: runtime.gpt56SolFallbackTimeoutMs,
+        solTotalBudgetMs,
+        solBudget: {
+          partitionTimeoutMs: runtime.gpt56SolFallbackTimeoutMs,
+          totalTimeoutMs: solTotalBudgetMs,
+          maxConcurrency: 2
+        },
         emergencyFallbackEnabled,
         minimaxFallbackModel: runtime.minimaxModel || null,
         assessmentTimeoutMs,
@@ -957,11 +1147,14 @@ export async function draftAssessment(config, input = {}) {
   };
 }
 
-export async function generateSubmissionReferenceAnswers(config, input = {}) {
+export async function generateSubmissionReferenceAnswers(config, input = {}, execution = {}) {
   const snapshot = buildAiStartupSnapshot(config);
   const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const runtime = normalizeRuntimeConfig(config);
-  const referenceModel = runtime.gpt56Model;
+  const referenceModel = execution.model || runtime.gpt56Model;
+  const primaryReasoningEffort = referenceModel === runtime.gpt56SolModel
+    ? "high"
+    : execution.reasoningEffort || "high";
   if (provider?.status !== "ready") {
     return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       referenceText: "",
@@ -1008,27 +1201,72 @@ export async function generateSubmissionReferenceAnswers(config, input = {}) {
     }
   ];
 
-  const timeoutMs = runtime.gpt56GenerationTimeoutMs;
-  const result = await timedCall(() => callGpt56Chat(config, messages, {
+  const timeoutMs = firstPositiveNumber(execution.timeoutMs, runtime.gpt56GenerationTimeoutMs);
+  const primaryResult = await timedCall(() => callGpt56Chat(config, messages, {
     model: referenceModel,
     temperature: 0.1,
     responseFormat: { type: "json_object" },
     maxTokens: 12000,
     timeoutMs,
-    reasoningEffort: "high"
+    reasoningEffort: primaryReasoningEffort
   }));
+  const attempts = [{
+    role: execution.role || "primary",
+    model: referenceModel,
+    timeoutMs,
+    reasoningEffort: primaryReasoningEffort,
+    status: primaryResult.status,
+    latencyMs: primaryResult.latencyMs,
+    error: primaryResult.error || null
+  }];
+  let result = primaryResult;
+  let usedModel = referenceModel;
+  const classification = primaryResult.status === "ERROR"
+    ? classifySolEscalationError(primaryResult.errorDetails || { message: primaryResult.error })
+    : null;
+  if (
+    classification?.allowed === true &&
+    execution.disableSolEscalation !== true &&
+    referenceModel !== runtime.gpt56SolModel &&
+    solEscalationEnabled(runtime)
+  ) {
+    const solTimeoutMs = runtime.gpt56SolFallbackTimeoutMs;
+    result = await timedCall(() => callGpt56Chat(config, messages, {
+      model: runtime.gpt56SolModel,
+      temperature: 0.1,
+      responseFormat: { type: "json_object" },
+      maxTokens: 12000,
+      timeoutMs: solTimeoutMs,
+      reasoningEffort: "high"
+    }));
+    usedModel = runtime.gpt56SolModel;
+    attempts.push({
+      role: "sol-escalation",
+      model: runtime.gpt56SolModel,
+      timeoutMs: solTimeoutMs,
+      reasoningEffort: "high",
+      triggerClass: classification.triggerClass,
+      triggerCode: classification.triggerCode,
+      status: result.status,
+      latencyMs: result.latencyMs,
+      error: result.error || null
+    });
+  }
   const text = result.body ? extractChatText(result.body) : "";
+  const parsed = parseJsonObjectText(text);
+  const solAttempted = attempts.some((attempt) => attempt.role === "sol-escalation");
+  const usedModelEscalation = solAttempted && result.status === "SUCCESS" && hasUsableReferenceAnswerStructure(parsed);
 
   return {
     available: result.status === "SUCCESS",
     providerId: "gpt56",
-    model: referenceModel,
+    model: usedModel,
     referenceText: text,
     raw: result.body,
     error: result.error,
     modelRun: {
       provider: "gpt56",
-      model: referenceModel,
+      model: usedModel,
       skill: "submission-reference-answer",
       inputSummary: input.title || input.subject || "",
       outputSummary: text.slice(0, 240),
@@ -1037,17 +1275,23 @@ export async function generateSubmissionReferenceAnswers(config, input = {}) {
       metadata: {
         studentId: input.studentId || null,
         subject: input.subject || null,
-        imageCount: input.imageNames?.length || 0
+        imageCount: input.imageNames?.length || 0,
+        solAttempted,
+        usedModelEscalation,
+        attempts
       }
     }
   };
 }
 
-export async function gradeSubmissionText(config, input = {}) {
+export async function gradeSubmissionText(config, input = {}, execution = {}) {
   const snapshot = buildAiStartupSnapshot(config);
   const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const runtime = normalizeRuntimeConfig(config);
-  const gradingModel = runtime.gpt56Model;
+  const gradingModel = execution.model || runtime.gpt56Model;
+  const primaryReasoningEffort = gradingModel === runtime.gpt56SolModel
+    ? "high"
+    : execution.reasoningEffort || "high";
   if (provider?.status !== "ready") {
     return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       gradingText: "",
@@ -1074,27 +1318,72 @@ export async function gradeSubmissionText(config, input = {}) {
     "你是小学作业、练习、小测和试卷批改助手。必须按最高置信链路批改：1）优先使用 answerKey、assignmentItems 和 questionLayoutManifest；其中 questionLayoutManifest 是本系统生成 PDF 的逐题清单，包含题号、题干、答案、解析、分值和页内相对区域，必须作为生成卷批改的权威证据；2）没有老师答案键或生成卷清单时，优先使用 referenceAnswers 作为参考答案；3）referenceAnswers 也不足时，才根据 printedText/ocrText 自行推导正确答案和解题步骤；4）studentAnswerText、manualText 是学生作答的最高优先证据，普通 ocrText 可能混有印刷题干，不能把印刷题干、题目自带答案或示例内容当作学生作答。若输入包含 ocrQuestions，必须优先按 ocrQuestions 逐题批改：使用 printedPrompt 理解题目，使用 studentAnswer/observedWork 判断学生作答，使用 bbox 生成对应题目的相对图片坐标；不要把其他题或印刷题干串到本题作答里。若 questionLayoutManifest 和 ocrQuestions 同时存在，先按题号对齐，再用 ocrQuestions 判定学生作答。不得因为缺少标准答案而直接判定无法确认；只有题干、关键条件、图片内容或学生作答识别不清时，才允许 status=uncertain，并说明是图片/OCR证据不足。必须只返回 JSON，不要解释 JSON 之外的内容。字段必须包含：score, summary, strengths, mistakes, nextPractice, needsTeacherReview, referenceAnswerMode, questionResults。questionResults 是逐题结果数组，每项字段为 questionNo, status(correct|wrong|partial|uncertain), studentAnswer, correctAnswer, studentProcess(数组), errorStep, explanation, knowledgePoint, suggestedPractice, confidence(0-1), bbox。bbox 使用相对图片坐标，字段为 page, x, y, w, h，范围 0-1；正确题说明关键作答过程；错误题指出哪一步导致错误，并给出正确思路。不要输出供应商或模型名称。"
   );
 
-  const timeoutMs = runtime.gpt56GradingTimeoutMs;
-  const result = await timedCall(() => callGpt56Chat(config, messages, {
+  const timeoutMs = firstPositiveNumber(execution.timeoutMs, runtime.gpt56GradingTimeoutMs);
+  const primaryResult = await timedCall(() => callGpt56Chat(config, messages, {
     model: gradingModel,
     temperature: 0.1,
     responseFormat: { type: "json_object" },
     maxTokens: 12000,
     timeoutMs,
-    reasoningEffort: "high"
+    reasoningEffort: primaryReasoningEffort
   }));
+  const attempts = [{
+    role: execution.role || "primary",
+    model: gradingModel,
+    timeoutMs,
+    reasoningEffort: primaryReasoningEffort,
+    status: primaryResult.status,
+    latencyMs: primaryResult.latencyMs,
+    error: primaryResult.error || null
+  }];
+  let result = primaryResult;
+  let usedModel = gradingModel;
+  const classification = primaryResult.status === "ERROR"
+    ? classifySolEscalationError(primaryResult.errorDetails || { message: primaryResult.error })
+    : null;
+  if (
+    classification?.allowed === true &&
+    execution.disableSolEscalation !== true &&
+    gradingModel !== runtime.gpt56SolModel &&
+    solEscalationEnabled(runtime)
+  ) {
+    const solTimeoutMs = runtime.gpt56SolFallbackTimeoutMs;
+    result = await timedCall(() => callGpt56Chat(config, messages, {
+      model: runtime.gpt56SolModel,
+      temperature: 0.1,
+      responseFormat: { type: "json_object" },
+      maxTokens: 12000,
+      timeoutMs: solTimeoutMs,
+      reasoningEffort: "high"
+    }));
+    usedModel = runtime.gpt56SolModel;
+    attempts.push({
+      role: "sol-escalation",
+      model: runtime.gpt56SolModel,
+      timeoutMs: solTimeoutMs,
+      reasoningEffort: "high",
+      triggerClass: classification.triggerClass,
+      triggerCode: classification.triggerCode,
+      status: result.status,
+      latencyMs: result.latencyMs,
+      error: result.error || null
+    });
+  }
   const text = result.body ? extractChatText(result.body) : "";
+  const parsed = parseJsonObjectText(text);
+  const solAttempted = attempts.some((attempt) => attempt.role === "sol-escalation");
+  const usedModelEscalation = solAttempted && result.status === "SUCCESS" && hasUsableGradingQuestionStructure(parsed);
 
   return {
     available: result.status === "SUCCESS",
     providerId: "gpt56",
-    model: gradingModel,
+    model: usedModel,
     gradingText: text,
     raw: result.body,
     error: result.error,
     modelRun: {
       provider: "gpt56",
-      model: gradingModel,
+      model: usedModel,
       skill: "submission-grading",
       inputSummary: input.title || input.subject || "",
       outputSummary: text.slice(0, 240),
@@ -1103,7 +1392,10 @@ export async function gradeSubmissionText(config, input = {}) {
       metadata: {
         studentId: input.studentId || null,
         subject: input.subject || null,
-        imageCount: input.imageNames?.length || 0
+        imageCount: input.imageNames?.length || 0,
+        solAttempted,
+        usedModelEscalation,
+        attempts
       }
     }
   };

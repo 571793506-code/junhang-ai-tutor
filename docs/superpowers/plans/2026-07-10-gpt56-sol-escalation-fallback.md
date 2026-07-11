@@ -34,7 +34,7 @@
 - Modify: `packages/ai/src/index.d.ts`
 - Modify: `packages/ai/src/gpt56-runtime.test.mjs`
 
-- [ ] **Step 1: Write failing config and policy tests**
+- [x] **Step 1: Write failing config and policy tests**
 
 Add table-driven cases proving that timeout, `524`, transient `429`, and `ECONNRESET` allow Sol; authentication, invalid requests, context length, and `insufficient_quota` do not. Also assert normalized config defaults and explicit overrides.
 
@@ -66,7 +66,7 @@ test("normalizeRuntimeConfig exposes disabled Sol defaults", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run:
 
@@ -76,7 +76,7 @@ node --test packages\ai\src\model-escalation.test.mjs packages\ai\src\gpt56-runt
 
 Expected: FAIL because `model-escalation.js` and Sol runtime fields do not exist.
 
-- [ ] **Step 3: Implement the pure policy module**
+- [x] **Step 3: Implement the pure policy module**
 
 Create focused exports with no network calls:
 
@@ -114,7 +114,7 @@ export function solEscalationEnabled(runtime = {}) {
 }
 ```
 
-- [ ] **Step 4: Preserve structured error details and add config**
+- [x] **Step 4: Preserve structured error details and add config**
 
 Extend `normalizeRuntimeConfig`:
 
@@ -139,11 +139,11 @@ errorDetails: details
 
 Export the pure helpers through `index.js` and declare their exact return shapes in `index.d.ts`.
 
-- [ ] **Step 5: Run tests and verify GREEN**
+- [x] **Step 5: Run tests and verify GREEN**
 
 Run the command from Step 2. Expected: all policy and existing GPT-5.6 runtime tests PASS.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```powershell
 git add -- packages/ai/src/model-escalation.js packages/ai/src/model-escalation.test.mjs packages/ai/src/runtime.js packages/ai/src/index.js packages/ai/src/index.d.ts packages/ai/src/gpt56-runtime.test.mjs
@@ -157,7 +157,7 @@ git commit -m "feat: classify GPT-5.6 Sol escalation"
 - Modify: `scripts/gpt56-capability-check.test.mjs`
 - Modify: `.env.example`
 
-- [ ] **Step 1: Write failing dual-target probe tests**
+- [x] **Step 1: Write failing dual-target probe tests**
 
 ```js
 test("capability check builds Terra and enabled Sol targets", () => {
@@ -178,7 +178,7 @@ test("Sol reasoning probe always uses high", () => {
 });
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -188,7 +188,7 @@ node --test scripts\gpt56-capability-check.test.mjs
 
 Expected: FAIL because probe targets/options are not implemented.
 
-- [ ] **Step 3: Implement per-model probe summaries**
+- [x] **Step 3: Implement per-model probe summaries**
 
 Add `buildGpt56ProbeTargets(env)` and let `buildGpt56ProbeCases` accept `{ reasoningEffort }`. Run the existing synthetic cases for each target and return:
 
@@ -205,7 +205,7 @@ Add `buildGpt56ProbeTargets(env)` and let `buildGpt56ProbeCases` accept `{ reaso
 
 The Sol target is required only when `GPT56_SOL_FALLBACK_ENABLED=true`; it must still be probeable explicitly while disabled through `--include-sol`. Keep all inputs synthetic.
 
-- [ ] **Step 4: Add documented disabled defaults**
+- [x] **Step 4: Add documented disabled defaults**
 
 Append to `.env.example`:
 
@@ -217,7 +217,7 @@ GPT56_SOL_FALLBACK_TIMEOUT_MS=180000
 
 Keep `check:gpt56` as the single command; do not add a duplicate capability script.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 ```powershell
 node --test scripts\gpt56-capability-check.test.mjs packages\ai\src\gpt56-runtime.test.mjs
@@ -236,7 +236,7 @@ Expected: tests PASS; no real network call occurs in unit tests.
 - Modify: `packages/ai/src/assessment-runtime.test.mjs`
 - Modify: `packages/ai/src/index.d.ts`
 
-- [ ] **Step 1: Write failing hard-validation tests**
+- [x] **Step 1: Write failing hard-validation tests**
 
 Add `validateAssessmentPartition(parsed, partition)` cases for empty sections, disallowed item types, and missing required answer/analysis/knowledge fields.
 
@@ -247,7 +247,7 @@ assert.ok(validateAssessmentPartition({
 }, partition).codes.includes("incomplete_item"));
 ```
 
-- [ ] **Step 2: Write fake-server escalation tests**
+- [x] **Step 2: Write fake-server escalation tests**
 
 Add tests that distinguish requests by `payload.model` and prove:
 
@@ -268,7 +268,7 @@ assert.equal(result.modelRun.metadata.partialGeneration, false);
 assert.equal(result.modelRun.metadata.attempts.filter((item) => item.role === "sol-escalation").length, 1);
 ```
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 ```powershell
 node --test packages\ai\src\model-escalation.test.mjs packages\ai\src\assessment-runtime.test.mjs
@@ -276,7 +276,7 @@ node --test packages\ai\src\model-escalation.test.mjs packages\ai\src\assessment
 
 Expected: new escalation assertions FAIL while existing assessment tests remain green.
 
-- [ ] **Step 4: Generalize partition execution without changing the public request contract**
+- [x] **Step 4: Generalize partition execution without changing the public request contract**
 
 Change the signature to accept internal execution options:
 
@@ -314,7 +314,7 @@ const callPartition = async (partition, index, {
 
 Do not expose `execution.model` through API request bodies; it is only for service/test runner injection.
 
-- [ ] **Step 5: Replace eligible failed units once with Sol**
+- [x] **Step 5: Replace eligible failed units once with Sol**
 
 Implement the partition validator in `model-escalation.js`:
 
@@ -361,7 +361,7 @@ Record each attempt with its real model and trigger:
 
 Set metadata fields `primaryModel`, `escalationModel`, `escalationTriggered`, `usedModelEscalation`, `escalationScopes`, and the Sol budget. Set `partialGeneration` only from the final post-Sol partition set. Skip automatic DeepSeek rollback whenever a Sol attempt occurred.
 
-- [ ] **Step 6: Verify GREEN and commit**
+- [x] **Step 6: Verify GREEN and commit**
 
 ```powershell
 node --test packages\ai\src\model-escalation.test.mjs packages\ai\src\assessment-runtime.test.mjs packages\ai\src\gpt56-runtime.test.mjs
@@ -377,7 +377,7 @@ git commit -m "feat: escalate failed assessment partitions to Sol"
 - Modify: `scripts/generation-quality-check.mjs`
 - Modify: `scripts/generation-quality-check.test.mjs`
 
-- [ ] **Step 1: Write failing service-state tests**
+- [x] **Step 1: Write failing service-state tests**
 
 Use a valid fake assessment result whose metadata contains a successful Sol escalation. Assert that it stays a real model draft, not dynamic repair.
 
@@ -390,7 +390,7 @@ assert.equal(result.generationPipeline.repair.usedDynamicFallback, false);
 
 Also assert that Sol failure followed by local item-pool repair still sets `usedDynamicFallback=true` and `needs_teacher_review`.
 
-- [ ] **Step 2: Write failing quality-evaluator tests**
+- [x] **Step 2: Write failing quality-evaluator tests**
 
 Add a successful model-escalation sample:
 
@@ -406,13 +406,13 @@ assert.equal(check.ok, true);
 assert.equal(check.detail.usedModelEscalation, true);
 ```
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 ```powershell
 node --test packages\services\src\assessment-draft-review.test.mjs scripts\generation-quality-check.test.mjs
 ```
 
-- [ ] **Step 4: Propagate model escalation separately**
+- [x] **Step 4: Propagate model escalation separately**
 
 Read `result.modelRun.metadata.usedModelEscalation` into normalized draft output and `generationPipeline.model`, but keep the existing dynamic fallback expression limited to final missing/partial model content:
 
@@ -423,7 +423,7 @@ const usedDynamicFallback = !result.available || !items.length || result.modelRu
 
 Expose `usedModelEscalation` in service output and quality diagnostics. Do not weaken any audit or teacher-review gate.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 ```powershell
 node --test packages\services\src\assessment-draft-review.test.mjs scripts\generation-quality-check.test.mjs
@@ -441,11 +441,11 @@ git commit -m "feat: report Sol generation escalation"
 - Modify: `packages/services/src/deterministic-grading.test.mjs`
 - Modify: `packages/services/src/grading-audit-gates.test.mjs`
 
-- [ ] **Step 1: Write failing runtime availability-escalation tests**
+- [x] **Step 1: Write failing runtime availability-escalation tests**
 
 For reference answers and grading, make Terra return `524`, Sol return valid JSON, and assert exactly two total requests, Sol `high`, `180000ms` timeout metadata, and no third model call. Add quota/configuration cases that never call Sol.
 
-- [ ] **Step 2: Write failing service quality-escalation tests**
+- [x] **Step 2: Write failing service quality-escalation tests**
 
 Cover:
 
@@ -466,13 +466,13 @@ assert.equal(result.structured.questionResults.find((item) => item.questionNo ==
 assert.equal(result.structured.questionResults.find((item) => item.questionNo === "2").modelEscalated, true);
 ```
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 ```powershell
 node --test packages\ai\src\gpt56-runtime.test.mjs packages\services\src\deterministic-grading.test.mjs packages\services\src\grading-audit-gates.test.mjs
 ```
 
-- [ ] **Step 4: Add internal model execution options**
+- [x] **Step 4: Add internal model execution options**
 
 Extend these signatures without changing existing callers:
 
@@ -483,7 +483,7 @@ export async function gradeSubmissionText(config, input = {}, execution = {})
 
 `execution` may contain only internal `model`, `timeoutMs`, `reasoningEffort`, `role`, and `disableSolEscalation`. Default calls use Terra; forced Sol calls always override effort to `high`. Availability failures use `classifySolEscalationError` and at most one Sol attempt.
 
-- [ ] **Step 5: Add evidence-aware service helpers**
+- [x] **Step 5: Add evidence-aware service helpers**
 
 Keep pure helpers near existing grading quality logic:
 
@@ -505,13 +505,13 @@ function selectSolGradingQuestions(structured, input, ocr, reference) {
 
 Build a filtered input from matching `ocrQuestions`, `referenceAnswers`, and layout-manifest questions. Merge Sol results by `questionNo`, mark only replacements with `modelEscalated=true`, rerun `normalizeGradingResult`, and recompute score from question results.
 
-- [ ] **Step 6: Replace automatic Terra risk review when Sol is active**
+- [x] **Step 6: Replace automatic Terra risk review when Sol is active**
 
 When Sol is enabled and evidence is sufficient, the Sol regrade is the single risk operation. Do not call the existing automatic Terra premium reviewer afterward. Preserve explicitly injected legacy double-review behavior only for explicit `deepAuditRequired` tests/config; it must not chain after an actual Sol attempt.
 
 If Sol still leaves risk, create a local blocking audit result with `scoreReliable=false` and `archiveAllowed=false`; do not call another text model.
 
-- [ ] **Step 7: Verify GREEN and commit**
+- [x] **Step 7: Verify GREEN and commit**
 
 ```powershell
 node --test packages\ai\src\gpt56-runtime.test.mjs packages\services\src\deterministic-grading.test.mjs packages\services\src\grading-audit-gates.test.mjs
@@ -531,7 +531,7 @@ git commit -m "feat: escalate grading risks to Sol"
 - Modify: `docs/14-api-contract.md`
 - Modify: `docs/41-prompt-context-engineering-playbook.md`
 
-- [ ] **Step 1: Write failing Sol quality-command tests**
+- [x] **Step 1: Write failing Sol quality-command tests**
 
 Test that the command reuses existing project cases, injects Sol only through the internal runner options, forces `high`, and rejects local dynamic fallback.
 
@@ -551,13 +551,13 @@ assert.deepEqual(buildSolExecutionOptions(), {
 });
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```powershell
 node --test scripts\sol-escalation-quality-check.test.mjs scripts\generation-quality-check.test.mjs
 ```
 
-- [ ] **Step 3: Implement the real-quality command**
+- [x] **Step 3: Implement the real-quality command**
 
 Export the reusable quality cases from `generation-quality-check.mjs`. In the new command, call `draftAssessmentService` with an injected `assessmentDraftRunner` that invokes:
 
@@ -573,7 +573,7 @@ draftAssessment(config, input, {
 
 Require `modelAvailable=true`, `usedDynamicFallback=false`, project audit pass, correct totals, required item types, answers, analysis, and knowledge fields. Output machine-readable model/effort/latency diagnostics.
 
-- [ ] **Step 4: Add command and update project rules**
+- [x] **Step 4: Add command and update project rules**
 
 Add:
 
@@ -583,7 +583,7 @@ Add:
 
 Document the exact trigger classes, evidence exclusion, one-attempt rule, independent budget, hidden model metadata, teacher review, and the fact that Sol availability does not prove grading accuracy without teacher gold data.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 ```powershell
 node --test scripts\sol-escalation-quality-check.test.mjs scripts\generation-quality-check.test.mjs
@@ -598,7 +598,7 @@ git commit -m "test: add Sol escalation quality gate"
 - Modify locally only after acceptance: `.env`
 - Modify: `docs/superpowers/plans/2026-07-10-gpt56-sol-escalation-fallback.md` (completion checkboxes and evidence)
 
-- [ ] **Step 1: Run all focused automated tests**
+- [x] **Step 1: Run all focused automated tests**
 
 ```powershell
 $aiTests = Get-ChildItem packages\ai\src -Filter *.test.mjs | Select-Object -ExpandProperty FullName
@@ -610,7 +610,7 @@ node --test scripts\gpt56-capability-check.test.mjs scripts\generation-quality-c
 
 Expected: all tests PASS with zero failures.
 
-- [ ] **Step 2: Run project-local checks**
+- [x] **Step 2: Run project-local checks**
 
 ```powershell
 cmd /c npm.cmd run check:generation:blueprint
@@ -623,7 +623,7 @@ cmd /c npm.cmd run check:services
 
 Expected: every command exits `0`. The API summary must keep provider/model internals out of student-facing payloads.
 
-- [ ] **Step 3: Probe Terra and Sol on the real intermediary**
+- [x] **Step 3: Probe Terra and Sol on the real intermediary**
 
 Run with Sol included while fallback remains disabled:
 
@@ -633,7 +633,7 @@ cmd /c npm.cmd run check:gpt56 -- --include-sol
 
 Required Sol checks: text, `json_object`, `reasoning_effort=high`, JSON Schema, and synthetic project grading JSON all pass. Image input may remain unsupported because MiniMax retains OCR.
 
-- [ ] **Step 4: Run real generation acceptance samples**
+- [x] **Step 4: Run real generation acceptance samples**
 
 ```powershell
 cmd /c npm.cmd run check:generation:quality:sol
@@ -643,7 +643,7 @@ cmd /c npm.cmd run check:generation:quality:formal
 
 Expected: six Sol samples and the normal Terra samples pass with `usedDynamicFallback=false`. Record per-sample latency and any intermediary `524`; one transient failure may be rerun unchanged once for diagnosis, but both attempts must be reported.
 
-- [ ] **Step 5: Handle grading accuracy honestly**
+- [x] **Step 5: Handle grading accuracy honestly**
 
 Use the project acceptance path `materials\evaluation\teacher-grading-gold-cases.json` when a teacher-confirmed file exists:
 
@@ -658,7 +658,7 @@ if (Test-Path -LiteralPath $goldPath) {
 
 If no gold file exists, record the missing operational acceptance gate. Do not claim production grading accuracy from synthetic probe data.
 
-- [ ] **Step 6: Enable Sol only after Steps 3-4 pass**
+- [x] **Step 6: Enable Sol only after Steps 3-4 pass**
 
 Update local ignored `.env` without exposing its key/base URL:
 
@@ -670,7 +670,7 @@ GPT56_SOL_FALLBACK_TIMEOUT_MS=180000
 
 Rerun `check:api`, `check:services`, and the focused fake-server tests to confirm the enabled gate does not change normal Terra requests.
 
-- [ ] **Step 7: Review scope and close out explicitly**
+- [x] **Step 7: Review scope and close out explicitly**
 
 ```powershell
 git diff --check
@@ -680,7 +680,7 @@ git status --short --branch
 
 Review changed files by group. Preserve ignored local assets and unrelated user changes. Never use `git add .`.
 
-- [ ] **Step 8: Commit the completion record**
+- [x] **Step 8: Commit the completion record**
 
 ```powershell
 git add -- docs/superpowers/plans/2026-07-10-gpt56-sol-escalation-fallback.md
@@ -688,3 +688,23 @@ git commit -m "docs: close GPT-5.6 Sol fallback rollout"
 ```
 
 Do not push unless the user explicitly requests the remote update after reviewing the final workspace state.
+
+## Completion Evidence (2026-07-11)
+
+- Focused automated tests: AI `57/57`, services `42/42`, and capability/generation/Sol/grading scripts `30/30`; zero failures.
+- Project checks: generation blueprint, API check, Web typecheck, miniprogram JavaScript check, service smoke, and source encoding check all exited `0`; encoding checked 251 files with zero issues.
+- Real capability probe with fallback still disabled: Terra and Sol passed text, `json_object`, reasoning effort, JSON Schema, and synthetic project grading JSON. Image input returned `500` for both and remains outside this text-model gate because MiniMax owns OCR. No `524` or retry occurred.
+- Forced Sol quality: `6/6` passed with `high` effort and `usedDynamicFallback=false`; case latencies were `93891`, `84999`, `72738`, `228588`, `81619`, and `101815` ms. Total duration was `663652` ms; no retry occurred.
+- Normal Terra quiz quality: `3/3` passed with `medium` effort and `usedDynamicFallback=false`; case latencies were `56939`, `80731`, and `52381` ms. Total duration was `190051` ms.
+- Normal Terra formal-tier quality: `3/3` passed with `usedDynamicFallback=false`; the formal exam used `high`, while personalized/ordinary practice used `medium`. Case latencies were `158012`, `59475`, and `75826` ms. Total duration was `293313` ms.
+- Teacher grading gold: `materials/evaluation/teacher-grading-gold-cases.json` was not present. Production grading accuracy therefore remains unverified; synthetic capability and quality checks are not an accuracy claim.
+- Local enablement: after the real capability and quality gates passed, the ignored repository-local `.env` was updated with the three approved Sol fallback fields. No key or base URL was changed or copied into Git.
+- Enabled-gate regression: API check and service smoke exited `0`; focused AI/service fake-server tests passed `94/94`, confirming valid normal requests remain on Terra.
+- Remote state: no push was performed.
+
+## Post-Closeout Boundary Verification (2026-07-11)
+
+- Final branch review found and fixed three cross-task boundaries: a prior reference-answer Sol attempt cannot be repeated by the quality gate; insufficient grading evidence disables runtime Sol while preserving the Terra grading attempt; learner payload sanitization recursively removes model-routing, escalation, attempt, budget, and internal-error metadata.
+- Fresh automated regression after commit `a96d5d1`: AI `58/58`, services `44/44`, capability/generation/Sol/grading scripts `30/30`, and learner payload/export tests `3/3`; zero failures.
+- Fresh project checks after the boundary fixes: generation blueprint `9/9`, API check, Web typecheck, miniprogram JavaScript check, service smoke, and source encoding check all exited `0`; encoding checked 251 files with zero issues.
+- The real intermediary capability and generation-quality evidence above remains applicable because the boundary fixes do not change model names, prompts, generation budgets, or the forced Sol quality runner. Teacher grading gold is still unavailable, so production grading accuracy remains unverified.

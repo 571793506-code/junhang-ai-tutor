@@ -7,8 +7,10 @@ import {
   generateSubmissionReferenceAnswers,
   generateVocabularyCard,
   gradeSubmissionText,
+  normalizeRuntimeConfig,
   reviewWithGpt55,
-  reviewWithMiniMax
+  reviewWithMiniMax,
+  solEscalationEnabled
 } from "@junhang/ai";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -524,12 +526,12 @@ function mergeReferenceAnswerGroups(...groups) {
 
 function normalizeReferenceAnswerItem(item, index) {
   const source = typeof item === "string" ? { correctAnswer: item } : item || {};
-  const questionNo = String(source.questionNo || source.no || source.index || index + 1);
+  const questionNo = String(source.questionNo ?? source.no ?? source.orderIndex ?? source.index ?? index + 1);
   const analysisSteps = toStringArray(source.analysisSteps || source.steps || source.analysis || source.explanation);
   return {
     questionNo,
-    prompt: String(source.prompt || source.question || source.printedPrompt || "").trim(),
-    correctAnswer: String(source.correctAnswer || source.answer || source.standardAnswer || source.expectedAnswer || "").trim(),
+    prompt: String(source.prompt ?? source.question ?? source.printedPrompt ?? "").trim(),
+    correctAnswer: String(source.correctAnswer ?? source.answer ?? source.standardAnswer ?? source.expectedAnswer ?? "").trim(),
     analysisSteps,
     knowledgePoint: String(source.knowledgePoint || source.point || source.skill || "").trim(),
     score: optionalNumber(source.score),
@@ -618,26 +620,77 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
     };
   }
 
-  const result = await generateSubmissionReferenceAnswers(config, {
+  const referenceAnswerRunner = options.referenceAnswerRunner || generateSubmissionReferenceAnswers;
+  const runnerInput = {
     ...input,
     ocrText: input.ocrText || ocr.text || "",
     studentAnswerText: input.studentAnswerText || ocr.studentAnswerText || "",
     printedText: input.printedText || ocr.printedText || "",
     ocrQuestions: Array.isArray(input.ocrQuestions) ? input.ocrQuestions : ocr.questions || []
-  });
-  const modelRun = await persistRun(result.modelRun, options);
-  const parsed = parseJsonObjectText(result.referenceText) || {};
-  const rawAnswers = Array.isArray(parsed.referenceAnswers)
+  };
+  let result = await referenceAnswerRunner(config, runnerInput);
+  let modelRun = await persistRun(result.modelRun, options);
+  let escalationModelRun = null;
+  let escalationPersistenceError = null;
+  let solAttempted = result.modelRun?.metadata?.solAttempted === true;
+  let usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
+  if (usedModelEscalation) escalationModelRun = modelRun;
+  let parsed = parseJsonObjectText(result.referenceText) || {};
+  let rawAnswers = Array.isArray(parsed.referenceAnswers)
     ? parsed.referenceAnswers
     : Array.isArray(parsed.answers)
       ? parsed.answers
       : [];
-  const referenceAnswers = rawAnswers
+  let normalizedAnswers = rawAnswers
     .map(normalizeReferenceAnswerItem)
     .filter((item) => item.correctAnswer || item.prompt);
-  const averageConfidence = referenceAnswers.length
-    ? referenceAnswers.reduce((sum, item) => sum + Number(item.confidence || 0), 0) / referenceAnswers.length
+  let averageConfidence = normalizedAnswers.length
+    ? normalizedAnswers.reduce((sum, item) => sum + Number(item.confidence || 0), 0) / normalizedAnswers.length
     : optionalNumber(parsed.confidence) ?? 0;
+  const runtime = normalizeRuntimeConfig(config);
+  const solEnabled = solEscalationEnabled(runtime);
+  const clearPrintedEvidence = Boolean(
+    runnerInput.printedText ||
+    runnerInput.ocrQuestions.some((item) => String(item?.printedText || item?.printedPrompt || "").trim())
+  );
+  if (solEnabled && clearPrintedEvidence && !solAttempted && !usedModelEscalation && result.available && normalizedAnswers.length && averageConfidence < 0.72) {
+    const solResult = await referenceAnswerRunner(config, runnerInput, {
+      model: runtime.gpt56SolModel,
+      timeoutMs: runtime.gpt56SolFallbackTimeoutMs,
+      reasoningEffort: "high",
+      role: "sol-reference-escalation",
+      disableSolEscalation: true
+    });
+    const solParsed = parseJsonObjectText(solResult.referenceText) || {};
+    const solRawAnswers = Array.isArray(solParsed.referenceAnswers)
+      ? solParsed.referenceAnswers
+      : Array.isArray(solParsed.answers)
+        ? solParsed.answers
+        : [];
+    const solAnswers = solRawAnswers
+      .map(normalizeReferenceAnswerItem)
+      .filter((item) => item.correctAnswer || item.prompt);
+    solAttempted = true;
+    let solModelRun = null;
+    let solPersistenceAvailable = true;
+    try {
+      solModelRun = await persistRun(solResult.modelRun, options);
+      escalationModelRun = solModelRun;
+    } catch (error) {
+      solPersistenceAvailable = false;
+      escalationPersistenceError = String(error?.message || error || "Sol escalation persistence failed");
+    }
+    if (solPersistenceAvailable && solResult.available && solAnswers.length) {
+      result = solResult;
+      parsed = solParsed;
+      rawAnswers = solRawAnswers;
+      normalizedAnswers = solAnswers;
+      averageConfidence = solAnswers.reduce((sum, item) => sum + Number(item.confidence || 0), 0) / solAnswers.length;
+      modelRun = solModelRun;
+      usedModelEscalation = true;
+    }
+  }
+  const referenceAnswers = normalizedAnswers;
   return {
     mode: "ai_generated_reference",
     available: Boolean(result.available && referenceAnswers.length),
@@ -647,6 +700,10 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
     confidence: Number(averageConfidence.toFixed(3)),
     needsTeacherReview: Boolean(parsed.needsTeacherReview ?? averageConfidence < 0.72),
     modelRunId: modelRun?.id || null,
+    escalationModelRunId: escalationModelRun?.id || null,
+    escalationPersistenceError,
+    solAttempted,
+    usedModelEscalation,
     summary: String(parsed.summary || result.error || "AI已尝试生成参考答案。").trim(),
     rawText: result.referenceText || "",
     error: result.error || null
@@ -1185,7 +1242,7 @@ function summarizeQuestionLayoutManifestForAudit(manifest = null) {
 function normalizeQuestionResult(item, index, input = {}, total = 1) {
   const source = typeof item === "string" ? { explanation: item } : item || {};
   const status = normalizeQuestionStatus(source.status || source.result || source.correctness);
-  const questionNo = String(source.questionNo || source.no || source.index || index + 1);
+  const questionNo = String(source.questionNo ?? source.no ?? source.orderIndex ?? source.index ?? index + 1);
   const manifest = manifestQuestionFor(input, questionNo);
   const process = toStringArray(source.studentProcess || source.process || source.steps || source.reasoning);
   const explanation = String(source.explanation || source.analysis || source.correctProcess || source.reason || "").trim();
@@ -1202,7 +1259,7 @@ function normalizeQuestionResult(item, index, input = {}, total = 1) {
     questionNo,
     status,
     studentAnswer: String(source.studentAnswer || source.answer || source.studentWork || "").trim(),
-    correctAnswer: String(source.correctAnswer || source.expectedAnswer || source.standardAnswer || manifest?.answer || "").trim(),
+    correctAnswer: String(source.correctAnswer ?? source.expectedAnswer ?? source.standardAnswer ?? manifest?.answer ?? "").trim(),
     studentProcess: process,
     errorStep,
     explanation: explanation || (Array.isArray(manifest?.analysisSteps) ? manifest.analysisSteps.join("；") : ""),
@@ -1211,7 +1268,8 @@ function normalizeQuestionResult(item, index, input = {}, total = 1) {
     maxScore,
     score: earnedScore,
     confidence: clampUnit(source.confidence, status === "uncertain" ? 0.45 : 0.72),
-    bbox: normalizeBBox(source.bbox || source.box || source.position, index, total, input, questionNo)
+    bbox: normalizeBBox(source.bbox || source.box || source.position, index, total, input, questionNo),
+    modelEscalated: source.modelEscalated === true ? true : undefined
   };
 }
 
@@ -1458,6 +1516,129 @@ function shouldRunGradingRiskReview(structured = {}) {
   return structured.quality?.lowConfidence === true ||
     structured.quality?.scoreMismatch === true ||
     questions.some((item) => item.status === "uncertain" || Number(item.confidence ?? 1) < 0.62);
+}
+
+function hasSufficientSolGradingEvidence(input = {}, ocr = {}, reference = {}) {
+  const imageQualityStatus = String(ocr.imageQuality?.status || input.imageQuality?.status || "").toLowerCase();
+  const imageBlocked = ["poor", "needs_review"].includes(imageQualityStatus);
+  const ocrStatus = String(ocr.status || input.ocrStatus || "").toLowerCase();
+  const unseparatedOcr = /unseparated|separation[_-]?failed|无法分离/.test(ocrStatus);
+  const questions = Array.isArray(ocr.questions) ? ocr.questions : [];
+  const hasStudentWork = Boolean(
+    input.studentAnswerText ||
+    ocr.studentAnswerText ||
+    questions.some((item) => String(item?.studentAnswer || "").trim())
+  );
+  const hasPrompt = Boolean(
+    input.printedText ||
+    ocr.printedText ||
+    questions.some((item) => String(item?.printedText || item?.printedPrompt || "").trim())
+  );
+  return !imageBlocked && !unseparatedOcr && hasStudentWork && hasPrompt && reference.available === true;
+}
+
+function selectSolGradingQuestionNos(structured = {}, input = {}, ocr = {}, reference = {}) {
+  if (!hasSufficientSolGradingEvidence(input, ocr, reference)) return [];
+  const references = new Map((reference.referenceAnswers || []).map((item) => [String(item.questionNo || ""), item]));
+  const normalizeAnswer = (value) => String(value ?? "").normalize("NFKC").replace(/\s+/g, "").trim().toLowerCase();
+  const questions = Array.isArray(structured.questionResults) ? structured.questionResults : [];
+  const selected = questions.filter((item) => {
+    const referenceItem = references.get(String(item.questionNo || ""));
+    const reportedAnswer = normalizeAnswer(item.correctAnswer);
+    const referenceAnswer = normalizeAnswer(referenceItem?.correctAnswer);
+    const answerConflict = Boolean(reportedAnswer && referenceAnswer && reportedAnswer !== referenceAnswer);
+    const score = optionalNumber(item.score);
+    const maxScore = optionalNumber(item.maxScore);
+    const localScoreMismatch = score != null && maxScore != null && (score < 0 || score > maxScore);
+    return item.status === "uncertain" || Number(item.confidence ?? 1) < 0.62 || answerConflict || localScoreMismatch;
+  });
+  if (!selected.length && structured.quality?.scoreMismatch === true) return questions.map((item) => String(item.questionNo || "")).filter(Boolean);
+  return selected.map((item) => String(item.questionNo || "")).filter(Boolean);
+}
+
+function buildSolGradingInput(input = {}, questionNos = []) {
+  const selected = new Set(questionNos.map(String));
+  const withQuestionNo = (items = []) => items.map((item, index) => ({
+    ...item,
+    questionNo: String(item.questionNo ?? item.no ?? item.orderIndex ?? item.index ?? index + 1)
+  }));
+  const questions = withQuestionNo(input.ocrQuestions || []).filter((item) => selected.has(item.questionNo));
+  const references = withQuestionNo(input.referenceAnswers || []).filter((item) => selected.has(item.questionNo));
+  const assignmentItems = withQuestionNo(input.assignmentItems || []).filter((item) => selected.has(item.questionNo));
+  const questionLayoutManifest = input.questionLayoutManifest
+    ? filterQuestionLayoutManifest({
+        ...input.questionLayoutManifest,
+        questions: withQuestionNo(input.questionLayoutManifest.questions || [])
+      }, selected)
+    : null;
+  const answerKey = parseAnswerKeyReferenceAnswers(input.answerKey)
+    .filter((item) => selected.has(String(item.questionNo || "")))
+    .map((item) => `${item.questionNo}. ${item.correctAnswer}`)
+    .join(" ") || null;
+  const numberedText = (field) => questions
+    .map((item) => `${item.questionNo}. ${String(item[field] || "").trim()}`)
+    .join(" ");
+  return {
+    ...input,
+    answerKey,
+    ocrQuestions: questions,
+    referenceAnswers: references,
+    assignmentItems,
+    printedText: numberedText("printedText"),
+    ocrText: numberedText("printedText"),
+    studentAnswerText: numberedText("studentAnswer"),
+    manualText: numberedText("studentAnswer"),
+    questionLayoutManifest
+  };
+}
+
+function mergeSolGradingResult(initialStructured = {}, solResult = {}, input = {}, selectedQuestionNos = []) {
+  const parsed = parseJsonObjectText(solResult.gradingText) || {};
+  const solQuestions = Array.isArray(parsed.questionResults) ? parsed.questionResults : [];
+  const selected = new Set(selectedQuestionNos.map(String));
+  const allowedStatuses = new Set(["correct", "wrong", "partial", "uncertain"]);
+  const counts = new Map();
+  for (const item of solQuestions) {
+    const questionNo = String(item?.questionNo ?? item?.no ?? "").trim();
+    if (selected.has(questionNo)) counts.set(questionNo, (counts.get(questionNo) || 0) + 1);
+  }
+  const solByQuestion = new Map(solQuestions
+    .filter((item) => {
+      const questionNo = String(item?.questionNo ?? item?.no ?? "").trim();
+      const status = String(item?.status || "").trim().toLowerCase();
+      return selected.has(questionNo) && counts.get(questionNo) === 1 && allowedStatuses.has(status);
+    })
+    .map((item) => [String(item.questionNo ?? item.no).trim(), { ...item, modelEscalated: true }]));
+  if (!solByQuestion.size) return null;
+  const questionResults = (initialStructured.questionResults || []).map((item) => solByQuestion.get(String(item.questionNo || "")) || item);
+  const explicitScores = questionResults.map((item) => optionalNumber(item.score));
+  const score = explicitScores.every((item) => item != null)
+    ? Number(explicitScores.reduce((sum, item) => sum + Number(item), 0).toFixed(2))
+    : inferScoreFromQuestionResults(questionResults, input);
+  return {
+    ...solResult,
+    gradingText: JSON.stringify({
+      ...parsed,
+      score,
+      questionResults
+    })
+  };
+}
+
+function blockingSolGradingAudit() {
+  return {
+    merged: true,
+    required: true,
+    available: true,
+    status: "needs_review",
+    riskLevel: "high",
+    scoreReliable: false,
+    archiveAllowed: false,
+    issues: ["Sol 复核后仍存在批改风险，需要教师逐题确认。"],
+    suggestions: [],
+    raw: { audits: [] },
+    error: null
+  };
 }
 
 function normalizeAssessmentItem(item, index) {
@@ -3402,6 +3583,7 @@ function normalizeAssessmentDraft(result = {}, input = {}) {
       ? parsed.items
       : sectionItems;
   const items = rawItems.map(normalizeAssessmentItem).filter((item) => item.prompt);
+  const usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
   const usedDynamicFallback = !result.available || !items.length || result.modelRun?.metadata?.partialGeneration === true;
   const review = reviewAndRepairAssessmentItems(items.length ? items : buildFallbackAssessmentItems(input), input);
   const safeItems = review.items;
@@ -3426,6 +3608,7 @@ function normalizeAssessmentDraft(result = {}, input = {}) {
     items: safeItems,
     answerKey: parsed.answerKey || parsed.answers || null,
     totalScore: review.totalScore,
+    usedModelEscalation,
     usedDynamicFallback,
     printNotes,
     audit,
@@ -3449,6 +3632,7 @@ function buildAssessmentGenerationPipeline({ result = {}, draft = {}, input = {}
     : "skipped";
   const modelStatus = result.modelRun?.status || (result.available ? "SUCCESS" : "ERROR");
   const modelAvailable = Boolean(result.available);
+  const usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
   const usedDynamicFallback = Boolean(draft.usedDynamicFallback);
   return {
     version: "assessment-generation-pipeline-v1",
@@ -3471,6 +3655,11 @@ function buildAssessmentGenerationPipeline({ result = {}, draft = {}, input = {}
       generationProfile: input.generationProfile || result.modelRun?.metadata?.generationProfile || null,
       assessmentTotalTimeoutMs: input.assessmentTotalTimeoutMs || result.modelRun?.metadata?.assessmentTotalTimeoutMs || null,
       assessmentMaxTokens: input.assessmentMaxTokens || result.modelRun?.metadata?.assessmentMaxTokens || null,
+      primaryModel: result.modelRun?.metadata?.primaryModel || null,
+      escalationModel: result.modelRun?.metadata?.escalationModel || null,
+      escalationTriggered: result.modelRun?.metadata?.escalationTriggered === true,
+      usedModelEscalation,
+      escalationScopes: Array.isArray(result.modelRun?.metadata?.escalationScopes) ? result.modelRun.metadata.escalationScopes : [],
       fallbackProvider: result.modelRun?.metadata?.fallbackProvider || null,
       primaryError: result.modelRun?.metadata?.primaryError || null,
       secondaryError: result.modelRun?.metadata?.secondaryError || null,
@@ -3834,6 +4023,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     draftItems: draft.items,
     audit: draft.audit,
     totalScore: draft.totalScore,
+    usedModelEscalation: draft.usedModelEscalation,
     usedDynamicFallback: draft.usedDynamicFallback,
     layoutTemplate,
     printProfile,
@@ -3879,6 +4069,7 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
   const deterministicPlan = buildDeterministicGradingPlan(gradingInput, ocr, reference.referenceAnswers || []);
   const gradingRunner = options.gradingRunner || gradeSubmissionText;
   const remoteGradingInput = buildUnresolvedGradingInput(gradingInput, deterministicPlan);
+  const gradingEvidenceSufficient = hasSufficientSolGradingEvidence(gradingInput, ocr, reference);
   const remoteResult = deterministicPlan.fullyResolved
     ? {
         available: true,
@@ -3894,16 +4085,64 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
         }),
         modelRun: null
       }
-    : await gradingRunner(config, remoteGradingInput);
+    : await gradingRunner(config, remoteGradingInput, {
+        disableSolEscalation: !gradingEvidenceSufficient
+      });
   const result = mergeDeterministicGradingResult(remoteResult, deterministicPlan.deterministicResults, gradingInput);
-  const modelRun = await persistRun(result.modelRun, options);
-  const initialStructured = normalizeGradingResult(result, gradingInput, ocr);
+  const primaryModelRun = await persistRun(result.modelRun, options);
+  let effectiveResult = result;
+  let effectiveModelRun = primaryModelRun;
+  let escalationModelRun = result.modelRun?.metadata?.solAttempted === true || result.modelRun?.metadata?.usedModelEscalation === true
+    ? primaryModelRun
+    : null;
+  let usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
+  let escalationPersistenceError = null;
+  let initialStructured = normalizeGradingResult(result, gradingInput, ocr);
   let auditModelRun = null;
   let premiumAuditModelRun = null;
   let combinedAudit = skippedGradingAudit();
   const reviewers = options.gradingReviewers || {};
+  const runtime = normalizeRuntimeConfig(config);
+  const solEnabled = solEscalationEnabled(runtime);
+  const selectedSolQuestionNos = solEnabled
+    ? selectSolGradingQuestionNos(initialStructured, gradingInput, ocr, reference)
+    : [];
+  let actualSolAttempt = result.modelRun?.metadata?.solAttempted === true || result.modelRun?.metadata?.usedModelEscalation === true;
+  if (!actualSolAttempt && selectedSolQuestionNos.length) {
+    actualSolAttempt = true;
+    const solGradingRunner = options.solGradingRunner || gradeSubmissionText;
+    const solResult = await solGradingRunner(
+      config,
+      buildSolGradingInput(gradingInput, selectedSolQuestionNos),
+      {
+        model: runtime.gpt56SolModel,
+        timeoutMs: runtime.gpt56SolFallbackTimeoutMs,
+        reasoningEffort: "high",
+        role: "sol-grading-escalation",
+        disableSolEscalation: true
+      }
+    );
+    let solModelRun = null;
+    let solPersistenceAvailable = true;
+    try {
+      solModelRun = await persistRun(solResult.modelRun, options);
+      escalationModelRun = solModelRun;
+    } catch (error) {
+      solPersistenceAvailable = false;
+      escalationPersistenceError = String(error?.message || error || "Sol grading persistence failed");
+    }
+    if (solPersistenceAvailable && solResult.available) {
+      const mergedSolResult = mergeSolGradingResult(initialStructured, solResult, gradingInput, selectedSolQuestionNos);
+      if (mergedSolResult) {
+        effectiveResult = mergedSolResult;
+        effectiveModelRun = solModelRun;
+        usedModelEscalation = true;
+        initialStructured = normalizeGradingResult(mergedSolResult, gradingInput, ocr);
+      }
+    }
+  }
   const riskReviewRequired = shouldRunGradingRiskReview(initialStructured);
-  const legacyDoubleReview = deepAuditRequired && typeof reviewers.minimax === "function" && typeof reviewers.premium === "function";
+  const legacyDoubleReview = !actualSolAttempt && deepAuditRequired && typeof reviewers.minimax === "function" && typeof reviewers.premium === "function";
   if (legacyDoubleReview) {
     const miniMaxReviewer = reviewers.minimax;
     const premiumReviewer = reviewers.premium;
@@ -3965,7 +4204,7 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
       { role: "premium", label: "GPT-5.6高级审查", result: premiumAuditResult }
     ], config);
     combinedAudit.required = true;
-  } else if (deepAuditRequired || riskReviewRequired) {
+  } else if (!actualSolAttempt && (deepAuditRequired || riskReviewRequired)) {
     const premiumReviewer = reviewers.premium || reviewWithGpt55;
     const premiumAuditResult = await premiumReviewer(config, {
       reviewTask: "submission-premium-grading-review",
@@ -4004,6 +4243,9 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
     });
     combinedAudit.required = true;
   }
+  if (actualSolAttempt && riskReviewRequired) {
+    combinedAudit = blockingSolGradingAudit();
+  }
   const structured = applyGradingAudit({
     ...initialStructured,
     referenceAnswer: reference,
@@ -4038,7 +4280,7 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
             assignmentId: assignment.id,
             studentId: input.studentId,
             subject: input.subject,
-            modelRunId: modelRun?.id || null,
+            modelRunId: effectiveModelRun?.id || primaryModelRun?.id || null,
             content: {
               ocrText: input.ocrText || null,
               studentAnswerText: input.studentAnswerText || null,
@@ -4059,9 +4301,9 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
             },
             result: {
               ...structured,
-              rawText: result.gradingText,
-              providerId: result.providerId,
-              available: result.available,
+              rawText: effectiveResult.gradingText,
+              providerId: effectiveResult.providerId,
+              available: effectiveResult.available,
               referenceAnswer: reference,
               questionLayoutManifest,
               gradingAuditModelRunId: auditModelRun?.id || null,
@@ -4075,12 +4317,17 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
         );
 
   return {
-    ...result,
+    ...effectiveResult,
+    solAttempted: actualSolAttempt,
+    usedModelEscalation,
+    escalationPersistenceError,
     referenceAnswer: reference,
     gradingAudit: structured.gradingAudit,
     structured,
     persisted: {
-      modelRunId: modelRun?.id || null,
+      modelRunId: effectiveModelRun?.id || primaryModelRun?.id || null,
+      primaryModelRunId: primaryModelRun?.id || null,
+      escalationModelRunId: escalationModelRun?.id || null,
       referenceModelRunId: reference.modelRunId || null,
       gradingAuditModelRunId: auditModelRun?.id || null,
       premiumAuditModelRunId: premiumAuditModelRun?.id || null,
