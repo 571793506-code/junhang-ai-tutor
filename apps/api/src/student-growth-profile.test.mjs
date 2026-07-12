@@ -280,6 +280,44 @@ test("one eligible qa signal remains weak and cannot raise mastery or weeklyScor
   assert.deepEqual(oneQaSnapshot.mastery, noQaSnapshot.mastery);
 });
 
+test("non-qa subjects outrank qa-only subjects in weekly and monthly focus", () => {
+  const fixture = studentFixture();
+  fixture.tasks = [];
+  fixture.submissions = [];
+  fixture.qaSessions = Array.from({ length: 3 }, (_, index) => ({
+    ...fixture.qaSessions[0],
+    id: `qa_english_${index + 1}`,
+    subject: "英语",
+    metadata: qaMetadata({
+      learningSignal: {
+        ...qaLearningSignal,
+        knowledgePoints: ["一般现在时"]
+      }
+    })
+  }));
+
+  const weekly = buildStudentGrowthSnapshot(fixture, { periodType: "weekly", now });
+  const monthly = buildStudentGrowthSnapshot(fixture, { periodType: "monthly", now });
+
+  assert.equal(weekly.publishedView.focusSubjects[0].subject, "数学");
+  assert.deepEqual(monthly.publishedView.focusSubjects.map((item) => item.subject), ["数学", "英语"]);
+  assert.match(monthly.publishedView.focusSubjects[1].whyFocus, /继续观察/);
+});
+
+test("qa-only focus remains an auxiliary continue-observing subject", () => {
+  const fixture = studentFixture();
+  fixture.tasks = [];
+  fixture.submissions = [];
+  fixture.mistakes = [];
+  fixture.qaSessions = [{ ...fixture.qaSessions[0], subject: "英语" }];
+
+  const snapshot = buildStudentGrowthSnapshot(fixture, { periodType: "weekly", now });
+
+  assert.equal(snapshot.publishedView.focusSubjects[0].subject, "英语");
+  assert.match(snapshot.publishedView.focusSubjects[0].whyFocus, /继续观察/);
+  assert.equal(snapshot.publishedView.focusSubjects[0].confidence, "weak");
+});
+
 test("two normalized subject and knowledge point records aggregate to one supported signal", () => {
   const pack = buildProfileEvidencePack(studentFixture(), { periodType: "weekly", now });
 
@@ -320,6 +358,28 @@ test("qa metadata requires a valid producer mode", () => {
       reason: "malformed-output"
     });
   }
+});
+
+test("qa eligibility requires a valid deterministic session date", () => {
+  const fixture = studentFixture();
+  fixture.tasks = [];
+  fixture.submissions = [];
+  fixture.mistakes = [];
+  fixture.qaSessions = [
+    { ...fixture.qaSessions[0], id: "qa_invalid_date", createdAt: "not-a-valid-date" },
+    { ...fixture.qaSessions[0], id: "qa_missing_date", createdAt: undefined }
+  ];
+
+  const first = buildProfileEvidencePack(fixture, { periodType: "weekly", now });
+  const second = buildProfileEvidencePack(fixture, { periodType: "weekly", now });
+  const expected = [
+    { id: "qa_invalid_date", type: "qa", date: "", reason: "malformed-output" },
+    { id: "qa_missing_date", type: "qa", date: "", reason: "malformed-output" }
+  ];
+
+  assert.equal(first.qaEvidence.length, 0);
+  assert.deepEqual(first.blockedEvidence, expected);
+  assert.deepEqual(second.blockedEvidence, expected);
 });
 
 test("forged eligible qa must satisfy exact Task 7 signal validity", () => {
@@ -481,11 +541,12 @@ test("ineligible and legacy qa stay out of public evidence", () => {
   }
 });
 
-test("teacher blockedEvidence contains only minimal fixed fields", () => {
+test("qa blockedEvidence is minimal while grading blockers retain teacher context", () => {
   const pack = buildProfileEvidencePack(studentFixture(), { periodType: "weekly", now });
   const qaBlocked = pack.blockedEvidence.filter((item) => item.type === "qa");
+  const gradingBlocked = pack.blockedEvidence.find((item) => item.type === "grading");
 
-  assert.equal(pack.blockedEvidence.every((item) => (
+  assert.equal(qaBlocked.every((item) => (
     JSON.stringify(Object.keys(item).sort()) === JSON.stringify(["date", "id", "reason", "type"])
   )), true);
   assert.deepEqual(qaBlocked.map((item) => item.reason).sort(), [
@@ -496,7 +557,28 @@ test("teacher blockedEvidence contains only minimal fixed fields", () => {
     "teacher-test",
     "unsafe-content"
   ]);
-  assert.equal(JSON.stringify(pack.blockedEvidence).includes("不得进入档案"), false);
+  assert.deepEqual(gradingBlocked, {
+    id: "sub_blocked",
+    type: "grading",
+    subject: "语文",
+    title: "低置信识别",
+    at: "2026-07-04T10:00:00.000Z",
+    score: null,
+    summary: "低置信 OCR。",
+    knowledgePoints: [],
+    confidence: "blocked",
+    reason: "批改结果未完成教师确认或置信不足。"
+  });
+  assert.equal(JSON.stringify(qaBlocked).includes("不得进入档案"), false);
+
+  for (const role of ["student", "parent"]) {
+    const publicView = JSON.stringify(filterStudentProfileSnapshot(
+      buildStudentGrowthSnapshot(studentFixture(), { periodType: "weekly", now }),
+      role
+    ));
+    assert.equal(publicView.includes("低置信 OCR"), false);
+    assert.equal(publicView.includes("批改结果未完成教师确认或置信不足"), false);
+  }
 });
 
 test("student and parent views hide learningSignal, profileEvidencePack, blocked reasons, and full qa text", () => {
@@ -546,6 +628,36 @@ test("qa conflicts with confirmed grading or mistake evidence add a teacher revi
   assert.match(snapshot.teacherReview.conflictNotes[0], /数学/);
   assert.match(snapshot.teacherReview.conflictNotes[0], /两步应用题/);
   assert.match(snapshot.teacherReview.conflictNotes[0], /人工复核/);
+});
+
+test("qa conflict matching accepts only controlled pedagogical aliases", () => {
+  const fixture = studentFixture();
+  fixture.tasks = [];
+  fixture.submissions = [];
+  fixture.qaSessions = [{
+    ...fixture.qaSessions[0],
+    metadata: qaMetadata({
+      learningSignal: {
+        ...qaLearningSignal,
+        knowledgePoints: ["小数意义"],
+        difficultySignal: "none",
+        followUpNeeded: false
+      }
+    })
+  }];
+  fixture.mistakes = [{
+    ...fixture.mistakes[0],
+    knowledgePoint: { name: "小数的意义" },
+    masteryResolved: false
+  }];
+
+  const aliasSnapshot = buildStudentGrowthSnapshot(fixture, { periodType: "weekly", now });
+  fixture.mistakes[0].knowledgePoint.name = "小数的应用";
+  const nearbySnapshot = buildStudentGrowthSnapshot(fixture, { periodType: "weekly", now });
+
+  assert.equal(aliasSnapshot.teacherReview.conflictNotes.length, 1);
+  assert.match(aliasSnapshot.teacherReview.conflictNotes[0], /小数意义/);
+  assert.deepEqual(nearbySnapshot.teacherReview.conflictNotes, []);
 });
 
 test("malformed confirmed knowledge points are skipped during qa conflict checks", () => {

@@ -40,7 +40,10 @@ export function buildProfileEvidencePack(student, options = {}) {
       knowledgePoints: extractKnowledgePoints(result),
       confidence: blocked ? "blocked" : "confirmed"
     };
-    if (blocked) blockedEvidence.push(minimalBlockedEvidence(submission, "grading", submission.submittedAt, "grading-unconfirmed"));
+    if (blocked) blockedEvidence.push({
+      ...item,
+      reason: "批改结果未完成教师确认或置信不足。"
+    });
     else gradingEvidence.push(item);
   });
 
@@ -504,17 +507,13 @@ function buildQaEvidence(qaSessions, blockedEvidence) {
 
   qaSessions.forEach((session) => {
     const metadata = isPlainObject(session.metadata) ? session.metadata : null;
-    const blockedReason = qaEligibilityBlockReason(metadata);
+    const sourceDate = qaIsoDate(session.createdAt);
+    const blockedReason = sourceDate ? qaEligibilityBlockReason(metadata) : "malformed-output";
     const signal = blockedReason ? null : sanitizeQaLearningSignal(metadata.learningSignal);
     const subject = subjectFromValue(session.subject || metadata?.subject);
     const sourceId = typeof session.id === "string" ? session.id.trim() : "";
     if (blockedReason || !signal || !subject || !sourceId) {
-      blockedEvidence.push(minimalBlockedEvidence(
-        session,
-        "qa",
-        session.createdAt,
-        blockedReason || "malformed-output"
-      ));
+      blockedEvidence.push(minimalQaBlockedEvidence(session, blockedReason || "malformed-output"));
       return;
     }
 
@@ -544,7 +543,6 @@ function buildQaEvidence(qaSessions, blockedEvidence) {
         group.knowledgePoint = knowledgePoint;
         group.title = `${knowledgePoint}问答观察`;
       }
-      const sourceDate = qaIsoDate(session.createdAt);
       const currentSourceDate = group.sourceDates.get(sourceId) || "";
       if (!group.sourceDates.has(sourceId) || sourceDate > currentSourceDate) {
         group.sourceDates.set(sourceId, sourceDate);
@@ -660,11 +658,11 @@ function strongestDifficultySignal(values) {
   return "none";
 }
 
-function minimalBlockedEvidence(item, type, date, reason) {
+function minimalQaBlockedEvidence(session, reason) {
   return {
-    id: typeof item?.id === "string" ? item.id : "",
-    type,
-    date: isoDate(date),
+    id: typeof session?.id === "string" ? session.id : "",
+    type: "qa",
+    date: qaIsoDate(session?.createdAt),
     reason
   };
 }
@@ -675,13 +673,13 @@ function qaSessionCount(pack) {
 
 function buildQaConflictNotes(pack) {
   return pack.qaEvidence.flatMap((qa) => {
-    const point = normalizeQaGroupValue(qa.knowledgePoint);
+    const point = conflictKnowledgePointKey(qa.knowledgePoint);
     const matchingMistakes = pack.mistakeEvidence.filter((item) => (
-      item.subject === qa.subject && normalizeQaGroupValue(item.title) === point
+      item.subject === qa.subject && conflictKnowledgePointKey(item.title) === point
     ));
     const matchingGradings = pack.gradingEvidence.filter((item) => (
       item.subject === qa.subject
-      && item.knowledgePoints.some((knowledgePoint) => normalizeQaGroupValue(knowledgePoint) === point)
+      && item.knowledgePoints.some((knowledgePoint) => conflictKnowledgePointKey(knowledgePoint) === point)
     ));
     const confirmedDifficulty = matchingMistakes.some((item) => !item.resolved)
       || matchingGradings.some((item) => typeof item.score === "number" && item.score < 90);
@@ -693,6 +691,13 @@ function buildQaConflictNotes(pack) {
       ? [`${qa.subject}·${qa.knowledgePoint}的问答辅助信号与教师确认的批改或错题证据不一致，请人工复核。`]
       : [];
   });
+}
+
+function conflictKnowledgePointKey(value) {
+  return normalizeQaGroupValue(value).replace(
+    /的(?=(?:意义|概念|性质|方法|应用|读法|写法|计算)$)/u,
+    ""
+  );
 }
 
 function buildPeriod(periodType, now) {
@@ -721,9 +726,9 @@ function filterByPeriod(items, period, getDate) {
 }
 
 function buildFocusSubjects(pack) {
-  const counts = new Map();
+  const nonQaCounts = new Map();
   [...pack.gradingEvidence, ...pack.mistakeEvidence, ...pack.taskEvidence, ...pack.classroomEvidence].forEach((item) => {
-    counts.set(item.subject, (counts.get(item.subject) || 0) + 1);
+    nonQaCounts.set(item.subject, (nonQaCounts.get(item.subject) || 0) + 1);
   });
   const qaSourcesBySubject = new Map();
   pack.qaEvidence.forEach((item) => {
@@ -731,11 +736,19 @@ function buildFocusSubjects(pack) {
     item.sourceRefs.forEach((sourceRef) => sources.add(sourceRef));
     qaSourcesBySubject.set(item.subject, sources);
   });
-  qaSourcesBySubject.forEach((sources, subject) => {
-    counts.set(subject, (counts.get(subject) || 0) + sources.size);
-  });
-  const subjects = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([subject]) => subject).filter(Boolean);
-  const selected = (subjects.length ? subjects : ["数学"]).slice(0, pack.period.type === "weekly" ? 1 : 2);
+  const rankSubjects = (entries) => [...entries]
+    .filter(([subject]) => subject)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-CN"))
+    .map(([subject]) => subject);
+  const maxSubjects = pack.period.type === "weekly" ? 1 : 2;
+  const selected = rankSubjects(nonQaCounts.entries()).slice(0, maxSubjects);
+  if (selected.length < maxSubjects) {
+    const qaOnlySubjects = rankSubjects(
+      [...qaSourcesBySubject.entries()].map(([subject, sources]) => [subject, sources.size])
+    ).filter((subject) => !selected.includes(subject));
+    selected.push(...qaOnlySubjects.slice(0, maxSubjects - selected.length));
+  }
+  if (!selected.length) selected.push("数学");
   return selected.map((subject) => {
     const refs = subjectRefs(pack, subject);
     const nonQaRefs = nonQaSubjectRefs(pack, subject);
