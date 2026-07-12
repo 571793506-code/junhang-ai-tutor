@@ -982,6 +982,12 @@ git commit -m "docs: close agent skills system integration"
 - GREEN after the focused fixes: the same suites passed `60/60`; all service tests passed `64/64`; `check:api`, Web typecheck, Mini Program JS, and `git diff --check` exited `0`.
 - Live `check:services` exited `0` in 68109 ms with successful Q&A, task, assessment, and dictation results; assessment used no dynamic fallback. The follow-up commit SHA is intentionally recorded only by Git after commit creation.
 
+### Final Quality Follow-up
+
+- TDD RED on baseline `8ce7d33`: the focused profile, term-report, and Q&A response suites ran 64 tests with 60 passing and 4 expected failures covering `+08:00` period boundaries, neutral Q&A completion feedback, and the stale aggregate API contract.
+- GREEN after the final fixes: the focused suites passed `64/64`; the profile suite also passed `38/38` with the process timezone forced to UTC; all service tests passed `64/64`; `check:api`, Web typecheck, Mini Program JS, and `git diff --check` exited `0`.
+- Live `check:services` exited `0` in 60588 ms with successful Q&A, task, assessment, and dictation results; assessment used no dynamic fallback. The final quality-fix commit SHA is intentionally recorded only by Git after commit creation.
+
 ## Task 10: Remove The Local Sol Worktree After Verification
 
 **Files:**

@@ -7,6 +7,8 @@ const QA_MODES = new Set(["GUIDED_THINKING", "KNOWLEDGE_EXPLANATION"]);
 const QA_QUESTION_INTENTS = new Set(["concept", "method", "error_reasoning", "expression", "other"]);
 const QA_DIFFICULTY_SIGNALS = new Set(["none", "possible", "clear"]);
 const QA_CONFIDENCE_LEVELS = new Set(["low", "medium", "high"]);
+const PROJECT_TIME_ZONE_OFFSET = "+08:00";
+const PROJECT_TIME_ZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 export function buildProfileEvidencePack(student, options = {}) {
   const now = options.now instanceof Date ? options.now : new Date();
@@ -722,24 +724,24 @@ function conflictKnowledgePointKey(value) {
 }
 
 function buildPeriod(periodType, now) {
+  const projectNow = new Date(now.getTime() + PROJECT_TIME_ZONE_OFFSET_MS);
+  const year = projectNow.getUTCFullYear();
+  const month = projectNow.getUTCMonth();
+  const date = projectNow.getUTCDate();
   if (periodType === "weekly") {
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    const day = start.getDay() || 7;
-    start.setDate(start.getDate() - day + 1);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 6);
-    end.setHours(23, 59, 59, 999);
+    const day = projectNow.getUTCDay() || 7;
+    const start = new Date(Date.UTC(year, month, date - day + 1));
+    const end = new Date(Date.UTC(year, month, date - day + 7));
     return { type: "weekly", label: `${formatDate(start)} 至 ${formatDate(end)}`, start: formatDate(start), end: formatDate(end) };
   }
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-  return { type: "monthly", label: `${now.getFullYear()}年${now.getMonth() + 1}月`, start: formatDate(start), end: formatDate(end) };
+  const start = new Date(Date.UTC(year, month, 1));
+  const end = new Date(Date.UTC(year, month + 1, 0));
+  return { type: "monthly", label: `${year}年${month + 1}月`, start: formatDate(start), end: formatDate(end) };
 }
 
 function filterByPeriod(items, period, getDate) {
-  const start = new Date(`${period.start}T00:00:00.000Z`);
-  const end = new Date(`${period.end}T23:59:59.999Z`);
+  const start = new Date(`${period.start}T00:00:00.000${PROJECT_TIME_ZONE_OFFSET}`);
+  const end = new Date(`${period.end}T23:59:59.999${PROJECT_TIME_ZONE_OFFSET}`);
   return items.filter((item) => {
     const date = toDate(getDate(item));
     return !date || (date >= start && date <= end);
@@ -1072,9 +1074,9 @@ function qaIsoDate(value) {
 }
 
 function formatDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 

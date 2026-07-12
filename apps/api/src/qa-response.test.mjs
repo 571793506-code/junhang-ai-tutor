@@ -425,3 +425,20 @@ test("Web QA response types expose only learner-visible route fields", () => {
   assert.doesNotMatch(qaType, /\bpersisted\b/);
   assert.doesNotMatch(classroomType, /\bpersisted\b/);
 });
+
+test("Web QA completion feedback does not claim hidden persistence", () => {
+  const source = readFileSync(new URL("../../../apps/web/src/main.tsx", import.meta.url), "utf8");
+  const qaFlow = source.slice(
+    source.indexOf("async function askQa"),
+    source.indexOf("async function askClassroomQa")
+  );
+  const classroomFlow = source.slice(
+    source.indexOf("async function askClassroomQa"),
+    source.indexOf("async function publishTabletBroadcast")
+  );
+
+  assert.match(qaFlow, /"AI问答回答完成"/);
+  assert.match(classroomFlow, /"平板问答回答完成"/);
+  assert.doesNotMatch(qaFlow, /已归档/);
+  assert.doesNotMatch(classroomFlow, /已归档/);
+});

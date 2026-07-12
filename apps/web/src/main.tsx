@@ -1036,7 +1036,7 @@ function App() {
       const imageNote = input?.images?.length ? `\n\n学生已选择 ${input.images.length} 张问题图片：${input.images.map((file) => file.name).join("、")}。当前 Web 端先记录附件信息，若图片内容没有被识别，请引导学生补充题目文字。` : "";
       const response = await askStudentQuestion({ studentId: currentStudent.id, studentName: currentStudent.displayName, subject: input?.subject && input.subject !== "全科" ? input.subject : undefined, question: `${question}${imageNote}` });
       setAnswer(normalizeAiAnswerText(response.result.answer));
-      setSync({ busy: false, ok: response.result.available, message: response.result.available ? "AI问答已归档" : "AI问答暂不可用" });
+      setSync({ busy: false, ok: response.result.available, message: response.result.available ? "AI问答回答完成" : "AI问答暂不可用" });
     } catch (error) {
       setSync({ busy: false, ok: false, message: `问答失败：${error instanceof Error ? error.message : String(error)}` });
     } finally {
@@ -1053,7 +1053,7 @@ function App() {
       question: input.question,
       context: "课堂平板端全科 AI 问答：日常知识、常识解释和英语词汇学习可以直接回答；题目、作业、小测、试卷或解题类问题必须做思路引导、关键步骤提示和追问，不直接替学生给最终答案。"
     });
-    setSync({ busy: false, ok: response.result.available, message: response.result.available ? "平板问答已归档" : "平板问答暂不可用" });
+    setSync({ busy: false, ok: response.result.available, message: response.result.available ? "平板问答回答完成" : "平板问答暂不可用" });
     return response.result.answer;
   }
 

@@ -105,8 +105,10 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 该接口不自动发布到学生端，也不自动发送微信；老师下载后人工发送或打印。
 
 - `POST /api/students/:studentId/profile/aggregate`
-  - 兼容型聚合接口，默认按 `periodType=monthly` 生成月度综合档案。
-  - 学生或教师会话都可调用，但响应按当前角色过滤。
+  - 兼容型教师草稿聚合接口，默认按 `periodType=monthly` 生成月度综合档案。
+  - 仅教师会话可调用；学生不能调用。
+  - 聚合结果持久化为 `draftStatus=draft`，仍需教师通过发布接口确认后才能成为学生可见内容。
+  - 学生仅通过 `GET /api/students/:studentId/profile` 读取教师已发布内容，不得读取未发布草稿。
 
 - `GET /api/students/:studentId/profile`
   - 读取已保存档案。

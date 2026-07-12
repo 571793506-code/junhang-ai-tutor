@@ -207,6 +207,58 @@ function studentFixture() {
   };
 }
 
+function periodBoundaryFixture(boundaries) {
+  const fixture = studentFixture();
+  fixture.tasks = boundaries.map(({ id, at }) => ({
+    id: `task_${id}`,
+    title: `边界任务 ${id}`,
+    status: "COMPLETED",
+    createdAt: new Date(at),
+    subject: { name: "数学" }
+  }));
+  fixture.submissions = boundaries.map(({ id, at }) => ({
+    id: `grading_${id}`,
+    status: "REVIEWED",
+    submittedAt: new Date(at),
+    assignment: { title: `边界批改 ${id}`, subject: { name: "数学" }, metadata: {} },
+    grading: { score: 90, result: { archiveEligible: true, needsTeacherReview: false, confidence: "high" } }
+  }));
+  fixture.mistakes = boundaries.map(({ id, at }) => ({
+    id: `mistake_${id}`,
+    subject: "数学",
+    prompt: `边界错题 ${id}`,
+    masteryResolved: false,
+    createdAt: new Date(at),
+    knowledgePoint: { name: "小数意义" },
+    metadata: {}
+  }));
+  fixture.qaSessions = boundaries.map(({ id, at }) => ({
+    id: `qa_${id}`,
+    createdAt: new Date(at),
+    subject: "数学",
+    metadata: qaMetadata()
+  }));
+  fixture.voiceInteractions = boundaries.map(({ id, at }) => ({
+    id: `voice_${id}`,
+    occurredAt: new Date(at),
+    subject: "数学",
+    question: `边界课堂观察 ${id}`,
+    metadata: { available: true }
+  }));
+  return fixture;
+}
+
+function assertPeriodEvidence(pack, expectedBoundaryIds) {
+  assert.deepEqual(pack.taskEvidence.map((item) => item.id), expectedBoundaryIds.map((id) => `task_${id}`));
+  assert.deepEqual(pack.gradingEvidence.map((item) => item.id), expectedBoundaryIds.map((id) => `grading_${id}`));
+  assert.deepEqual(pack.mistakeEvidence.map((item) => item.id), expectedBoundaryIds.map((id) => `mistake_${id}`));
+  assert.deepEqual(
+    pack.qaEvidence.flatMap((item) => item.sourceRefs).sort(),
+    expectedBoundaryIds.map((id) => `qa_${id}`).sort()
+  );
+  assert.deepEqual(pack.classroomEvidence.map((item) => item.id), expectedBoundaryIds.map((id) => `voice_${id}`));
+}
+
 test("buildProfileEvidencePack includes reviewed evidence and blocks provisional grading", () => {
   const pack = buildProfileEvidencePack(studentFixture(), { periodType: "weekly", now });
 
@@ -215,6 +267,42 @@ test("buildProfileEvidencePack includes reviewed evidence and blocks provisional
   assert.equal(pack.gradingEvidence[0].id, "sub_ok");
   assert.ok(pack.blockedEvidence.some((item) => item.id === "sub_blocked"));
   assert.equal(pack.sourceQuality.hasBlockedEvidence, true);
+});
+
+test("weekly profile period uses deterministic Asia Shanghai boundaries for every evidence type", () => {
+  const fixture = periodBoundaryFixture([
+    { id: "previous", at: "2026-07-05T15:59:59.999Z" },
+    { id: "start", at: "2026-07-05T16:00:00.000Z" },
+    { id: "end", at: "2026-07-12T15:59:59.999Z" },
+    { id: "next", at: "2026-07-12T16:00:00.000Z" }
+  ]);
+
+  const pack = buildProfileEvidencePack(fixture, {
+    periodType: "weekly",
+    now: new Date("2026-07-05T16:00:00.000Z")
+  });
+
+  assert.equal(pack.period.start, "2026-07-06");
+  assert.equal(pack.period.end, "2026-07-12");
+  assertPeriodEvidence(pack, ["start", "end"]);
+});
+
+test("monthly profile period uses deterministic Asia Shanghai boundaries for every evidence type", () => {
+  const fixture = periodBoundaryFixture([
+    { id: "previous", at: "2026-06-30T15:59:59.999Z" },
+    { id: "start", at: "2026-06-30T16:00:00.000Z" },
+    { id: "end", at: "2026-07-31T15:59:59.999Z" },
+    { id: "next", at: "2026-07-31T16:00:00.000Z" }
+  ]);
+
+  const pack = buildProfileEvidencePack(fixture, {
+    periodType: "monthly",
+    now: new Date("2026-06-30T16:00:00.000Z")
+  });
+
+  assert.equal(pack.period.start, "2026-07-01");
+  assert.equal(pack.period.end, "2026-07-31");
+  assertPeriodEvidence(pack, ["start", "end"]);
 });
 
 test("only eligible qa-learning-signal-v1 records enter qaEvidence", () => {
@@ -893,6 +981,19 @@ test("student profile routes enforce teacher drafts and role-based published sel
   assert.match(getRoute, /selectProfileSnapshotForRole\(student\.profiles, req\.session\.role\)/);
   assert.match(getRoute, /mapStudent\(student, req\.session\.role\)/);
   assert.match(bootstrapRoute, /profiles: profileRecordsQueryForRole\(req\.session\.role\)/);
+});
+
+test("profile aggregate contract documents teacher-only draft persistence and published student reads", () => {
+  const contract = fs.readFileSync(new URL("../../../docs/14-api-contract.md", import.meta.url), "utf8");
+  const aggregateSection = contract.slice(
+    contract.indexOf("- `POST /api/students/:studentId/profile/aggregate`"),
+    contract.indexOf("- `GET /api/students/:studentId/profile`")
+  );
+
+  assert.match(aggregateSection, /仅教师会话可调用/);
+  assert.match(aggregateSection, /`draftStatus=draft`/);
+  assert.match(aggregateSection, /学生不能调用/);
+  assert.match(aggregateSection, /通过 `GET \/api\/students\/:studentId\/profile` 读取教师已发布内容/);
 });
 
 test("mergeStudentProfileAiDraft only merges safe structured AI fields", () => {
