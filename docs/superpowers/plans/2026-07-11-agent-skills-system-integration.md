@@ -930,7 +930,7 @@ cmd /c npm.cmd run check:content-context
 
 Expected: the content-context, draft, review, and export boundary closes successfully. Do not substitute the full teaching-content E2E unless the implementation changed upload or formal export behavior beyond this plan.
 
-- [ ] **Step 6: Review repository integrity**
+- [x] **Step 6: Review repository integrity**
 
 ```powershell
 git diff --check
@@ -969,7 +969,7 @@ git commit -m "docs: close agent skills system integration"
 - Step 4 layered checks: `check:skills` found all nine routes; read-only `check:miniprogram-sync` reported `added=[]`, `changed=[]`, `deleted=[]`; Mini Program JS checked 28 files; `check:miniapp1` checked 103 files; generation blueprint passed all nine subject/kind cases; API check passed with database connected; service smoke passed QA/task/assessment/dictation in 62973 ms; Web typecheck exited `0`; encoding checked 527 files with zero issues. Every layered command exited `0`, and no reverse sync was written.
 - Step 5 E2E: `check:content-context` exited `0`; all 16 reported checks passed, including teacher auth, protected/input-path guards, content-context injection, draft export, pre-review print block, teacher acceptance, two final PDF assets with HTTP 200, and content-index cleanup. Scope remained `link-guard`; it does not claim generation quality.
 - Initial `workspace:guard` on `5fa2325` exited `1` only for the known local condition: 71 ignored Task 3 runtime-residue files and 57 approved ignored local PDF/PNG/helper assets. These files remain untouched and untracked; the branch has no upstream. Task 9 integrity evidence below must preserve this classification rather than deleting or staging the files.
-- Step 6 integrity classification: `git diff --check`, `git status --short --branch`, and `git log --oneline --decorate -12` exited `0`; status listed exactly the nine Task 9 owned documentation files and no untracked/staged paths. `workspace:guard` exited `1`, so this checkbox remains open and Task 9 is `DONE_WITH_CONCERNS`: it reported the expected nine visible Task 9 docs, 75 ignored runtime-residue files (the preserved 71 Task 3 files plus four `check:content-context` fixtures), the approved 57 ignored local assets, and no upstream. No ignored files or assets were deleted or staged.
+- Step 6 clean integrity verification: `workspace:archive-residue` moved exactly 75 recognized runtime-residue files to `E:\UserData\86188\Documents\君航AI助教-local-archive\2026-07-12T15-18-12-run-residue`; the 57 approved local PDF/PNG/helper assets remained in place. The subsequent `workspace:guard` exited `0` with clean risk, ignored runtime residue `0`, and no staged, unstaged, or untracked paths; tracked status was clean. The Sol worktree remained present at `e52e9a6`, and `git merge-base --is-ancestor e52e9a6 HEAD` confirmed `ancestor=yes`. Task 10 remained unstarted.
 - Step 7 commit: explicit staging contained exactly the nine owned documentation files; `git diff --cached --check` exited `0`; commit `59647d7` (`docs: close agent skills system integration`) succeeded.
 - Final acceptance wording follow-up: commit `a8cfe8e` (`docs: align qa acceptance criteria`) aligned the exact schema, valid-date, unique-source, normalized aggregation, non-Q&A priority, and teacher conflict-note wording.
 
