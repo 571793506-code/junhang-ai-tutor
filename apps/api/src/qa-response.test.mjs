@@ -62,6 +62,10 @@ const genericJsonFragments = [
   `prefix [["secret"`
 ];
 const unsafeSemanticArrays = [
+  `[x 'alpha']`,
+  `[1 'alpha']`,
+  `[typeof 'alpha']`,
+  `[(x) 'alpha']`,
   `[('alpha'), ('beta')]`,
   `[( 'alpha' )]`,
   `[+'alpha']`,
