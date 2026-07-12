@@ -12,6 +12,7 @@ const GENERIC_JSON_OBJECT_OPENING = /\{\s*"(?:\\.|[^"\\\r\n])*"\s*:/;
 const HALF_OPEN_INTERVAL = /^\[\s*(?:[A-Za-z]|-?(?:0|[1-9]\d*)(?:\.\d+)?)\s*,\s*(?:[A-Za-z]|-?(?:0|[1-9]\d*)(?:\.\d+)?)\s*\)/;
 const STRUCTURED_ARRAY_TOKEN = /\b(?:true|false|null|NaN|Infinity)\b/;
 const JSON_NUMBER_FIRST = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?(?=\s*(?:,|\]|$))/;
+const PRIME_CARRIER = /[\p{L}\p{N}\p{M}_)\]']/u;
 const QA_UNAVAILABLE_ANSWER = "AI 问答暂时不可用，请稍后再试。";
 const REQUIRED_SIGNAL_FIELDS = [
   "knowledgePoints",
@@ -70,7 +71,7 @@ function inspectArrayAt(value, start) {
       continue;
     }
     const startsString = character === '"'
-      || (character === "'" && (previousSignificant === "[" || previousSignificant === ","));
+      || (character === "'" && !PRIME_CARRIER.test(previousSignificant || ""));
     if (startsString) {
       containsString = true;
       inString = true;

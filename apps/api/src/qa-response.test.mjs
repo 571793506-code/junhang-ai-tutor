@@ -62,6 +62,11 @@ const genericJsonFragments = [
   `prefix [["secret"`
 ];
 const unsafeSemanticArrays = [
+  `[('alpha'), ('beta')]`,
+  `[( 'alpha' )]`,
+  `[+'alpha']`,
+  `[-'alpha']`,
+  `[*'alpha']`,
   `['alpha', 'beta']`,
   `['alpha\\'s', 'beta']`,
   `[{'custom': 'secret'}]`,
@@ -178,6 +183,8 @@ test("QA response cleaners preserve ordinary list, vector, set, and interval not
     "The vector [1, 2] isn't empty.",
     "The teacher quoted 'alpha and beta' in prose.",
     "The variables [x', y'] are prime-marked.",
+    "The variables [x'', y''] use repeated primes.",
+    "The grouped terms [(x)', (y)'] carry primes.",
     "Compare [f'(x), g'(x)] in the derivative table.",
     "The set is {1, 2, 3}.",
     "Use [a, b] for the interval."
