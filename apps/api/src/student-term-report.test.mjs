@@ -8,6 +8,30 @@ import {
   termReportTypeToDb
 } from "./student-term-report.js";
 
+const qaLearningSignal = {
+  knowledgePoints: ["小数意义"],
+  questionIntent: "concept",
+  difficultySignal: "possible",
+  misconceptionHypotheses: ["需要继续观察小数位值理解"],
+  followUpNeeded: true,
+  confidence: "medium",
+  safetyStatus: "pass"
+};
+
+function qaMetadata(overrides = {}) {
+  return {
+    schemaVersion: "qa-learning-signal-v1",
+    actorRole: "student",
+    identityConfirmed: true,
+    available: true,
+    mode: "KNOWLEDGE_EXPLANATION",
+    profileEligibility: true,
+    blockedReason: null,
+    learningSignal: { ...qaLearningSignal },
+    ...overrides
+  };
+}
+
 const student = {
   id: "stu_1",
   displayName: "张思源",
@@ -152,6 +176,88 @@ test("buildTermReportDraft includes deeper stage report content blocks", () => {
   assert.ok(draft.sections.teacherReviewChecklist.some((item) => item.text.includes("人工发送")));
   assert.ok(draft.sections.parentCommunicationSummary.text.includes("家长"));
   assert.equal(JSON.stringify(draft).includes("平均表现约"), false);
+});
+
+test("term report excludes ineligible qa and every qa-backed voice interaction", () => {
+  const fixture = {
+    ...student,
+    qaSessions: [
+      {
+        id: "qa_unavailable",
+        createdAt: new Date("2026-07-01T08:00:00.000Z"),
+        subject: "数学",
+        metadata: qaMetadata({ available: false, profileEligibility: false, blockedReason: "model-unavailable" })
+      },
+      {
+        id: "qa_unsafe",
+        createdAt: new Date("2026-07-01T09:00:00.000Z"),
+        subject: "数学",
+        metadata: qaMetadata({
+          profileEligibility: false,
+          blockedReason: "unsafe-content",
+          learningSignal: { ...qaLearningSignal, safetyStatus: "blocked" }
+        })
+      },
+      {
+        id: "qa_unconfirmed",
+        createdAt: new Date("2026-07-01T10:00:00.000Z"),
+        subject: "数学",
+        metadata: qaMetadata({ identityConfirmed: false, profileEligibility: false, blockedReason: "identity-unconfirmed" })
+      }
+    ],
+    voiceInteractions: [
+      { id: "voice_unavailable", metadata: { qaSessionId: "qa_unavailable", available: false } },
+      { id: "voice_unsafe", metadata: { qaSessionId: "qa_unsafe", available: true } },
+      { id: "voice_unconfirmed", metadata: { qaSessionId: "qa_unconfirmed", available: true } }
+    ]
+  };
+
+  const draft = buildTermReportDraft(fixture, { reportType: "final", periodLabel: "2026春季期末" });
+  const interactionTexts = [
+    draft.sections.learningHabits[1],
+    draft.sections.evidenceSummary.find((item) => item.title === "问答互动").text,
+    draft.sections.evidenceCoverage.find((item) => item.title === "互动覆盖").text
+  ];
+
+  assert.equal(interactionTexts.every((text) => text.includes("记录较少")), true);
+});
+
+test("term report counts unique eligible qa plus standalone classroom evidence once", () => {
+  const eligibleQa = {
+    id: "qa_eligible",
+    createdAt: new Date("2026-07-02T08:00:00.000Z"),
+    subject: "数学",
+    metadata: qaMetadata({
+      learningSignal: { ...qaLearningSignal, knowledgePoints: ["小数意义", "小数位值"] }
+    })
+  };
+  const fixture = {
+    ...student,
+    qaSessions: [
+      eligibleQa,
+      { ...eligibleQa, createdAt: new Date("2026-07-02T09:00:00.000Z") }
+    ],
+    voiceInteractions: [
+      { id: "voice_qa", metadata: { qaSessionId: "qa_eligible", available: true } },
+      {
+        id: "voice_standalone",
+        subject: "语文",
+        question: "课堂复述",
+        occurredAt: new Date("2026-07-02T10:00:00.000Z"),
+        metadata: { available: true }
+      }
+    ]
+  };
+
+  const draft = buildTermReportDraft(fixture, { reportType: "final", periodLabel: "2026春季期末" });
+  const interactionTexts = [
+    draft.sections.learningHabits[1],
+    draft.sections.evidenceSummary.find((item) => item.title === "问答互动").text,
+    draft.sections.evidenceCoverage.find((item) => item.title === "互动覆盖").text
+  ];
+
+  assert.equal(interactionTexts.every((text) => text.includes("2 次")), true);
+  assert.equal(interactionTexts.some((text) => text.includes("3 次") || text.includes("4 次")), false);
 });
 
 test("mapTermReportForRole hides PDF and body from student until sent", () => {

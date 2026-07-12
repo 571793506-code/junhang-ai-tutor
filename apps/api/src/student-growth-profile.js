@@ -68,18 +68,7 @@ export function buildProfileEvidencePack(student, options = {}) {
     nextPractice: mistake.metadata?.nextPractice || mistake.metadata?.suggestedPractice || "",
     confidence: "confirmed"
   }));
-  const qaEvidence = buildQaEvidence(qaSessions, blockedEvidence);
-  const classroomEvidence = voiceInteractions
-    .filter((item) => !hasQaSessionMarker(item?.metadata))
-    .map((item) => ({
-      id: item.id,
-      type: "classroom",
-      subject: subjectFromValue(item.subject || item.metadata?.subject),
-      title: item.question || item.action || "课堂互动",
-      at: isoDate(item.occurredAt),
-      summary: item.answer || item.result || "",
-      confidence: "supported"
-    }));
+  const { qaEvidence, classroomEvidence } = buildInteractionEvidence(qaSessions, voiceInteractions, { blockedEvidence });
 
   return {
     period,
@@ -187,6 +176,28 @@ export function selectProfileSnapshotForRole(profiles, role = "student") {
     ? profiles.find((item) => isPlainObject(item?.snapshot))
     : profiles.find((item) => isPlainObject(item?.snapshot) && item.snapshot.draftStatus === "published");
   return profile?.snapshot || null;
+}
+
+export function buildInteractionEvidence(qaSessions = [], voiceInteractions = [], options = {}) {
+  const blockedEvidence = Array.isArray(options.blockedEvidence) ? options.blockedEvidence : [];
+  const qaEvidence = buildQaEvidence(Array.isArray(qaSessions) ? qaSessions : [], blockedEvidence);
+  const classroomEvidence = (Array.isArray(voiceInteractions) ? voiceInteractions : [])
+    .filter((item) => !hasQaSessionMarker(item?.metadata))
+    .map((item) => ({
+      id: item.id,
+      type: "classroom",
+      subject: subjectFromValue(item.subject || item.metadata?.subject),
+      title: item.question || item.action || "课堂互动",
+      at: isoDate(item.occurredAt),
+      summary: item.answer || item.result || "",
+      confidence: "supported"
+    }));
+  return {
+    qaEvidence,
+    classroomEvidence,
+    blockedEvidence,
+    interactionCount: qaSessionCount({ qaEvidence }) + classroomEvidence.length
+  };
 }
 
 export function mergeStudentProfileAiDraft(baseSnapshot, aiDraft) {
@@ -987,9 +998,7 @@ function isPlainObject(value) {
 }
 
 function hasQaSessionMarker(metadata) {
-  return metadata !== null
-    && typeof metadata === "object"
-    && "qaSessionId" in metadata;
+  return isPlainObject(metadata) && Object.hasOwn(metadata, "qaSessionId");
 }
 
 function mergePublishedView(baseView, draftView) {

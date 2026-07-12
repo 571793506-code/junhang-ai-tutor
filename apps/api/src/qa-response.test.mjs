@@ -409,3 +409,19 @@ test("QA routes use server-confirmed actor context and response cleaners", () =>
   const speechIndex = classroomRoute.indexOf("const speech = await createMiniMaxSpeechTask");
   assert.equal(qaServiceIndex >= 0 && speechIndex > qaServiceIndex, true);
 });
+
+test("Web QA response types expose only learner-visible route fields", () => {
+  const source = readFileSync(new URL("../../../apps/web/src/api.ts", import.meta.url), "utf8");
+  const qaType = source.slice(
+    source.indexOf("export async function askStudentQuestion"),
+    source.indexOf("export type VocabularyCard")
+  );
+  const classroomType = source.slice(
+    source.indexOf("export async function askClassroomVoice"),
+    source.indexOf("export async function listReviewSubmissions")
+  );
+
+  assert.doesNotMatch(qaType, /\bpersistence\b/);
+  assert.doesNotMatch(qaType, /\bpersisted\b/);
+  assert.doesNotMatch(classroomType, /\bpersisted\b/);
+});

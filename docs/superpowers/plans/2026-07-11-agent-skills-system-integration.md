@@ -976,6 +976,12 @@ git commit -m "docs: close agent skills system integration"
 - `git worktree remove .worktrees/gpt56-sol-escalation` and `git worktree prune` exited `0`. After Git removal, only residual `node_modules/@junhang` directory links remained; inspection found no source or business files, their absolute target was inside the workspace, and that residual directory was removed. The branch was not deleted.
 - Final verification showed only the integration worktree, retained branch `codex/gpt56-sol-escalation` still an ancestor of `HEAD`, no residual worktree directory, and clean Git status. `workspace:guard` exited `0` with ignored runtime residue `0` and 57 approved local assets; `git diff --check` exited `0`; `check:encoding` exited `0` after checking 275 current source files with zero issues.
 
+### Integration Boundary Follow-up
+
+- TDD RED on baseline `e7ccca2`: the focused profile, term-report, and Q&A response suites ran 60 tests with 55 passing and 5 expected failures covering the bounded profile lookup, raw formal-report interaction counts, inherited voice marker handling, and stale Web response types.
+- GREEN after the focused fixes: the same suites passed `60/60`; all service tests passed `64/64`; `check:api`, Web typecheck, Mini Program JS, and `git diff --check` exited `0`.
+- Live `check:services` exited `0` in 68109 ms with successful Q&A, task, assessment, and dictation results; assessment used no dynamic fallback. The follow-up commit SHA is intentionally recorded only by Git after commit creation.
+
 ## Task 10: Remove The Local Sol Worktree After Verification
 
 **Files:**

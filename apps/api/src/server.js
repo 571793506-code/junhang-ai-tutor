@@ -1038,6 +1038,15 @@ function enrollmentStatusToDb(status) {
   return "ACTIVE";
 }
 
+function profileRecordsQueryForRole(role) {
+  const newestProfile = { orderBy: { createdAt: "desc" }, take: 1 };
+  if (role === "teacher") return newestProfile;
+  return {
+    where: { snapshot: { path: ["draftStatus"], equals: "published" } },
+    ...newestProfile
+  };
+}
+
 function mapStudent(student, role = "teacher") {
   const selectedProfile = selectProfileSnapshotForRole(student.profiles, role);
   const profile = selectedProfile || {};
@@ -2925,7 +2934,7 @@ app.get("/api/bootstrap", requireDatabase, requireSession(config, ["student", "t
         guardians: { include: { guardian: true }, take: 1 },
         responsibleTeacher: true,
         teacherAssignments: { where: { activeTo: null } },
-        profiles: { orderBy: { createdAt: "desc" }, take: 20 }
+        profiles: profileRecordsQueryForRole(req.session.role)
       }
     }),
     prisma.learningTask.findMany({
@@ -4490,7 +4499,7 @@ app.get("/api/students/:studentId/profile", requireDatabase, requireSession(conf
       accessCodes: { where: { status: "ACTIVE" }, take: 1 },
       guardians: { include: { guardian: true }, take: 1 },
       responsibleTeacher: true,
-      profiles: { orderBy: { createdAt: "desc" }, take: 20 },
+      profiles: profileRecordsQueryForRole(req.session.role),
       reports: { orderBy: { createdAt: "desc" }, take: 20 },
       mistakes: { orderBy: { createdAt: "desc" }, take: 50, include: { knowledgePoint: true } }
     }

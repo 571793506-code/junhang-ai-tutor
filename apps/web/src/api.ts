@@ -143,16 +143,10 @@ export async function askStudentQuestion(input: {
   });
   return readJson<{
     ok: boolean;
-    persistence: { active: boolean; reason: string };
     result: {
       available: boolean;
       mode: "GUIDED_THINKING" | "KNOWLEDGE_EXPLANATION";
       answer: string;
-      persisted?: {
-        modelRunId?: string | null;
-        qaSessionId?: string | null;
-        voiceInteractionId?: string | null;
-      };
     };
   }>(response);
 }
@@ -542,7 +536,6 @@ export async function askClassroomVoice(input: Record<string, unknown>) {
       transcript: string;
       answer: string;
       voice: { available: boolean; status?: string; audioUrl?: string | null; reason?: string | null };
-      persisted?: { voiceInteractionId?: string | null; qaSessionId?: string | null; modelRunId?: string | null };
     };
   }>(response);
 }

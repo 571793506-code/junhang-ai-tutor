@@ -1,3 +1,5 @@
+import { buildInteractionEvidence } from "./student-growth-profile.js";
+
 const SUBJECTS = ["语文", "数学", "英语"];
 const TERM_REPORT_TEMPLATES = {
   midterm: {
@@ -37,10 +39,11 @@ export function buildTermReportDraft(student, options = {}) {
   const template = TERM_REPORT_TEMPLATES[reportType];
   const now = options.now instanceof Date ? options.now : new Date();
   const periodLabel = String(options.periodLabel || defaultPeriodLabel(reportType, now)).trim();
+  const interactionCount = buildInteractionEvidence(student.qaSessions, student.voiceInteractions).interactionCount;
   const subjects = SUBJECTS.map((subject) => subjectSection(student, subject));
   const focus = subjects.find((item) => item.concerns.length) || subjects[0];
   const title = `${student.displayName} ${periodLabel}${termReportTypeLabel(reportType)}`;
-  const habits = learningHabits(student);
+  const habits = learningHabits(student, interactionCount);
   const progress = progressList(student);
   const actions = nextActions(subjects);
   const suggestions = parentSuggestions(subjects);
@@ -48,11 +51,11 @@ export function buildTermReportDraft(student, options = {}) {
   const stableGrowth = stableGrowthDetails(habits, progress);
   const parentNextSteps = suggestions.map((text) => ({ text }));
   const stageConclusions = stageConclusionDetails(reportType, template, focus, habits, progress);
-  const evidenceSummary = evidenceSummaryDetails(student);
+  const evidenceSummary = evidenceSummaryDetails(student, interactionCount);
   const subjectAbilityMap = subjectAbilityDetails(subjects);
   const commonCauseAnalysis = commonCauseDetails(focusSubjects);
   const growthTrajectory = growthTrajectoryDetails(reportType, focus, habits, progress, student);
-  const evidenceCoverage = evidenceCoverageDetails(student, subjects);
+  const evidenceCoverage = evidenceCoverageDetails(student, subjects, interactionCount);
   const learningProcess = learningProcessDetails(student, focus, habits);
   const actionPlan = actionPlanDetails(template, focusSubjects, actions);
   const homeSchoolCollaboration = homeSchoolCollaborationDetails(template, focus, suggestions);
@@ -283,12 +286,11 @@ function correctionLoop(student) {
     : ["本阶段暂无可发布的错题订正闭环，建议继续积累批改记录。"];
 }
 
-function learningHabits(student) {
-  const qaCount = (student.qaSessions || []).length + (student.voiceInteractions || []).length;
+function learningHabits(student, interactionCount) {
   const completed = (student.tasks || []).filter((item) => item.status === "COMPLETED" || item.status === "REVIEWED").length;
   return [
     completed ? `已完成 ${completed} 项学习任务，学习节奏有记录可追踪。` : "学习任务完成记录仍需继续积累。",
-    qaCount ? `主动提问或课堂互动 ${qaCount} 次，问题意识正在形成。` : "主动提问和课堂互动记录较少，后续继续观察。"
+    interactionCount ? `主动提问或课堂互动 ${interactionCount} 次，问题意识正在形成。` : "主动提问和课堂互动记录较少，后续继续观察。"
   ];
 }
 
@@ -317,16 +319,15 @@ function stageConclusionDetails(reportType, template, focus, habits, progress) {
   ];
 }
 
-function evidenceSummaryDetails(student) {
+function evidenceSummaryDetails(student, interactionCount) {
   const tasks = student.tasks || [];
   const reviewed = (student.submissions || []).filter((item) => item.status === "REVIEWED" && item.grading);
   const mistakes = student.mistakes || [];
-  const interactions = (student.qaSessions || []).length + (student.voiceInteractions || []).length;
   return [
     { title: "学习任务", text: `${tasks.length} 项任务记录，其中 ${(tasks.filter((item) => item.status === "COMPLETED" || item.status === "REVIEWED")).length} 项已完成或已复核。`, evidence: "任务状态记录" },
     { title: "教师确认批改", text: `${reviewed.length} 条教师确认批改记录用于阶段观察。`, evidence: "REVIEWED 批改记录" },
     { title: "错题与订正", text: `${mistakes.length} 条错题记录用于定位共性错因和复练动作。`, evidence: "错题本记录" },
-    { title: "问答互动", text: interactions ? `${interactions} 次问答或语音互动作为辅助观察。` : "本阶段问答互动记录较少，暂作为继续观察项。", evidence: "问答与语音互动记录" }
+    { title: "问答互动", text: interactionCount ? `${interactionCount} 次问答或语音互动作为辅助观察。` : "本阶段问答互动记录较少，暂作为继续观察项。", evidence: "问答与语音互动记录" }
   ];
 }
 
@@ -352,11 +353,10 @@ function growthTrajectoryDetails(reportType, focus, habits, progress, student) {
   ];
 }
 
-function evidenceCoverageDetails(student, subjects) {
+function evidenceCoverageDetails(student, subjects, interactionCount) {
   const tasks = student.tasks || [];
   const reviewed = (student.submissions || []).filter((item) => item.status === "REVIEWED" && item.grading);
   const mistakes = student.mistakes || [];
-  const interactions = (student.qaSessions || []).length + (student.voiceInteractions || []).length;
   const coveredSubjects = subjects.filter((item) => item.evidence && !item.evidence.includes("较少")).map((item) => item.subject);
   return [
     {
@@ -381,7 +381,7 @@ function evidenceCoverageDetails(student, subjects) {
     },
     {
       title: "互动覆盖",
-      text: interactions ? `${interactions} 次问答或语音互动用于辅助观察表达和问题意识。` : "问答互动记录较少，暂不单独形成强结论。",
+      text: interactionCount ? `${interactionCount} 次问答或语音互动用于辅助观察表达和问题意识。` : "问答互动记录较少，暂不单独形成强结论。",
       evidence: "问答与语音互动"
     }
   ];

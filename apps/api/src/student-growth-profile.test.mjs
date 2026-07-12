@@ -310,6 +310,33 @@ test("standalone non-qa voice remains classroom evidence", () => {
   assert.equal(pack.sourceQuality.classroomCount, 1);
 });
 
+test("only a plain own qaSessionId marker excludes standalone classroom evidence", () => {
+  const fixture = studentFixture();
+  fixture.qaSessions = [];
+  const inheritedMetadata = Object.create({ qaSessionId: "qa_inherited" });
+  inheritedMetadata.available = true;
+  fixture.voiceInteractions = [
+    {
+      id: "voice_own_empty_marker",
+      occurredAt: new Date("2026-07-05T11:10:00.000Z"),
+      subject: "语文",
+      question: "空关联标记不得绕回课堂证据",
+      metadata: { qaSessionId: "", available: true }
+    },
+    {
+      id: "voice_inherited_marker",
+      occurredAt: new Date("2026-07-05T11:20:00.000Z"),
+      subject: "语文",
+      question: "继承属性不构成 QA 关联标记",
+      metadata: inheritedMetadata
+    }
+  ];
+
+  const pack = buildProfileEvidencePack(fixture, { periodType: "weekly", now });
+
+  assert.deepEqual(pack.classroomEvidence.map((item) => item.id), ["voice_inherited_marker"]);
+});
+
 test("qaEvidence contains only bounded summaries and refs, never full qa or internal fields", () => {
   const pack = buildProfileEvidencePack(studentFixture(), { periodType: "weekly", now });
   const item = pack.qaEvidence[0];
@@ -835,6 +862,10 @@ test("selectProfileSnapshotForRole keeps newest teacher snapshot and newest exac
 
 test("student profile routes enforce teacher drafts and role-based published selection", () => {
   const server = fs.readFileSync(new URL("./server.js", import.meta.url), "utf8");
+  const profileQueryHelper = server.slice(
+    server.indexOf("function profileRecordsQueryForRole"),
+    server.indexOf("function mapStudent")
+  );
   const aggregateRoute = server.slice(
     server.indexOf('app.post("/api/students/:studentId/profile/aggregate"'),
     server.indexOf('app.get("/api/students/:studentId/profile"')
@@ -852,10 +883,16 @@ test("student profile routes enforce teacher drafts and role-based published sel
   assert.match(aggregateRoute, /draftStatus: "draft"/);
   assert.match(aggregateRoute, /draftGeneratedAt: new Date\(\)\.toISOString\(\)/);
   assert.match(aggregateRoute, /filterStudentProfileSnapshot\(snapshot, "teacher"\)/);
-  assert.match(getRoute, /profiles: \{ orderBy: \{ createdAt: "desc" \}, take: 20 \}/);
+  assert.match(profileQueryHelper, /role === "teacher"/);
+  assert.match(profileQueryHelper, /path: \["draftStatus"\]/);
+  assert.match(profileQueryHelper, /equals: "published"/);
+  assert.match(profileQueryHelper, /orderBy: \{ createdAt: "desc" \}/);
+  assert.match(profileQueryHelper, /take: 1/);
+  assert.doesNotMatch(profileQueryHelper, /take: 20/);
+  assert.match(getRoute, /profiles: profileRecordsQueryForRole\(req\.session\.role\)/);
   assert.match(getRoute, /selectProfileSnapshotForRole\(student\.profiles, req\.session\.role\)/);
   assert.match(getRoute, /mapStudent\(student, req\.session\.role\)/);
-  assert.match(bootstrapRoute, /profiles: \{ orderBy: \{ createdAt: "desc" \}, take: 20 \}/);
+  assert.match(bootstrapRoute, /profiles: profileRecordsQueryForRole\(req\.session\.role\)/);
 });
 
 test("mergeStudentProfileAiDraft only merges safe structured AI fields", () => {
