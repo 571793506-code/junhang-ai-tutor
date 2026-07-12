@@ -576,6 +576,8 @@ test("answerStudentQuestionService preserves plain and blocked canonical answers
     ["The matrix [[1, 2], [3, 4]] has two rows.", validLearningSignal, true],
     ["The vector [1, 2] isn't empty.", validLearningSignal, true],
     ["The teacher quoted 'alpha and beta' in prose.", validLearningSignal, true],
+    ["The variables [x', y'] are prime-marked.", validLearningSignal, true],
+    ["Compare [f'(x), g'(x)] in the derivative table.", validLearningSignal, true],
     ["The interval is [0, 1).", validLearningSignal, true],
     ["Compare the intervals (a, b] and [c, d).", validLearningSignal, true],
     ['The word "content" appears in quoted prose.', validLearningSignal, true],

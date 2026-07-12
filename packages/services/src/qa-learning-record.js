@@ -56,6 +56,7 @@ function inspectArrayAt(value, start) {
   let escaped = false;
   let containsString = false;
   let containsObject = false;
+  let previousSignificant = null;
 
   for (let index = start; index < value.length; index += 1) {
     const character = value[index];
@@ -68,7 +69,9 @@ function inspectArrayAt(value, start) {
       }
       continue;
     }
-    if (character === '"' || character === "'") {
+    const startsString = character === '"'
+      || (character === "'" && (previousSignificant === "[" || previousSignificant === ","));
+    if (startsString) {
       containsString = true;
       inString = true;
       stringQuote = character;
@@ -78,11 +81,18 @@ function inspectArrayAt(value, start) {
     if (character === "[") {
       depth += 1;
       if (depth > 2) return { unsafe: true, end: index };
+      previousSignificant = character;
       continue;
     }
-    if (character !== "]") continue;
+    if (character !== "]") {
+      if (!/\s/.test(character)) previousSignificant = character;
+      continue;
+    }
     depth -= 1;
-    if (depth !== 0) continue;
+    if (depth !== 0) {
+      previousSignificant = character;
+      continue;
+    }
 
     const source = value.slice(start, index + 1);
     if (containsString || containsObject) return { unsafe: true, end: index };

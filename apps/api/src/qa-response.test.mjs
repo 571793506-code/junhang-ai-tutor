@@ -177,6 +177,8 @@ test("QA response cleaners preserve ordinary list, vector, set, and interval not
     "The matrix [[1, 2], [3, 4]] has two rows.",
     "The vector [1, 2] isn't empty.",
     "The teacher quoted 'alpha and beta' in prose.",
+    "The variables [x', y'] are prime-marked.",
+    "Compare [f'(x), g'(x)] in the derivative table.",
     "The set is {1, 2, 3}.",
     "Use [a, b] for the interval."
   ];
