@@ -71,6 +71,8 @@ const genericJsonFragments = [
   `prefix [["secret"`
 ];
 const unsafeSemanticArrays = [
+  `[\uD835'alpha']`,
+  `[\uDC65'alpha']`,
   `[x 'alpha']`,
   `[1 'alpha']`,
   `[typeof 'alpha']`,
@@ -586,6 +588,7 @@ test("answerStudentQuestionService preserves plain and blocked canonical answers
     ["The vector [1, 2] isn't empty.", validLearningSignal, true],
     ["The teacher quoted 'alpha and beta' in prose.", validLearningSignal, true],
     ["The variables [x', y'] are prime-marked.", validLearningSignal, true],
+    ["The variables [\u{1D465}', \u{1D466}'] use mathematical primes.", validLearningSignal, true],
     ["The variables [x'', y''] use repeated primes.", validLearningSignal, true],
     ["The grouped terms [(x)', (y)'] carry primes.", validLearningSignal, true],
     ["Compare [f'(x), g'(x)] in the derivative table.", validLearningSignal, true],

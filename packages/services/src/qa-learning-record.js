@@ -50,6 +50,20 @@ function malformedArrayIsUnsafe(source, complete) {
   return JSON_NUMBER_FIRST.test(inner);
 }
 
+function precedingCodePoint(value, index) {
+  if (index <= 0) return "";
+  const previousIndex = index - 1;
+  const previousUnit = value.charCodeAt(previousIndex);
+  if (previousUnit >= 0xDC00 && previousUnit <= 0xDFFF) {
+    if (previousIndex === 0) return "";
+    const highUnit = value.charCodeAt(previousIndex - 1);
+    if (highUnit < 0xD800 || highUnit > 0xDBFF) return "";
+    return String.fromCodePoint(value.codePointAt(previousIndex - 1));
+  }
+  if (previousUnit >= 0xD800 && previousUnit <= 0xDBFF) return "";
+  return value[previousIndex];
+}
+
 function inspectArrayAt(value, start) {
   let depth = 0;
   let inString = false;
@@ -70,7 +84,7 @@ function inspectArrayAt(value, start) {
       continue;
     }
     const startsString = character === '"'
-      || (character === "'" && !PRIME_CARRIER.test(value[index - 1] || ""));
+      || (character === "'" && !PRIME_CARRIER.test(precedingCodePoint(value, index)));
     if (startsString) {
       containsString = true;
       inString = true;
