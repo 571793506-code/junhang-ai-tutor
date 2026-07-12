@@ -8,6 +8,7 @@ const DISTINCT_PROJECT_IDENTIFIER = /\b(?:gpt(?:[-\s]?5[.-]6|56)|openai|deepseek
 const MINIMAX_BRAND = /\bMiniMax\b/;
 const CONTEXTUAL_PROJECT_IDENTIFIER = /(?:\b(?:provider|model|route|runtime)\s*(?::|=)?\s*(?:terra|sol|minimax)\b|\b(?:terra|sol|minimax)\s+(?:provider|model|route|runtime)\b|\b(?:generated|powered)\s+by\s+(?:terra|sol|minimax)\b|\bresponse\s+from\s+(?:terra|sol|minimax)\b|\brouted\s+through\s+(?:the\s+)?(?:terra|sol|minimax)\b|\b(?:terra|sol|minimax)\s+(?:timeout|unavailable)\b|\b(?:timeout|unavailable)\s+(?:from|for|on)\s+(?:terra|sol|minimax)\b)/i;
 const KNOWN_INTERNAL_OBJECT_KEY = /["'](?:content|answer|studentAnswer|provider|providerId|model|raw|prompt|debug|learningSignal|profileEligibility|blockedReason|structureValid|modelRun|metadata)["']\s*:/i;
+const GENERIC_JSON_CONTAINER_OPENING = /(?:\{\s*"(?:\\.|[^"\\\r\n])*"\s*:|\[\s*(?:"|\{|\[))/;
 const QA_UNAVAILABLE_ANSWER = "AI 问答暂时不可用，请稍后再试。";
 const REQUIRED_SIGNAL_FIELDS = [
   "knowledgePoints",
@@ -87,6 +88,7 @@ function sanitizeQaTextDetailed(value, { maxLength = 2000, rejectInternal = true
   if (rejectInternal && (
     INTERNAL_LABEL.test(normalized)
     || KNOWN_INTERNAL_OBJECT_KEY.test(normalized)
+    || GENERIC_JSON_CONTAINER_OPENING.test(normalized)
     || hasProjectIdentifier(normalized)
     || hasEmbeddedJson(normalized)
   )) {

@@ -52,6 +52,15 @@ const structuredQaFragments = [
   `{"studentAnswer":"${"A".repeat(5000)}"}`,
   `prefix {"content":"${"B".repeat(5000)}"}`
 ];
+const genericJsonFragments = [
+  `{"unknown":"secret"`,
+  `prefix {"custom":42`,
+  `{"unknown":"${"A".repeat(5000)}"}`,
+  `["secret"`,
+  `["${"B".repeat(5000)}"]`,
+  `prefix [{"custom":"secret"`,
+  `prefix [["secret"`
+];
 
 test("buildQaActorContext confirms only a matching student session", () => {
   assert.deepEqual(
@@ -157,7 +166,8 @@ test("cleanQaResultForClient caps answers and rejects structured internal conten
     "gpt56",
     ...terraSolInternalForms,
     ...lowercaseMinimaxInternalForms,
-    ...structuredQaFragments
+    ...structuredQaFragments,
+    ...genericJsonFragments
   ]) {
     assert.deepEqual(cleanQaResultForClient({ available: true, studentAnswer }), {
       available: false,
@@ -252,7 +262,7 @@ test("cleanClassroomQaResultForClient validates voice values and caps visible te
 });
 
 test("cleanClassroomQaResultForClient rejects bounded structured fragments in transcript and reason", () => {
-  for (const fragment of structuredQaFragments) {
+  for (const fragment of [...structuredQaFragments, ...genericJsonFragments]) {
     const result = cleanClassroomQaResultForClient({
       qa: { available: true, studentAnswer: "安全回答" },
       transcript: fragment,

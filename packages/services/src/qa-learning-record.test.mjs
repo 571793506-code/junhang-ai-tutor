@@ -61,6 +61,15 @@ const structuredQaFragments = [
   `{"studentAnswer":"${"A".repeat(5000)}"}`,
   `prefix {"content":"${"B".repeat(5000)}"}`
 ];
+const genericJsonFragments = [
+  `{"unknown":"secret"`,
+  `prefix {"custom":42`,
+  `{"unknown":"${"A".repeat(5000)}"}`,
+  `["secret"`,
+  `["${"B".repeat(5000)}"]`,
+  `prefix [{"custom":"secret"`,
+  `prefix [["secret"`
+];
 
 function buildInput(overrides = {}) {
   return {
@@ -456,7 +465,8 @@ test("answerStudentQuestionService canonicalizes malicious runner answers before
     "gpt56",
     ...terraSolInternalForms,
     ...lowercaseMinimaxInternalForms,
-    ...structuredQaFragments
+    ...structuredQaFragments,
+    ...genericJsonFragments
   ];
 
   for (const studentAnswer of cases) {
@@ -512,6 +522,8 @@ test("answerStudentQuestionService preserves plain and blocked canonical answers
     ["Sol is the Latin name for the Sun; terra means earth.", validLearningSignal, true],
     ["The set is {1, 2, 3}.", validLearningSignal, true],
     ["Use [a, b] as a bracketed example.", validLearningSignal, true],
+    ["The interval is [0, 1).", validLearningSignal, true],
+    ["Compare the intervals (a, b] and [c, d).", validLearningSignal, true],
     ['The word "content" appears in quoted prose.', validLearningSignal, true],
     [blockedAnswer, { ...validLearningSignal, safetyStatus: "blocked" }, true]
   ];
