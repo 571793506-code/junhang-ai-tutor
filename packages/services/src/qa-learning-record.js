@@ -26,51 +26,6 @@ function isPlainObject(value) {
   return prototype === Object.prototype || prototype === null;
 }
 
-function hasEmbeddedJson(value) {
-  let candidates = 0;
-  let work = 0;
-  for (let start = 0; start < value.length; start += 1) {
-    const opening = value[start];
-    if (opening !== "{" && opening !== "[") continue;
-    candidates += 1;
-    if (candidates > 64) return true;
-    const stack = [opening];
-    let inString = false;
-    let escaped = false;
-    for (let index = start + 1; index < value.length; index += 1) {
-      work += 1;
-      if (work > 65536) return true;
-      const character = value[index];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (character === "\\") escaped = true;
-        else if (character === '"') inString = false;
-        continue;
-      }
-      if (character === '"') {
-        inString = true;
-        continue;
-      }
-      if (character === "{" || character === "[") {
-        stack.push(character);
-        continue;
-      }
-      if (character !== "}" && character !== "]") continue;
-      const expected = character === "}" ? "{" : "[";
-      if (stack.at(-1) !== expected) break;
-      stack.pop();
-      if (stack.length !== 0) continue;
-      try {
-        JSON.parse(value.slice(start, index + 1));
-        return true;
-      } catch {
-        break;
-      }
-    }
-  }
-  return false;
-}
-
 function hasProjectIdentifier(value) {
   return DISTINCT_PROJECT_IDENTIFIER.test(value)
     || MINIMAX_BRAND.test(value)
@@ -90,7 +45,6 @@ function sanitizeQaTextDetailed(value, { maxLength = 2000, rejectInternal = true
     || KNOWN_INTERNAL_OBJECT_KEY.test(normalized)
     || GENERIC_JSON_CONTAINER_OPENING.test(normalized)
     || hasProjectIdentifier(normalized)
-    || hasEmbeddedJson(normalized)
   )) {
     return { text: "", unchanged: false };
   }

@@ -522,6 +522,8 @@ test("answerStudentQuestionService preserves plain and blocked canonical answers
     ["Sol is the Latin name for the Sun; terra means earth.", validLearningSignal, true],
     ["The set is {1, 2, 3}.", validLearningSignal, true],
     ["Use [a, b] as a bracketed example.", validLearningSignal, true],
+    ["The list [1, 2, 3] has three numbers.", validLearningSignal, true],
+    ["The vector [-1, 0, 1] crosses zero.", validLearningSignal, true],
     ["The interval is [0, 1).", validLearningSignal, true],
     ["Compare the intervals (a, b] and [c, d).", validLearningSignal, true],
     ['The word "content" appears in quoted prose.', validLearningSignal, true],

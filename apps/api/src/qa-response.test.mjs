@@ -151,6 +151,28 @@ test("cleanQaResultForClient safely supports a plain legacy answer field", () =>
   });
 });
 
+test("QA response cleaners preserve ordinary list, vector, set, and interval notation", () => {
+  const cases = [
+    "The list [1, 2, 3] has three numbers.",
+    "The vector [-1, 0, 1] crosses zero.",
+    "The set is {1, 2, 3}.",
+    "Use [a, b] for the interval."
+  ];
+
+  for (const text of cases) {
+    assert.equal(cleanQaResultForClient({ available: true, studentAnswer: text }).answer, text);
+    const classroom = cleanClassroomQaResultForClient({
+      qa: { available: true, studentAnswer: text },
+      transcript: text,
+      voice: { reason: text }
+    });
+    assert.equal(classroom.available, true);
+    assert.equal(classroom.answer, text);
+    assert.equal(classroom.transcript, text);
+    assert.equal(classroom.voice.reason, text);
+  }
+});
+
 test("cleanQaResultForClient caps answers and rejects structured internal content", () => {
   const longResult = cleanQaResultForClient({
     available: true,
