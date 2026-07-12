@@ -70,6 +70,20 @@ const genericJsonFragments = [
   `prefix [{"custom":"secret"`,
   `prefix [["secret"`
 ];
+const unsafeSemanticArrays = [
+  `[true, false]`,
+  `prefix [true, false] suffix`,
+  `[true`,
+  `[null]`,
+  `[1, "secret"]`,
+  `[1, null]`,
+  `[1, null`,
+  `[1, a]`,
+  `[1e309]`,
+  `[]`,
+  `[[[1]]]`,
+  `[[1, 2], [3, 4]${" ".repeat(5000)}]`
+];
 
 function buildInput(overrides = {}) {
   return {
@@ -425,6 +439,35 @@ test("answerStudentQuestionService persists only approved QA metadata", async ()
   });
 });
 
+test("answerStudentQuestionService persists numeric vectors and matrices as eligible text", async () => {
+  for (const studentAnswer of [
+    "The vector [-1, 0, 1] crosses zero.",
+    "The matrix [[1, 2], [3, 4]] has two rows."
+  ]) {
+    let qaSessionData;
+    const qaRunner = async () => ({
+      ...buildResult(),
+      studentAnswer,
+      answer: studentAnswer,
+      modelRun: null
+    });
+    const prisma = {
+      qaSession: {
+        create: async ({ data }) => {
+          qaSessionData = data;
+          return { id: "qa1" };
+        }
+      }
+    };
+
+    await answerStudentQuestionService({}, buildInput({ question: "问题" }), { qaRunner, prisma });
+
+    assert.equal(qaSessionData.answer, studentAnswer);
+    assert.equal(qaSessionData.metadata.available, true);
+    assert.equal(qaSessionData.metadata.profileEligibility, true);
+  }
+});
+
 test("answerStudentQuestionService uses the safe legacy answer and honors persist false", async () => {
   const qaRunner = async () => ({
     ...buildResult(),
@@ -466,7 +509,8 @@ test("answerStudentQuestionService canonicalizes malicious runner answers before
     ...terraSolInternalForms,
     ...lowercaseMinimaxInternalForms,
     ...structuredQaFragments,
-    ...genericJsonFragments
+    ...genericJsonFragments,
+    ...unsafeSemanticArrays
   ];
 
   for (const studentAnswer of cases) {
@@ -524,6 +568,7 @@ test("answerStudentQuestionService preserves plain and blocked canonical answers
     ["Use [a, b] as a bracketed example.", validLearningSignal, true],
     ["The list [1, 2, 3] has three numbers.", validLearningSignal, true],
     ["The vector [-1, 0, 1] crosses zero.", validLearningSignal, true],
+    ["The matrix [[1, 2], [3, 4]] has two rows.", validLearningSignal, true],
     ["The interval is [0, 1).", validLearningSignal, true],
     ["Compare the intervals (a, b] and [c, d).", validLearningSignal, true],
     ['The word "content" appears in quoted prose.', validLearningSignal, true],

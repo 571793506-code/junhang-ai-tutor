@@ -8,7 +8,10 @@ const DISTINCT_PROJECT_IDENTIFIER = /\b(?:gpt(?:[-\s]?5[.-]6|56)|openai|deepseek
 const MINIMAX_BRAND = /\bMiniMax\b/;
 const CONTEXTUAL_PROJECT_IDENTIFIER = /(?:\b(?:provider|model|route|runtime)\s*(?::|=)?\s*(?:terra|sol|minimax)\b|\b(?:terra|sol|minimax)\s+(?:provider|model|route|runtime)\b|\b(?:generated|powered)\s+by\s+(?:terra|sol|minimax)\b|\bresponse\s+from\s+(?:terra|sol|minimax)\b|\brouted\s+through\s+(?:the\s+)?(?:terra|sol|minimax)\b|\b(?:terra|sol|minimax)\s+(?:timeout|unavailable)\b|\b(?:timeout|unavailable)\s+(?:from|for|on)\s+(?:terra|sol|minimax)\b)/i;
 const KNOWN_INTERNAL_OBJECT_KEY = /["'](?:content|answer|studentAnswer|provider|providerId|model|raw|prompt|debug|learningSignal|profileEligibility|blockedReason|structureValid|modelRun|metadata)["']\s*:/i;
-const GENERIC_JSON_CONTAINER_OPENING = /(?:\{\s*"(?:\\.|[^"\\\r\n])*"\s*:|\[\s*(?:"|\{|\[))/;
+const GENERIC_JSON_OBJECT_OPENING = /\{\s*"(?:\\.|[^"\\\r\n])*"\s*:/;
+const HALF_OPEN_INTERVAL = /^\[\s*(?:[A-Za-z]|-?(?:0|[1-9]\d*)(?:\.\d+)?)\s*,\s*(?:[A-Za-z]|-?(?:0|[1-9]\d*)(?:\.\d+)?)\s*\)/;
+const STRUCTURED_ARRAY_TOKEN = /\b(?:true|false|null|NaN|Infinity)\b/;
+const JSON_NUMBER_FIRST = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?(?=\s*(?:,|\]|$))/;
 const QA_UNAVAILABLE_ANSWER = "AI 问答暂时不可用，请稍后再试。";
 const REQUIRED_SIGNAL_FIELDS = [
   "knowledgePoints",
@@ -24,6 +27,94 @@ function isPlainObject(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function isFiniteNumericVector(value) {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every((item) => typeof item === "number" && Number.isFinite(item));
+}
+
+function isFiniteNumericMatrix(value) {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every((row) => isFiniteNumericVector(row));
+}
+
+function malformedArrayIsUnsafe(source, complete) {
+  const inner = source.slice(1, complete ? -1 : undefined).trim();
+  if (complete && !inner) return true;
+  if (STRUCTURED_ARRAY_TOKEN.test(inner)) return true;
+  if (/["{\[]/.test(inner)) return true;
+  return JSON_NUMBER_FIRST.test(inner);
+}
+
+function inspectArrayAt(value, start) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let containsString = false;
+  let containsObject = false;
+
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      containsString = true;
+      inString = true;
+      continue;
+    }
+    if (character === "{") containsObject = true;
+    if (character === "[") {
+      depth += 1;
+      if (depth > 2) return { unsafe: true, end: index };
+      continue;
+    }
+    if (character !== "]") continue;
+    depth -= 1;
+    if (depth !== 0) continue;
+
+    const source = value.slice(start, index + 1);
+    if (containsString || containsObject) return { unsafe: true, end: index };
+    try {
+      const parsed = JSON.parse(source);
+      return {
+        unsafe: !isFiniteNumericVector(parsed) && !isFiniteNumericMatrix(parsed),
+        end: index
+      };
+    } catch {
+      return { unsafe: malformedArrayIsUnsafe(source, true), end: index };
+    }
+  }
+
+  const source = value.slice(start);
+  return {
+    unsafe: containsString
+      || containsObject
+      || depth > 1
+      || malformedArrayIsUnsafe(source, false),
+    end: value.length - 1
+  };
+}
+
+function hasUnsafeArrayContent(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== "[") continue;
+    const interval = value.slice(index).match(HALF_OPEN_INTERVAL);
+    if (interval) {
+      index += interval[0].length - 1;
+      continue;
+    }
+    const inspected = inspectArrayAt(value, index);
+    if (inspected.unsafe) return true;
+    index = inspected.end;
+  }
+  return false;
 }
 
 function hasProjectIdentifier(value) {
@@ -43,7 +134,8 @@ function sanitizeQaTextDetailed(value, { maxLength = 2000, rejectInternal = true
   if (rejectInternal && (
     INTERNAL_LABEL.test(normalized)
     || KNOWN_INTERNAL_OBJECT_KEY.test(normalized)
-    || GENERIC_JSON_CONTAINER_OPENING.test(normalized)
+    || GENERIC_JSON_OBJECT_OPENING.test(normalized)
+    || hasUnsafeArrayContent(normalized)
     || hasProjectIdentifier(normalized)
   )) {
     return { text: "", unchanged: false };

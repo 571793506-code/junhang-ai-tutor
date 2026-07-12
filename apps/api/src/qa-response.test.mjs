@@ -61,6 +61,20 @@ const genericJsonFragments = [
   `prefix [{"custom":"secret"`,
   `prefix [["secret"`
 ];
+const unsafeSemanticArrays = [
+  `[true, false]`,
+  `prefix [true, false] suffix`,
+  `[true`,
+  `[null]`,
+  `[1, "secret"]`,
+  `[1, null]`,
+  `[1, null`,
+  `[1, a]`,
+  `[1e309]`,
+  `[]`,
+  `[[[1]]]`,
+  `[[1, 2], [3, 4]${" ".repeat(5000)}]`
+];
 
 test("buildQaActorContext confirms only a matching student session", () => {
   assert.deepEqual(
@@ -155,6 +169,7 @@ test("QA response cleaners preserve ordinary list, vector, set, and interval not
   const cases = [
     "The list [1, 2, 3] has three numbers.",
     "The vector [-1, 0, 1] crosses zero.",
+    "The matrix [[1, 2], [3, 4]] has two rows.",
     "The set is {1, 2, 3}.",
     "Use [a, b] for the interval."
   ];
@@ -189,7 +204,8 @@ test("cleanQaResultForClient caps answers and rejects structured internal conten
     ...terraSolInternalForms,
     ...lowercaseMinimaxInternalForms,
     ...structuredQaFragments,
-    ...genericJsonFragments
+    ...genericJsonFragments,
+    ...unsafeSemanticArrays
   ]) {
     assert.deepEqual(cleanQaResultForClient({ available: true, studentAnswer }), {
       available: false,
@@ -284,7 +300,7 @@ test("cleanClassroomQaResultForClient validates voice values and caps visible te
 });
 
 test("cleanClassroomQaResultForClient rejects bounded structured fragments in transcript and reason", () => {
-  for (const fragment of [...structuredQaFragments, ...genericJsonFragments]) {
+  for (const fragment of [...structuredQaFragments, ...genericJsonFragments, ...unsafeSemanticArrays]) {
     const result = cleanClassroomQaResultForClient({
       qa: { available: true, studentAnswer: "安全回答" },
       transcript: fragment,
