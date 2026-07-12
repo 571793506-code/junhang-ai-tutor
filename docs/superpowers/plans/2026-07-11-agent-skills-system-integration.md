@@ -988,6 +988,12 @@ git commit -m "docs: close agent skills system integration"
 - GREEN after the final fixes: the focused suites passed `64/64`; the profile suite also passed `38/38` with the process timezone forced to UTC; all service tests passed `64/64`; `check:api`, Web typecheck, Mini Program JS, and `git diff --check` exited `0`.
 - Live `check:services` exited `0` in 60588 ms with successful Q&A, task, assessment, and dictation results; assessment used no dynamic fallback. The final quality-fix commit SHA is intentionally recorded only by Git after commit creation.
 
+### Public Database Failure Follow-up
+
+- TDD RED on baseline `5ff90f9`: the focused database-status suite ran 2 tests with 2 expected failures proving that no public payload helper existed and `requireDatabase` still exposed the raw internal status object.
+- GREEN after the shared middleware fix: the focused DB/Q&A/profile/term suites passed `66/66`; all service tests passed `64/64`; `check:api`, Web typecheck, Mini Program JS, and `git diff --check` exited `0`.
+- Live `check:services` exited `0` in 78512 ms with successful Q&A, task, assessment, and dictation results; assessment used no dynamic fallback. The database-failure fix commit SHA is intentionally recorded only by Git after commit creation.
+
 ## Task 10: Remove The Local Sol Worktree After Verification
 
 **Files:**

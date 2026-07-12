@@ -335,7 +335,17 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 学生 `POST /api/ai/qa` 和课堂平板 `POST /api/classroom/voice-qa` 的成功响应只包含 `ok` 与经过服务端清理的 `result`，不返回数据库状态、`persistence` 或内部失败原因。对允许在不落库时继续执行的安全问答链路，数据库不可用可能使内部持久化停用，但回答仍按 AI 可用性返回；学生和课堂平板不会看到持久化诊断或数据库内部原因。
 
-必须落库的接口会返回 `503 DATABASE_UNAVAILABLE`。
+必须落库的接口会返回稳定的公共 `503 DATABASE_UNAVAILABLE` 响应：
+
+```json
+{
+  "ok": false,
+  "error": "DATABASE_UNAVAILABLE",
+  "message": "数据库当前不可用，请稍后再试。"
+}
+```
+
+所有使用 `requireDatabase` 的接口都遵守该公共失败结构，包括学生端和课堂平板端接口。响应不得包含 `database`、`checkedAt`、`checkedAtMs`、内部 `reason`、原始数据库错误、连接 URL 或配置详情。
 
 
 ## 2026-05-26 真实数据联通范围

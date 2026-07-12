@@ -2,6 +2,14 @@ import { prisma } from "@junhang/db";
 
 let cached = null;
 
+export function publicDatabaseUnavailablePayload() {
+  return {
+    ok: false,
+    error: "DATABASE_UNAVAILABLE",
+    message: "数据库当前不可用，请稍后再试。"
+  };
+}
+
 export async function checkDatabaseStatus({ force = false } = {}) {
   const now = Date.now();
   if (!force && cached && now - cached.checkedAtMs < 2500) return cached;
@@ -39,12 +47,7 @@ export async function checkDatabaseStatus({ force = false } = {}) {
 export async function requireDatabase(req, res, next) {
   const status = await checkDatabaseStatus();
   if (!status.ok) {
-    return res.status(503).json({
-      ok: false,
-      error: "DATABASE_UNAVAILABLE",
-      message: "数据库当前不可用，真实落库操作暂时不能执行。",
-      database: status
-    });
+    return res.status(503).json(publicDatabaseUnavailablePayload());
   }
   next();
 }
