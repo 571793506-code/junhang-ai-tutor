@@ -84,10 +84,10 @@ npm.cmd run check:api
 
 ## AI 生成与修复职责
 
-模型原始输出不得直接传给任何端或写入正式资产。服务层必须负责 parse、normalize、validate、repair、安全检查和按角色过滤字段，并按任务类型决定即时返回或进入教师复核。
+模型原始输出不得直接传给任何端或写入正式资产。服务层必须负责 parse、normalize、validate、repair、模型安全字段或项目安全规则校验和按角色过滤字段，并按任务类型决定即时返回或进入教师复核。
 
-- 学生 AI 问答固定由一次 Terra 低推理文本调用同时生成 `studentAnswer + learningSignal`；安全且结构有效的回答即时返回，不需要教师逐条预审，问答链路不得调用 Sol。
-- 问答的 actor、身份确认和档案准入由服务端计算；只有精确符合 `qa-learning-signal-v1` 的合格记录可进入学生档案辅助分析。
+- 学生 AI 问答最多执行一次 Terra 低推理文本调用；Terra 不可用时调用数为 0，且问答链路绝不调用 Sol。实际调用成功时，同一次调用生成 `studentAnswer + learningSignal`；安全且结构有效的回答即时返回，不需要教师逐条预审。
+- 模型在 `learningSignal` 中输出结构化 `safetyStatus`；服务端负责校验和规范化该信号，并计算最终 actor、身份确认、可用性、结构有效性和档案准入。只有精确符合 `qa-learning-signal-v1` 的合格记录可进入学生档案辅助分析。
 - 生成类和批改类输出仍是草稿，必须经过教师复核后才能发布、归档或正式导出。
 - 周/月档案、阶段报告、家长摘要和正式打印/PDF 必须经过教师确认。
 

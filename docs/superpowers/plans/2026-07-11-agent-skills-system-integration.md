@@ -4,7 +4,7 @@
 
 **Goal:** 在一个可追踪的集成分支中合入已验证的 Sol 升级链路，建立可自动发现的项目 Skills 和双目录同步守卫，并让安全、身份确认的学生问答成为学生档案的结构化辅助证据。
 
-**Architecture:** 保留 `skills/*/SKILLS.md` 和 `docs/41-prompt-context-engineering-playbook.md` 作为项目规则正文，新增 `.agents/skills/*/SKILL.md` 薄路由层和 `check:skills` 自动守卫。AI 问答继续由 Terra 低推理单次调用即时返回，但模型输出先解析为 `studentAnswer + learningSignal`，服务层再根据会话角色、身份、安全和结构完整性计算档案准入；第一版复用 `QaSession.metadata`，不做数据库迁移。`miniapp-1` 仍是微信开发者工具运行目录，`apps/miniprogram` 仍是 Git 镜像，反向同步必须显式执行并拒绝覆盖脏镜像。
+**Architecture:** 保留 `skills/*/SKILLS.md` 和 `docs/41-prompt-context-engineering-playbook.md` 作为项目规则正文，新增 `.agents/skills/*/SKILL.md` 薄路由层和 `check:skills` 自动守卫。AI 问答最多执行一次 Terra 低推理文本调用，Terra 不可用时零调用且绝不调用 Sol；实际调用成功时，同一次调用返回 `studentAnswer + learningSignal`。服务层校验和规范化模型 `safetyStatus`，再计算最终会话角色、身份、可用性、结构完整性和档案准入；第一版复用 `QaSession.metadata`，不做数据库迁移。`miniapp-1` 仍是微信开发者工具运行目录，`apps/miniprogram` 仍是 Git 镜像，反向同步必须显式执行并拒绝覆盖脏镜像。
 
 **Tech Stack:** Node.js 22+、ES modules、Node test runner、Express、Prisma JSON metadata、PowerShell/cmd、Git worktree、Codex repository Skills。
 
@@ -90,8 +90,8 @@ Expected: only the three approved rule paths appear. Do not proceed if another s
 Replace the universal “all model output requires teacher review” wording with these task-aware rules:
 
 ```markdown
-- 学生 AI 问答在服务层完成结构解析、内容安全检查和普通端字段过滤后可以即时返回，不需要教师逐条预审。
-- 只有精确匹配 `qa-learning-signal-v1`，并由服务端计算 actor、身份确认和 `profileEligibility`，且成功、安全、结构有效、来源日期有效的学生/课堂问答记录可以进入学生档案辅助分析；教师测试、匿名/未确认课堂问答、不可用、不安全、结构异常、日期无效和 legacy 记录不得进入公开证据。
+- 学生 AI 问答在服务层完成结构解析、模型 `safetyStatus` 校验和规范化以及普通端字段过滤后可以即时返回，不需要教师逐条预审。
+- 只有精确匹配 `qa-learning-signal-v1`，模型 `safetyStatus` 经服务端校验和规范化，并由服务端计算最终 actor、身份确认、可用性、结构有效性和 `profileEligibility`，且来源日期有效的学生/课堂问答记录可以进入学生档案辅助分析；教师测试、匿名/未确认课堂问答、不可用、不安全、结构异常、日期无效和 legacy 记录不得进入公开证据。
 - 小测、练习、试卷、批改、周/月档案、阶段报告、家长摘要和正式导出仍是草稿流程，必须由教师确认后才能发布、打印、归档或同步给学生/家长。
 - 一个唯一来源问答不能提高掌握度、分数或形成强结论；同一标准化 `subject + knowledgePoint` 的重复信号可形成 `supported`，但仍是辅助证据。教师确认的非问答证据优先，冲突只生成教师复核备注。
 ```
@@ -874,7 +874,7 @@ git commit -m "feat: aggregate eligible qa profile evidence"
 
 The Playbook and API contract must state:
 
-- one Terra low-reasoning call returns `studentAnswer + learningSignal`;
+- at most one Terra low-reasoning text call; zero provider calls when Terra is unavailable; never Sol; when the call succeeds, that same call returns `studentAnswer + learningSignal`;
 - successful safe answers return immediately without teacher pre-review;
 - only server-computed eligible signals enter profile analysis;
 - teacher tests, anonymous/unconfirmed classroom, unavailable, unsafe, malformed, and legacy records are excluded from public evidence;
@@ -970,7 +970,8 @@ git commit -m "docs: close agent skills system integration"
 - Step 5 E2E: `check:content-context` exited `0`; all 16 reported checks passed, including teacher auth, protected/input-path guards, content-context injection, draft export, pre-review print block, teacher acceptance, two final PDF assets with HTTP 200, and content-index cleanup. Scope remained `link-guard`; it does not claim generation quality.
 - Initial `workspace:guard` on `5fa2325` exited `1` only for the known local condition: 71 ignored Task 3 runtime-residue files and 57 approved ignored local PDF/PNG/helper assets. These files remain untouched and untracked; the branch has no upstream. Task 9 integrity evidence below must preserve this classification rather than deleting or staging the files.
 - Step 6 integrity classification: `git diff --check`, `git status --short --branch`, and `git log --oneline --decorate -12` exited `0`; status listed exactly the nine Task 9 owned documentation files and no untracked/staged paths. `workspace:guard` exited `1`, so this checkbox remains open and Task 9 is `DONE_WITH_CONCERNS`: it reported the expected nine visible Task 9 docs, 75 ignored runtime-residue files (the preserved 71 Task 3 files plus four `check:content-context` fixtures), the approved 57 ignored local assets, and no upstream. No ignored files or assets were deleted or staged.
-- Step 7 commit: explicit staging contained exactly the nine owned documentation files; `git diff --cached --check` exited `0`; commit `docs: close agent skills system integration` succeeded. The final SHA is reported from Git after this plan-only amend because a commit cannot contain its own stable SHA.
+- Step 7 commit: explicit staging contained exactly the nine owned documentation files; `git diff --cached --check` exited `0`; commit `59647d7` (`docs: close agent skills system integration`) succeeded.
+- Final acceptance wording follow-up: commit `a8cfe8e` (`docs: align qa acceptance criteria`) aligned the exact schema, valid-date, unique-source, normalized aggregation, non-Q&A priority, and teacher conflict-note wording.
 
 ## Task 10: Remove The Local Sol Worktree After Verification
 
@@ -1014,8 +1015,8 @@ Expected: only intended worktrees remain, Sol branch still exists, and the integ
 3. Nine `.agents/skills` routes are discoverable, point to existing project Playbooks, and pass `check:skills`.
 4. No active project route contains `ai-video-production`; ordinary media assets and user-level video Skills remain untouched.
 5. `check:miniprogram-sync` is read-only; reverse writes are explicit, path-contained, config-excluding, and refused when `apps/miniprogram` is dirty.
-6. Student Q&A returns immediately after service safety handling and never waits for teacher review or Sol.
-7. Only records with exact `schemaVersion=qa-learning-signal-v1`, server-computed actor, identity confirmation, and `profileEligibility`, plus a successful, safe, structurally valid result and valid source date, enter profile analysis.
+6. Student Q&A makes at most one Terra low-reasoning text call, makes zero provider calls when Terra is unavailable, never calls Sol, and returns a successful safe structured answer immediately without teacher pre-review.
+7. Only records with exact `schemaVersion=qa-learning-signal-v1`, a server-validated and normalized model `safetyStatus`, server-computed actor, identity confirmation, availability, structural validity, and `profileEligibility`, plus a valid source date, enter profile analysis.
 8. Teacher tests, anonymous/unconfirmed classroom, unavailable, unsafe, malformed, invalid-date, and legacy Q&A cannot enter public profile evidence.
 9. One unique-source Q&A cannot raise mastery, score, or form a strong conclusion. Repeated signals for the same normalized `subject + knowledgePoint` may become `supported` but remain auxiliary; confirmed non-Q&A evidence has priority, conflicts create teacher review notes, and formal outputs still require teacher confirmation.
 10. Student, parent, classroom, and public-screen responses expose no provider, model, internal prompt, raw output, learning signal, eligibility, blocked reason, or escalation metadata.

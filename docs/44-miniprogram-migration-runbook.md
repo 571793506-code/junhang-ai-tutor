@@ -131,7 +131,7 @@
 - `/api/review/submissions`
 - `/api/classroom/voice-qa`
 
-`/api/ai/qa` 和 `/api/classroom/voice-qa` 均由服务端执行一次 Terra 低推理问答调用，安全且结构有效时即时返回，且从不调用 Sol。小程序只消费 `available`、`mode`、`answer` 及课堂语音白名单字段，不接收 `learningSignal` 或内部模型/准入元数据。
+`/api/ai/qa` 和 `/api/classroom/voice-qa` 均由服务端最多执行一次 Terra 低推理文本调用；Terra 不可用时调用数为 0，且绝不调用 Sol。实际调用成功时，同一次调用返回 `studentAnswer + learningSignal`；服务端校验和规范化模型 `safetyStatus`，并计算最终 actor、身份、可用性、结构和准入。小程序只消费 `available`、`mode`、`answer` 及课堂语音白名单字段，不接收 `learningSignal` 或内部模型/准入元数据。
 
 学生档案页面只读取教师已发布的周/月档案或阶段报告状态；问答准入、证据优先级、冲突备注和正式报告确认全部留在 API/服务层，不新增前端业务逻辑。
 

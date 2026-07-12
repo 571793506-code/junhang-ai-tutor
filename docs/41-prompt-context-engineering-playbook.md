@@ -111,9 +111,9 @@
 
 ### 3.1 学生问答的单次调用契约
 
-- 每次学生/课堂问答严格执行一次 `gpt-5.6-terra` 低推理文本调用，由同一次调用输出严格 JSON `studentAnswer + learningSignal`；问答不调用 Sol，也不在失败后串接第三个文本模型。
+- 每次学生/课堂问答最多执行一次 `gpt-5.6-terra` 低推理文本调用；Terra 不可用时调用数为 0，且问答绝不调用 Sol，也不在失败后串接第三个文本模型。实际调用成功时，由同一次调用输出严格 JSON `studentAnswer + learningSignal`。
 - 安全、结构有效且可用的 `studentAnswer` 经服务层白名单过滤后立即返回，不等待教师逐条预审。
-- 服务端根据会话计算 actor、身份确认、可用性、安全、结构完整性和 `profileEligibility`；客户端和模型都不能决定最终准入。只有精确符合 `schemaVersion=qa-learning-signal-v1` 的合格学生或已确认课堂记录进入档案辅助分析。
+- 模型在 `learningSignal` 中输出结构化 `safetyStatus`；服务端校验和规范化该信号，并根据会话计算最终 actor、身份确认、可用性、结构完整性和 `profileEligibility`。客户端和模型都不能决定最终准入；只有精确符合 `schemaVersion=qa-learning-signal-v1` 的合格学生或已确认课堂记录进入档案辅助分析。
 - 教师测试、匿名或身份未确认课堂、不可用、不安全、结构异常、日期无效和 legacy 记录不得进入公开证据，只能以最小原因摘要进入教师侧 `blockedEvidence`。
 - 学习者响应不得包含 `learningSignal`、供应商、模型、路由、raw、prompt、debug、准入或阻断元数据；课堂语音响应只能额外包含白名单 `transcript` 和 `voice` 状态。
 - 单条来源问答不能提高掌握度、分数或形成强结论；同知识点重复信号可形成 `supported` 但仍是辅助证据。教师确认的批改、错题、任务或课堂证据优先，冲突只生成教师复核备注。

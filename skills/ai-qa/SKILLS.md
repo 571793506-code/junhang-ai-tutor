@@ -17,9 +17,9 @@
 
 ## 运行与档案契约
 
-- 每次问答严格执行一次 `gpt-5.6-terra` 低推理文本调用，由同一次调用生成严格结构化的 `studentAnswer + learningSignal`；问答在不可用、不安全或结构异常时也不得调用 Sol 或第三个文本模型。
+- 每次问答最多执行一次 `gpt-5.6-terra` 低推理文本调用；Terra 不可用时调用数为 0，且问答绝不调用 Sol 或第三个文本模型。实际调用成功时，由同一次调用生成严格结构化的 `studentAnswer + learningSignal`。
 - 安全、结构有效且可用的 `studentAnswer` 经服务层过滤后立即返回，不进入教师逐条预审队列。
-- actor、身份确认、可用性、安全、结构有效性和 `profileEligibility` 必须由服务端计算，不能信任客户端或模型给出的准入布尔值。只有精确符合 `schemaVersion=qa-learning-signal-v1` 的合格学生或已确认课堂记录进入档案辅助分析。
+- 模型在 `learningSignal` 中输出结构化 `safetyStatus`；服务端校验和规范化该信号，并计算最终 actor、身份确认、可用性、结构有效性和 `profileEligibility`，不能信任客户端或模型给出的准入布尔值。只有精确符合 `schemaVersion=qa-learning-signal-v1` 的合格学生或已确认课堂记录进入档案辅助分析。
 - 教师测试、匿名或身份未确认的课堂问答、不可用、不安全、结构异常、日期无效和 legacy 记录不得进入公开证据；教师侧只保留 ID、类型、日期和固定原因等最小 `blockedEvidence` 摘要。
 - 学生问答响应只允许返回 `available`、`mode` 和 `answer`；课堂语音响应可额外返回 `transcript` 与白名单 `voice` 状态。学习信号、供应商、模型、路由、原始输出、prompt、debug、准入和阻断元数据均不得返回学习者端。
 - 单条来源问答不能提高掌握度、分数或形成“已掌握”“退步”“薄弱点”等强结论；同知识点重复信号可形成 `supported`，但仍是辅助证据。教师确认的批改、错题、任务或课堂证据优先，冲突只生成教师复核备注。
