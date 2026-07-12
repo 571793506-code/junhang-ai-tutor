@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { answerStudentQuestionService } from "./index.js";
-import { buildQaLearningRecord } from "./qa-learning-record.js";
+import { buildQaLearningRecord, sanitizeQaText } from "./qa-learning-record.js";
 
 const validLearningSignal = {
   knowledgePoints: ["小数意义"],
@@ -415,6 +415,9 @@ test("answerStudentQuestionService preserves plain and blocked canonical answers
     ["A model helps us explain a math pattern.", validLearningSignal, true],
     ["The words deep seek are separate ordinary words.", validLearningSignal, true],
     ["The minimax algorithm explores game trees.", validLearningSignal, true],
+    ["The minimax algorithm generated the best move.", validLearningSignal, true],
+    ["Terra generated a map for the geography lesson.", validLearningSignal, true],
+    ["Sol generated heat in the story about the Sun.", validLearningSignal, true],
     ["Sol is the Latin name for the Sun; terra means earth.", validLearningSignal, true],
     [blockedAnswer, { ...validLearningSignal, safetyStatus: "blocked" }, true]
   ];
@@ -452,4 +455,32 @@ test("answerStudentQuestionService caps canonical answers by well-formed code po
   assert.equal(result.studentAnswer.includes("\uD800"), false);
   assert.equal(result.answer, result.studentAnswer);
   assert.equal(result.available, true);
+});
+
+test("sanitizeQaText bounds normalization work before processing hostile input", { concurrency: false }, () => {
+  const descriptor = Object.getOwnPropertyDescriptor(String.prototype, "toWellFormed");
+  const original = descriptor.value;
+  let largestNormalizedInput = 0;
+  Object.defineProperty(String.prototype, "toWellFormed", {
+    ...descriptor,
+    value() {
+      const source = this.valueOf();
+      largestNormalizedInput = Math.max(largestNormalizedInput, source.length);
+      return original.call(source);
+    }
+  });
+
+  try {
+    const maxLength = 80;
+    const hugeSuffix = "😀".repeat(600_000);
+    const visible = sanitizeQaText(hugeSuffix, { maxLength });
+    assert.equal(Array.from(visible).length, maxLength);
+    assert.equal(visible, "😀".repeat(maxLength));
+
+    const blocked = sanitizeQaText(`前缀 providerId: gpt56 ${hugeSuffix}`, { maxLength });
+    assert.equal(blocked, "");
+    assert.equal(largestNormalizedInput <= maxLength * 2 + 128, true);
+  } finally {
+    Object.defineProperty(String.prototype, "toWellFormed", descriptor);
+  }
 });

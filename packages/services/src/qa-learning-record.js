@@ -6,12 +6,7 @@ const CONFIDENCE_LEVELS = new Set(["low", "medium", "high"]);
 const INTERNAL_LABEL = /(?:^|[\s,;，；([{])["']?(?:provider(?:Id)?|model|raw|prompt|debug)["']?\s*[:=：＝]/i;
 const DISTINCT_PROJECT_IDENTIFIER = /\b(?:gpt(?:[-\s]?5[.-]6|56)|openai|deepseek)\b/i;
 const MINIMAX_BRAND = /\bMiniMax\b/;
-const PROVIDER_CONTEXT = "provider|model|api|route|routed|routing|response|runtime|generated|powered|unavailable|timeout|failed";
-const CONTEXTUAL_PROJECT_IDENTIFIER = new RegExp(
-  `(?:\\b(?:${PROVIDER_CONTEXT})\\b[\\s\\S]{0,32}\\b(?:terra|sol|minimax)\\b|` +
-  `\\b(?:terra|sol|minimax)\\b[\\s\\S]{0,32}\\b(?:${PROVIDER_CONTEXT})\\b)`,
-  "i"
-);
+const CONTEXTUAL_PROJECT_IDENTIFIER = /(?:\b(?:provider|model|route|runtime)\s*(?::|=)?\s*(?:terra|sol|minimax)\b|\b(?:terra|sol|minimax)\s+(?:provider|model|route|runtime)\b|\brouted\s+through\s+(?:the\s+)?(?:terra|sol)\b|\b(?:terra|sol)\s+(?:timeout|unavailable)\b|\b(?:timeout|unavailable)\s+(?:from|for|on)\s+(?:terra|sol)\b|\b(?:generated|powered)\s+by\s+minimax\b)/i;
 const QA_UNAVAILABLE_ANSWER = "AI 问答暂时不可用，请稍后再试。";
 const REQUIRED_SIGNAL_FIELDS = [
   "knowledgePoints",
@@ -82,7 +77,10 @@ function hasProjectIdentifier(value) {
 
 export function sanitizeQaText(value, { maxLength = 2000, rejectInternal = true } = {}) {
   if (typeof value !== "string") return "";
+  if (!Number.isSafeInteger(maxLength) || maxLength <= 0) return "";
+  const inspectionCodeUnits = Math.min(value.length, maxLength * 2 + 128);
   const text = value
+    .slice(0, inspectionCodeUnits)
     .toWellFormed()
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .trim();
