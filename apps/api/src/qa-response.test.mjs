@@ -30,6 +30,28 @@ const lowercaseMinimaxInternalForms = [
   "minimax unavailable",
   "timeout from minimax"
 ];
+const knownStructuredKeys = [
+  "content",
+  "answer",
+  "studentAnswer",
+  "provider",
+  "providerId",
+  "model",
+  "raw",
+  "prompt",
+  "debug",
+  "learningSignal",
+  "profileEligibility",
+  "blockedReason",
+  "structureValid",
+  "modelRun",
+  "metadata"
+];
+const structuredQaFragments = [
+  ...knownStructuredKeys.map((key) => `{"${key}":"secret"`),
+  `{"studentAnswer":"${"A".repeat(5000)}"}`,
+  `prefix {"content":"${"B".repeat(5000)}"}`
+];
 
 test("buildQaActorContext confirms only a matching student session", () => {
   assert.deepEqual(
@@ -134,7 +156,8 @@ test("cleanQaResultForClient caps answers and rejects structured internal conten
     "providerId: gpt56",
     "gpt56",
     ...terraSolInternalForms,
-    ...lowercaseMinimaxInternalForms
+    ...lowercaseMinimaxInternalForms,
+    ...structuredQaFragments
   ]) {
     assert.deepEqual(cleanQaResultForClient({ available: true, studentAnswer }), {
       available: false,
@@ -226,6 +249,18 @@ test("cleanClassroomQaResultForClient validates voice values and caps visible te
     voice: { reason: "稍后重试".repeat(100) }
   }).voice.reason;
   assert.equal(Array.from(longReason).length, 240);
+});
+
+test("cleanClassroomQaResultForClient rejects bounded structured fragments in transcript and reason", () => {
+  for (const fragment of structuredQaFragments) {
+    const result = cleanClassroomQaResultForClient({
+      qa: { available: true, studentAnswer: "安全回答" },
+      transcript: fragment,
+      voice: { reason: fragment }
+    });
+    assert.equal(result.transcript, "");
+    assert.equal(result.voice.reason, null);
+  }
 });
 
 test("cleanClassroomQaResultForClient allows only explicit statuses and safe audio URLs", () => {

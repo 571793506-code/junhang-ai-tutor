@@ -39,6 +39,28 @@ const lowercaseMinimaxInternalForms = [
   "minimax unavailable",
   "timeout from minimax"
 ];
+const knownStructuredKeys = [
+  "content",
+  "answer",
+  "studentAnswer",
+  "provider",
+  "providerId",
+  "model",
+  "raw",
+  "prompt",
+  "debug",
+  "learningSignal",
+  "profileEligibility",
+  "blockedReason",
+  "structureValid",
+  "modelRun",
+  "metadata"
+];
+const structuredQaFragments = [
+  ...knownStructuredKeys.map((key) => `{"${key}":"secret"`),
+  `{"studentAnswer":"${"A".repeat(5000)}"}`,
+  `prefix {"content":"${"B".repeat(5000)}"}`
+];
 
 function buildInput(overrides = {}) {
   return {
@@ -433,7 +455,8 @@ test("answerStudentQuestionService canonicalizes malicious runner answers before
     "providerId: gpt56",
     "gpt56",
     ...terraSolInternalForms,
-    ...lowercaseMinimaxInternalForms
+    ...lowercaseMinimaxInternalForms,
+    ...structuredQaFragments
   ];
 
   for (const studentAnswer of cases) {
@@ -487,6 +510,9 @@ test("answerStudentQuestionService preserves plain and blocked canonical answers
     ["Terra generated a map for the geography lesson.", validLearningSignal, true],
     ["Sol generated heat in the story about the Sun.", validLearningSignal, true],
     ["Sol is the Latin name for the Sun; terra means earth.", validLearningSignal, true],
+    ["The set is {1, 2, 3}.", validLearningSignal, true],
+    ["Use [a, b] as a bracketed example.", validLearningSignal, true],
+    ['The word "content" appears in quoted prose.', validLearningSignal, true],
     [blockedAnswer, { ...validLearningSignal, safetyStatus: "blocked" }, true]
   ];
 
