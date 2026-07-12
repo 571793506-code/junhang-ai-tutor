@@ -317,17 +317,23 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 ## 数据库缺席时的行为
 
-AI 类接口不会因为数据库暂时不可用而失败，会返回：
+部分教师端或生成类 AI 接口仍会显式返回 `persistence` 状态；这类接口在数据库暂时不可用但任务仍可继续时，可以返回：
 
 ```json
 {
+  "ok": true,
   "persistence": {
     "requested": true,
     "active": false,
     "reason": "..."
-  }
+  },
+  "result": {}
 }
 ```
+
+该示例只适用于明确声明 `persistence` 字段的接口，不是所有 AI 接口的统一响应结构。
+
+学生 `POST /api/ai/qa` 和课堂平板 `POST /api/classroom/voice-qa` 的成功响应只包含 `ok` 与经过服务端清理的 `result`，不返回数据库状态、`persistence` 或内部失败原因。对允许在不落库时继续执行的安全问答链路，数据库不可用可能使内部持久化停用，但回答仍按 AI 可用性返回；学生和课堂平板不会看到持久化诊断或数据库内部原因。
 
 必须落库的接口会返回 `503 DATABASE_UNAVAILABLE`。
 
