@@ -24,6 +24,12 @@ const terraSolInternalForms = ["Terra", "Sol"].flatMap((identifier) => [
   `${identifier} provider timeout`,
   `${identifier} runtime unavailable`
 ]);
+const lowercaseMinimaxInternalForms = [
+  "response from minimax",
+  "routed through minimax",
+  "minimax unavailable",
+  "timeout from minimax"
+];
 
 test("buildQaActorContext confirms only a matching student session", () => {
   assert.deepEqual(
@@ -127,7 +133,8 @@ test("cleanQaResultForClient caps answers and rejects structured internal conten
     '回答前缀 {"content":"safe","raw":"secret-raw"} 回答后缀',
     "providerId: gpt56",
     "gpt56",
-    ...terraSolInternalForms
+    ...terraSolInternalForms,
+    ...lowercaseMinimaxInternalForms
   ]) {
     assert.deepEqual(cleanQaResultForClient({ available: true, studentAnswer }), {
       available: false,
@@ -204,7 +211,8 @@ test("cleanClassroomQaResultForClient validates voice values and caps visible te
     "MiniMax speech unavailable",
     "providerId: gpt56",
     "gpt56",
-    ...terraSolInternalForms
+    ...terraSolInternalForms,
+    ...lowercaseMinimaxInternalForms
   ]) {
     const filtered = cleanClassroomQaResultForClient({
       qa: { available: true, studentAnswer: "安全回答" },

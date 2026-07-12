@@ -33,6 +33,12 @@ const terraSolInternalForms = ["Terra", "Sol"].flatMap((identifier) => [
   `${identifier} provider timeout`,
   `${identifier} runtime unavailable`
 ]);
+const lowercaseMinimaxInternalForms = [
+  "response from minimax",
+  "routed through minimax",
+  "minimax unavailable",
+  "timeout from minimax"
+];
 
 function buildInput(overrides = {}) {
   return {
@@ -238,6 +244,51 @@ test("buildQaLearningRecord bounds sparse signal array access before iteration",
   assert.deepEqual([...accessedIndexes], [0, 1, 2, 3, 4, 5, 6, 7]);
 });
 
+test("buildQaLearningRecord marks every altered signal item invalid", () => {
+  const cases = [
+    ["知识\u0000点", "知识 点"],
+    [" 知识点 ", "知识点"],
+    ["知识\uD800点", "知识�点"]
+  ];
+
+  for (const [source, expected] of cases) {
+    const record = buildQaLearningRecord(buildInput(), buildResult({
+      learningSignal: { ...validLearningSignal, knowledgePoints: [source] }
+    }));
+    assert.equal(record.profileEligibility, false);
+    assert.equal(record.blockedReason, "malformed-output");
+    assert.deepEqual(record.learningSignal.knowledgePoints, [expected]);
+  }
+});
+
+test("buildQaLearningRecord bounds normalization work for hostile signal items", { concurrency: false }, () => {
+  const descriptor = Object.getOwnPropertyDescriptor(String.prototype, "toWellFormed");
+  const original = descriptor.value;
+  let largestNormalizedInput = 0;
+  Object.defineProperty(String.prototype, "toWellFormed", {
+    ...descriptor,
+    value() {
+      const source = this.valueOf();
+      largestNormalizedInput = Math.max(largestNormalizedInput, source.length);
+      return original.call(source);
+    }
+  });
+
+  try {
+    const record = buildQaLearningRecord(buildInput(), buildResult({
+      learningSignal: {
+        ...validLearningSignal,
+        knowledgePoints: ["知".repeat(1_000_000)]
+      }
+    }));
+    assert.equal(record.profileEligibility, false);
+    assert.equal(Array.from(record.learningSignal.knowledgePoints[0]).length, 80);
+    assert.equal(largestNormalizedInput <= 80 * 2 + 128, true);
+  } finally {
+    Object.defineProperty(String.prototype, "toWellFormed", descriptor);
+  }
+});
+
 test("buildQaLearningRecord drops internal labels and embedded JSON from signal text", () => {
   const record = buildQaLearningRecord(buildInput(), buildResult({
     learningSignal: {
@@ -381,7 +432,8 @@ test("answerStudentQuestionService canonicalizes malicious runner answers before
     "Powered by MiniMax.",
     "providerId: gpt56",
     "gpt56",
-    ...terraSolInternalForms
+    ...terraSolInternalForms,
+    ...lowercaseMinimaxInternalForms
   ];
 
   for (const studentAnswer of cases) {

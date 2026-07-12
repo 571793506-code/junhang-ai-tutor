@@ -6,7 +6,7 @@ const CONFIDENCE_LEVELS = new Set(["low", "medium", "high"]);
 const INTERNAL_LABEL = /(?:^|[\s,;，；([{])["']?(?:provider(?:Id)?|model|raw|prompt|debug)["']?\s*[:=：＝]/i;
 const DISTINCT_PROJECT_IDENTIFIER = /\b(?:gpt(?:[-\s]?5[.-]6|56)|openai|deepseek)\b/i;
 const MINIMAX_BRAND = /\bMiniMax\b/;
-const CONTEXTUAL_PROJECT_IDENTIFIER = /(?:\b(?:provider|model|route|runtime)\s*(?::|=)?\s*(?:terra|sol|minimax)\b|\b(?:terra|sol|minimax)\s+(?:provider|model|route|runtime)\b|\b(?:generated|powered)\s+by\s+(?:terra|sol|minimax)\b|\bresponse\s+from\s+(?:terra|sol)\b|\brouted\s+through\s+(?:the\s+)?(?:terra|sol)\b|\b(?:terra|sol)\s+(?:timeout|unavailable)\b|\b(?:timeout|unavailable)\s+(?:from|for|on)\s+(?:terra|sol)\b)/i;
+const CONTEXTUAL_PROJECT_IDENTIFIER = /(?:\b(?:provider|model|route|runtime)\s*(?::|=)?\s*(?:terra|sol|minimax)\b|\b(?:terra|sol|minimax)\s+(?:provider|model|route|runtime)\b|\b(?:generated|powered)\s+by\s+(?:terra|sol|minimax)\b|\bresponse\s+from\s+(?:terra|sol|minimax)\b|\brouted\s+through\s+(?:the\s+)?(?:terra|sol|minimax)\b|\b(?:terra|sol|minimax)\s+(?:timeout|unavailable)\b|\b(?:timeout|unavailable)\s+(?:from|for|on)\s+(?:terra|sol|minimax)\b)/i;
 const QA_UNAVAILABLE_ANSWER = "AI 问答暂时不可用，请稍后再试。";
 const REQUIRED_SIGNAL_FIELDS = [
   "knowledgePoints",
@@ -75,18 +75,29 @@ function hasProjectIdentifier(value) {
     || CONTEXTUAL_PROJECT_IDENTIFIER.test(value);
 }
 
-export function sanitizeQaText(value, { maxLength = 2000, rejectInternal = true } = {}) {
-  if (typeof value !== "string") return "";
-  if (!Number.isSafeInteger(maxLength) || maxLength <= 0) return "";
+function sanitizeQaTextDetailed(value, { maxLength = 2000, rejectInternal = true } = {}) {
+  if (typeof value !== "string") return { text: "", unchanged: false };
+  if (!Number.isSafeInteger(maxLength) || maxLength <= 0) return { text: "", unchanged: false };
   const inspectionCodeUnits = Math.min(value.length, maxLength * 2 + 128);
-  const text = value
-    .slice(0, inspectionCodeUnits)
-    .toWellFormed()
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .trim();
-  if (!text) return "";
-  if (rejectInternal && (INTERNAL_LABEL.test(text) || hasProjectIdentifier(text) || hasEmbeddedJson(text))) return "";
-  return Array.from(text).slice(0, maxLength).join("");
+  const boundedSource = value.slice(0, inspectionCodeUnits);
+  const wellFormed = boundedSource.toWellFormed();
+  const normalized = wellFormed.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+  if (!normalized) return { text: "", unchanged: false };
+  if (rejectInternal && (INTERNAL_LABEL.test(normalized) || hasProjectIdentifier(normalized) || hasEmbeddedJson(normalized))) {
+    return { text: "", unchanged: false };
+  }
+  const codePoints = Array.from(normalized);
+  return {
+    text: codePoints.slice(0, maxLength).join(""),
+    unchanged: value.length === inspectionCodeUnits
+      && boundedSource === wellFormed
+      && wellFormed === normalized
+      && codePoints.length <= maxLength
+  };
+}
+
+export function sanitizeQaText(value, options = {}) {
+  return sanitizeQaTextDetailed(value, options).text;
 }
 
 export function sanitizeQaAnswer(value) {
@@ -109,14 +120,13 @@ function sanitizeSignalList(value, maxItems, maxLength) {
       valid = false;
       continue;
     }
-    const source = value[index].toWellFormed().replace(/[\u0000-\u001f\u007f]/g, " ").trim();
-    const sanitized = sanitizeQaText(value[index], { maxLength });
-    if (!sanitized) {
+    const sanitized = sanitizeQaTextDetailed(value[index], { maxLength });
+    if (!sanitized.text) {
       valid = false;
       continue;
     }
-    if (sanitized !== source || value[index] !== value[index].toWellFormed()) valid = false;
-    if (items.length < maxItems) items.push(sanitized);
+    if (!sanitized.unchanged) valid = false;
+    if (items.length < maxItems) items.push(sanitized.text);
     else valid = false;
   }
   return { items, valid };
