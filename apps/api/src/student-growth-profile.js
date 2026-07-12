@@ -534,8 +534,8 @@ function buildQaEvidence(qaSessions, blockedEvidence) {
         title: `${knowledgePoint}问答观察`,
         subject,
         knowledgePoint,
-        dates: [],
         sourceRefs: new Set(),
+        sourceDates: new Map(),
         questionIntents: new Set(),
         difficultySignals: new Set(),
         followUpNeeded: false
@@ -544,7 +544,11 @@ function buildQaEvidence(qaSessions, blockedEvidence) {
         group.knowledgePoint = knowledgePoint;
         group.title = `${knowledgePoint}问答观察`;
       }
-      group.dates.push(isoDate(session.createdAt));
+      const sourceDate = qaIsoDate(session.createdAt);
+      const currentSourceDate = group.sourceDates.get(sourceId) || "";
+      if (!group.sourceDates.has(sourceId) || sourceDate > currentSourceDate) {
+        group.sourceDates.set(sourceId, sourceDate);
+      }
       group.sourceRefs.add(sourceId);
       group.questionIntents.add(signal.questionIntent);
       group.difficultySignals.add(signal.difficultySignal);
@@ -556,6 +560,10 @@ function buildQaEvidence(qaSessions, blockedEvidence) {
   return [...groups.values()]
     .map((group) => {
       const sourceRefs = [...group.sourceRefs].sort();
+      const sourceDates = Object.fromEntries(sourceRefs.map((sourceRef) => [
+        sourceRef,
+        group.sourceDates.get(sourceRef) || ""
+      ]));
       const sessionCount = sourceRefs.length;
       const questionIntent = group.questionIntents.size === 1 ? [...group.questionIntents][0] : "other";
       const difficultySignal = strongestDifficultySignal(group.difficultySignals);
@@ -565,12 +573,13 @@ function buildQaEvidence(qaSessions, blockedEvidence) {
         title: group.title,
         subject: group.subject,
         knowledgePoint: group.knowledgePoint,
-        date: [...group.dates].sort().at(-1),
+        date: Object.values(sourceDates).sort().at(-1) || "",
         sessionCount,
         questionIntent,
         difficultySignal,
         followUpNeeded: group.followUpNeeded,
         sourceRefs,
+        sourceDates,
         summary: `${sessionCount} 次围绕${group.knowledgePoint}的合格问答仅作为辅助观察。`,
         confidence: sessionCount >= 2 ? "supported" : "weak"
       };
@@ -835,7 +844,8 @@ function buildQaSourceTimeline(qaEvidence) {
         groupIds: new Set(),
         supported: false
       };
-      source.dates.add(group.date);
+      const sourceDate = group.sourceDates?.[sourceRef];
+      if (typeof sourceDate === "string" && sourceDate) source.dates.add(sourceDate);
       source.subjects.add(group.subject);
       source.groupIds.add(group.id);
       source.supported ||= group.sessionCount >= 2;
@@ -850,7 +860,7 @@ function buildQaSourceTimeline(qaEvidence) {
       type: "qa",
       title: `${subject || "学习"}问答辅助观察`,
       subject,
-      at: [...source.dates].sort().at(-1),
+      at: [...source.dates].sort().at(-1) || "",
       text: `${knowledgePointCount} 个知识点的合格问答仅作为辅助观察。`,
       evidenceRefs: [sourceRef],
       confidence: source.supported ? "supported" : "weak"
@@ -1016,6 +1026,11 @@ function toDate(value) {
 function isoDate(value) {
   const date = toDate(value);
   return date ? date.toISOString() : new Date().toISOString();
+}
+
+function qaIsoDate(value) {
+  const date = toDate(value);
+  return date ? date.toISOString() : "";
 }
 
 function formatDate(date) {

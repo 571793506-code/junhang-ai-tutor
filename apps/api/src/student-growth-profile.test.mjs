@@ -240,6 +240,7 @@ test("qaEvidence contains only bounded summaries and refs, never full qa or inte
     "knowledgePoint",
     "questionIntent",
     "sessionCount",
+    "sourceDates",
     "sourceRefs",
     "subject",
     "summary",
@@ -293,6 +294,10 @@ test("two supported same-point qa sessions each receive one source timeline entr
 
   assert.equal(qaTimeline.length, 2);
   assert.deepEqual(qaTimeline.map((item) => item.id).sort(), ["qa_eligible_1", "qa_eligible_2"]);
+  assert.deepEqual(Object.fromEntries(qaTimeline.map((item) => [item.id, item.at])), {
+    qa_eligible_1: "2026-07-05T08:00:00.000Z",
+    qa_eligible_2: "2026-07-05T09:00:00.000Z"
+  });
   assert.equal(qaTimeline.every((item) => item.confidence === "supported"), true);
   assert.equal(qaTimeline.every((item) => JSON.stringify(item.evidenceRefs) === JSON.stringify([item.id])), true);
 });
@@ -413,6 +418,7 @@ test("one qa session with multiple knowledge points stays one weak source", () =
   const qaTimeline = snapshot.publishedView.timelinePreview.filter((item) => item.type === "qa");
   assert.equal(qaTimeline.length, 1);
   assert.equal(qaTimeline[0].id, "qa_eligible_1");
+  assert.equal(qaTimeline[0].at, "2026-07-05T08:00:00.000Z");
   assert.deepEqual(qaTimeline[0].evidenceRefs, ["qa_eligible_1"]);
   assert.equal(qaTimeline[0].confidence, "weak");
   assert.match(qaTimeline[0].title, /问答辅助观察/);
@@ -436,6 +442,11 @@ test("duplicate qa session ids cannot inflate aggregate or source strength", () 
     {
       ...fixture.qaSessions[1],
       id: "qa_eligible_1"
+    },
+    {
+      ...fixture.qaSessions[1],
+      id: "qa_eligible_1",
+      createdAt: "not-a-valid-date"
     }
   ];
 
@@ -446,6 +457,10 @@ test("duplicate qa session ids cannot inflate aggregate or source strength", () 
   assert.equal(snapshot.profileEvidencePack.qaEvidence[0].confidence, "weak");
   assert.equal(snapshot.sourceCounts.qaSessions, 1);
   assert.equal(snapshot.publishedView.overview.confidence, "weak");
+  assert.equal(
+    snapshot.publishedView.timelinePreview.find((item) => item.type === "qa").at,
+    "2026-07-05T09:00:00.000Z"
+  );
 });
 
 test("ineligible and legacy qa stay out of public evidence", () => {
