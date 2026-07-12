@@ -91,9 +91,9 @@ Replace the universal “all model output requires teacher review” wording wit
 
 ```markdown
 - 学生 AI 问答在服务层完成结构解析、内容安全检查和普通端字段过滤后可以即时返回，不需要教师逐条预审。
-- 只有已确认学生身份、安全通过、结构有效且成功返回的问答学习信号可以进入学生档案辅助分析；教师测试、匿名/未确认课堂问答、失败、敏感或结构异常记录不得进入。
+- 只有精确匹配 `qa-learning-signal-v1`，并由服务端计算 actor、身份确认和 `profileEligibility`，且成功、安全、结构有效、来源日期有效的学生/课堂问答记录可以进入学生档案辅助分析；教师测试、匿名/未确认课堂问答、不可用、不安全、结构异常、日期无效和 legacy 记录不得进入公开证据。
 - 小测、练习、试卷、批改、周/月档案、阶段报告、家长摘要和正式导出仍是草稿流程，必须由教师确认后才能发布、打印、归档或同步给学生/家长。
-- 单次问答只能作为弱辅助证据，不能独立形成掌握、退步、薄弱点或家长可见结论。
+- 一个唯一来源问答不能提高掌握度、分数或形成强结论；同一标准化 `subject + knowledgePoint` 的重复信号可形成 `supported`，但仍是辅助证据。教师确认的非问答证据优先，冲突只生成教师复核备注。
 ```
 
 Keep the existing parse/normalize/validate/repair and multi-end visibility rules. Restrict `review-state handling` to the task-specific policy instead of asserting that every Q&A response waits for review.
@@ -1015,8 +1015,8 @@ Expected: only intended worktrees remain, Sol branch still exists, and the integ
 4. No active project route contains `ai-video-production`; ordinary media assets and user-level video Skills remain untouched.
 5. `check:miniprogram-sync` is read-only; reverse writes are explicit, path-contained, config-excluding, and refused when `apps/miniprogram` is dirty.
 6. Student Q&A returns immediately after service safety handling and never waits for teacher review or Sol.
-7. Only successful, safe, structurally valid, identity-confirmed student/classroom Q&A enters profile analysis.
-8. Teacher tests, anonymous/unconfirmed classroom, failed, unsafe, malformed, and legacy Q&A cannot enter public profile evidence.
-9. One Q&A cannot independently raise mastery, score, or form a strong profile conclusion; repeated signals remain auxiliary and formal outputs still require teacher confirmation.
+7. Only records with exact `schemaVersion=qa-learning-signal-v1`, server-computed actor, identity confirmation, and `profileEligibility`, plus a successful, safe, structurally valid result and valid source date, enter profile analysis.
+8. Teacher tests, anonymous/unconfirmed classroom, unavailable, unsafe, malformed, invalid-date, and legacy Q&A cannot enter public profile evidence.
+9. One unique-source Q&A cannot raise mastery, score, or form a strong conclusion. Repeated signals for the same normalized `subject + knowledgePoint` may become `supported` but remain auxiliary; confirmed non-Q&A evidence has priority, conflicts create teacher review notes, and formal outputs still require teacher confirmation.
 10. Student, parent, classroom, and public-screen responses expose no provider, model, internal prompt, raw output, learning signal, eligibility, blocked reason, or escalation metadata.
 11. All focused tests, layered checks, encoding check, diff check, and workspace guard pass before the Sol worktree is removed.
