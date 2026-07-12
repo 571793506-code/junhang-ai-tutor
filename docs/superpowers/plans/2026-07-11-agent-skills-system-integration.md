@@ -973,13 +973,19 @@ git commit -m "docs: close agent skills system integration"
 - Step 7 commit: explicit staging contained exactly the nine owned documentation files; `git diff --cached --check` exited `0`; commit `59647d7` (`docs: close agent skills system integration`) succeeded.
 - Final acceptance wording follow-up: commit `a8cfe8e` (`docs: align qa acceptance criteria`) aligned the exact schema, valid-date, unique-source, normalized aggregation, non-Q&A priority, and teacher conflict-note wording.
 
+### Task 10
+
+- Pre-removal verification showed a clean `codex/gpt56-sol-escalation` worktree, and `git merge-base --is-ancestor codex/gpt56-sol-escalation HEAD` exited `0`.
+- `git worktree remove .worktrees/gpt56-sol-escalation` and `git worktree prune` exited `0`. After Git removal, only residual `node_modules/@junhang` directory links remained; inspection found no source or business files, their absolute target was inside the workspace, and that residual directory was removed. The branch was not deleted.
+- Final verification showed only the integration worktree, retained branch `codex/gpt56-sol-escalation` still an ancestor of `HEAD`, no residual worktree directory, and clean Git status. `workspace:guard` exited `0` with ignored runtime residue `0` and 57 approved local assets; `git diff --check` exited `0`; `check:encoding` exited `0` after checking 275 current source files with zero issues.
+
 ## Task 10: Remove The Local Sol Worktree After Verification
 
 **Files:**
 - Remove local worktree registration and directory only.
 - Keep branch `codex/gpt56-sol-escalation` through the final PR.
 
-- [ ] **Step 1: Prove the Sol worktree is clean and merged**
+- [x] **Step 1: Prove the Sol worktree is clean and merged**
 
 ```powershell
 git -C .worktrees/gpt56-sol-escalation status --short --branch
@@ -988,7 +994,7 @@ git merge-base --is-ancestor codex/gpt56-sol-escalation HEAD
 
 Expected: Sol worktree has no local changes and ancestry exits `0`.
 
-- [ ] **Step 2: Remove only the verified local worktree**
+- [x] **Step 2: Remove only the verified local worktree**
 
 ```powershell
 git worktree remove .worktrees/gpt56-sol-escalation
@@ -997,7 +1003,7 @@ git worktree prune
 
 Expected: the local worktree directory and registration are removed. Do not delete the branch.
 
-- [ ] **Step 3: Final state check**
+- [x] **Step 3: Final state check**
 
 ```powershell
 git worktree list --porcelain
@@ -1010,14 +1016,15 @@ Expected: only intended worktrees remain, Sol branch still exists, and the integ
 
 ## Final Acceptance Criteria
 
-1. `e52e9a6` is an ancestor of the integration branch through a non-fast-forward merge.
-2. Sol generation/grading tests, capability probe, and explicit generation quality gate pass; production grading accuracy is not claimed without teacher-confirmed gold data.
-3. Nine `.agents/skills` routes are discoverable, point to existing project Playbooks, and pass `check:skills`.
-4. No active project route contains `ai-video-production`; ordinary media assets and user-level video Skills remain untouched.
-5. `check:miniprogram-sync` is read-only; reverse writes are explicit, path-contained, config-excluding, and refused when `apps/miniprogram` is dirty.
-6. Student Q&A makes at most one Terra low-reasoning text call, makes zero provider calls when Terra is unavailable, never calls Sol, and returns a successful safe structured answer immediately without teacher pre-review.
-7. Only records with exact `schemaVersion=qa-learning-signal-v1`, a server-validated and normalized model `safetyStatus`, server-computed actor, identity confirmation, availability, structural validity, and `profileEligibility`, plus a valid source date, enter profile analysis.
-8. Teacher tests, anonymous/unconfirmed classroom, unavailable, unsafe, malformed, invalid-date, and legacy Q&A cannot enter public profile evidence.
-9. One unique-source Q&A cannot raise mastery, score, or form a strong conclusion. Repeated signals for the same normalized `subject + knowledgePoint` may become `supported` but remain auxiliary; confirmed non-Q&A evidence has priority, conflicts create teacher review notes, and formal outputs still require teacher confirmation.
-10. Student, parent, classroom, and public-screen responses expose no provider, model, internal prompt, raw output, learning signal, eligibility, blocked reason, or escalation metadata.
-11. All focused tests, layered checks, encoding check, diff check, and workspace guard pass before the Sol worktree is removed.
+1. [x] `e52e9a6` is an ancestor of the integration branch through a non-fast-forward merge.
+2. [x] Sol generation/grading tests, capability probe, and explicit generation quality gate pass; production grading accuracy is not claimed without teacher-confirmed gold data.
+3. [x] Nine `.agents/skills` routes are discoverable, point to existing project Playbooks, and pass `check:skills`.
+4. [x] No active project route contains `ai-video-production`; ordinary media assets and user-level video Skills remain untouched.
+5. [x] `check:miniprogram-sync` is read-only; reverse writes are explicit, path-contained, config-excluding, and refused when `apps/miniprogram` is dirty.
+6. [x] Student Q&A makes at most one Terra low-reasoning text call, makes zero provider calls when Terra is unavailable, never calls Sol, and returns a successful safe structured answer immediately without teacher pre-review.
+7. [x] Only records with exact `schemaVersion=qa-learning-signal-v1`, a server-validated and normalized model `safetyStatus`, server-computed actor, identity confirmation, availability, structural validity, and `profileEligibility`, plus a valid source date, enter profile analysis.
+8. [x] Teacher tests, anonymous/unconfirmed classroom, unavailable, unsafe, malformed, invalid-date, and legacy Q&A cannot enter public profile evidence.
+9. [x] One unique-source Q&A cannot raise mastery, score, or form a strong conclusion. Repeated signals for the same normalized `subject + knowledgePoint` may become `supported` but remain auxiliary; confirmed non-Q&A evidence has priority, conflicts create teacher review notes, and formal outputs still require teacher confirmation.
+10. [x] Student, parent, classroom, and public-screen responses expose no provider, model, internal prompt, raw output, learning signal, eligibility, blocked reason, or escalation metadata.
+11. [x] All focused tests, layered checks, encoding check, diff check, and workspace guard passed before the Sol worktree was removed.
+12. [x] The verified local Sol worktree registration and directory are removed; branch `codex/gpt56-sol-escalation` is retained and remains an ancestor of the integration branch.
