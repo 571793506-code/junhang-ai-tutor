@@ -641,6 +641,7 @@ function sanitizeQaStringList(value, maxItems, maxLength) {
 }
 
 function normalizeQaGroupValue(value) {
+  if (typeof value !== "string") return "";
   return value.normalize("NFKC").replace(/\s+/g, " ").toLocaleLowerCase("zh-CN");
 }
 
@@ -800,25 +801,61 @@ function buildParentNextSteps(pack, focusSubjects) {
 }
 
 function buildTimelinePreview(pack) {
-  return [
+  const timelineItems = [
     ...pack.taskEvidence,
     ...pack.gradingEvidence,
     ...pack.mistakeEvidence,
-    ...pack.qaEvidence,
     ...pack.classroomEvidence
-  ]
-    .sort((a, b) => String(b.at || b.date).localeCompare(String(a.at || a.date)))
-    .slice(0, 6)
-    .map((item) => ({
+  ].map((item) => ({
       id: item.id,
       type: item.type,
       title: item.title,
       subject: item.subject,
       at: item.at || item.date,
       text: item.summary || item.cause || item.title,
-      evidenceRefs: item.type === "qa" ? item.sourceRefs : [item.id],
+      evidenceRefs: [item.id],
       confidence: item.confidence || "supported"
     }));
+  timelineItems.push(...buildQaSourceTimeline(pack.qaEvidence));
+  return timelineItems
+    .sort((a, b) => (
+      String(b.at).localeCompare(String(a.at))
+      || String(a.id).localeCompare(String(b.id))
+    ))
+    .slice(0, 6);
+}
+
+function buildQaSourceTimeline(qaEvidence) {
+  const sources = new Map();
+  qaEvidence.forEach((group) => {
+    group.sourceRefs.forEach((sourceRef) => {
+      const source = sources.get(sourceRef) || {
+        dates: new Set(),
+        subjects: new Set(),
+        groupIds: new Set(),
+        supported: false
+      };
+      source.dates.add(group.date);
+      source.subjects.add(group.subject);
+      source.groupIds.add(group.id);
+      source.supported ||= group.sessionCount >= 2;
+      sources.set(sourceRef, source);
+    });
+  });
+  return [...sources.entries()].map(([sourceRef, source]) => {
+    const subject = [...source.subjects].sort((a, b) => a.localeCompare(b, "zh-CN"))[0] || "";
+    const knowledgePointCount = source.groupIds.size;
+    return {
+      id: sourceRef,
+      type: "qa",
+      title: `${subject || "学习"}问答辅助观察`,
+      subject,
+      at: [...source.dates].sort().at(-1),
+      text: `${knowledgePointCount} 个知识点的合格问答仅作为辅助观察。`,
+      evidenceRefs: [sourceRef],
+      confidence: source.supported ? "supported" : "weak"
+    };
+  });
 }
 
 function buildSampleLimitNotes(pack) {

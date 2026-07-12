@@ -287,6 +287,16 @@ test("two normalized subject and knowledge point records aggregate to one suppor
   assert.equal(pack.qaEvidence[0].confidence, "supported");
 });
 
+test("two supported same-point qa sessions each receive one source timeline entry", () => {
+  const snapshot = buildStudentGrowthSnapshot(studentFixture(), { periodType: "weekly", now });
+  const qaTimeline = snapshot.publishedView.timelinePreview.filter((item) => item.type === "qa");
+
+  assert.equal(qaTimeline.length, 2);
+  assert.deepEqual(qaTimeline.map((item) => item.id).sort(), ["qa_eligible_1", "qa_eligible_2"]);
+  assert.equal(qaTimeline.every((item) => item.confidence === "supported"), true);
+  assert.equal(qaTimeline.every((item) => JSON.stringify(item.evidenceRefs) === JSON.stringify([item.id])), true);
+});
+
 test("qa metadata requires a valid producer mode", () => {
   for (const mode of [undefined, "INVALID_MODE"]) {
     const fixture = studentFixture();
@@ -400,9 +410,20 @@ test("one qa session with multiple knowledge points stays one weak source", () =
   assert.equal(snapshot.sourceCounts.qaSessions, 1);
   assert.equal(snapshot.publishedView.overview.confidence, "weak");
   assert.equal(snapshot.publishedView.subjectOverview.find((item) => item.subject === "数学").confidence, "weak");
-  assert.equal(snapshot.publishedView.timelinePreview.every((item) => (
-    item.type !== "qa" || JSON.stringify(item.evidenceRefs) === JSON.stringify(["qa_eligible_1"])
-  )), true);
+  const qaTimeline = snapshot.publishedView.timelinePreview.filter((item) => item.type === "qa");
+  assert.equal(qaTimeline.length, 1);
+  assert.equal(qaTimeline[0].id, "qa_eligible_1");
+  assert.deepEqual(qaTimeline[0].evidenceRefs, ["qa_eligible_1"]);
+  assert.equal(qaTimeline[0].confidence, "weak");
+  assert.match(qaTimeline[0].title, /问答辅助观察/);
+  assert.match(qaTimeline[0].text, /辅助观察/);
+  assert.equal(JSON.stringify(qaTimeline).includes(fixture.qaSessions[0].question), false);
+  assert.equal(JSON.stringify(qaTimeline).includes(fixture.qaSessions[0].answer), false);
+  assert.equal(snapshot.publishedView.timelinePreview.length <= 6, true);
+  assert.deepEqual(
+    snapshot.publishedView.timelinePreview.map((item) => item.at),
+    [...snapshot.publishedView.timelinePreview.map((item) => item.at)].sort().reverse()
+  );
 });
 
 test("duplicate qa session ids cannot inflate aggregate or source strength", () => {
@@ -510,6 +531,47 @@ test("qa conflicts with confirmed grading or mistake evidence add a teacher revi
   assert.match(snapshot.teacherReview.conflictNotes[0], /数学/);
   assert.match(snapshot.teacherReview.conflictNotes[0], /两步应用题/);
   assert.match(snapshot.teacherReview.conflictNotes[0], /人工复核/);
+});
+
+test("malformed confirmed knowledge points are skipped during qa conflict checks", () => {
+  const fixture = studentFixture();
+  fixture.qaSessions = [{
+    ...fixture.qaSessions[0],
+    metadata: qaMetadata({
+      learningSignal: {
+        ...qaLearningSignal,
+        difficultySignal: "none",
+        followUpNeeded: false
+      }
+    })
+  }];
+  fixture.mistakes = [
+    {
+      ...fixture.mistakes[0],
+      id: "mistake_numeric_point",
+      knowledgePoint: { name: 42 },
+      prompt: null,
+      metadata: { point: null }
+    },
+    {
+      ...fixture.mistakes[0],
+      id: "mistake_object_point",
+      knowledgePoint: null,
+      prompt: null,
+      metadata: { point: { internal: "not-comparable" } }
+    }
+  ];
+  fixture.submissions[0].grading.result.questionResults = [
+    { knowledgePoint: 42 },
+    { knowledgePoint: null, point: { internal: "not-comparable" } },
+    { knowledgePoint: null }
+  ];
+
+  const snapshot = buildStudentGrowthSnapshot(fixture, { periodType: "weekly", now });
+
+  assert.deepEqual(snapshot.teacherReview.conflictNotes, []);
+  assert.equal(snapshot.profileEvidencePack.qaEvidence.length, 1);
+  assert.ok(snapshot.publishedView.timelinePreview.length > 0);
 });
 
 test("buildStudentGrowthSnapshot creates structured weekly published view with confidence", () => {
