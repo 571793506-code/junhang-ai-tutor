@@ -106,7 +106,9 @@ test("cleanQaResultForClient caps answers and rejects structured internal conten
 
   for (const studentAnswer of [
     '{"content":"safe","provider":"secret-provider"}',
-    '回答前缀 {"content":"safe","raw":"secret-raw"} 回答后缀'
+    '回答前缀 {"content":"safe","raw":"secret-raw"} 回答后缀',
+    "providerId: gpt56",
+    "gpt56"
   ]) {
     assert.deepEqual(cleanQaResultForClient({ available: true, studentAnswer }), {
       available: false,
@@ -180,7 +182,9 @@ test("cleanClassroomQaResultForClient validates voice values and caps visible te
     "Sol provider timeout",
     "OpenAI response failed",
     "DeepSeek response failed",
-    "MiniMax speech unavailable"
+    "MiniMax speech unavailable",
+    "providerId: gpt56",
+    "gpt56"
   ]) {
     const filtered = cleanClassroomQaResultForClient({
       qa: { available: true, studentAnswer: "安全回答" },

@@ -3,8 +3,8 @@ const QA_MODES = new Set(["GUIDED_THINKING", "KNOWLEDGE_EXPLANATION"]);
 const QUESTION_INTENTS = new Set(["concept", "method", "error_reasoning", "expression", "other"]);
 const DIFFICULTY_SIGNALS = new Set(["none", "possible", "clear"]);
 const CONFIDENCE_LEVELS = new Set(["low", "medium", "high"]);
-const INTERNAL_LABEL = /(?:^|[\s,;，；([{])["']?(?:provider|model|raw|prompt|debug)["']?\s*[:=：＝]/i;
-const DISTINCT_PROJECT_IDENTIFIER = /\b(?:gpt[-\s]?5[.-]6|openai|deepseek)\b/i;
+const INTERNAL_LABEL = /(?:^|[\s,;，；([{])["']?(?:provider(?:Id)?|model|raw|prompt|debug)["']?\s*[:=：＝]/i;
+const DISTINCT_PROJECT_IDENTIFIER = /\b(?:gpt(?:[-\s]?5[.-]6|56)|openai|deepseek)\b/i;
 const MINIMAX_BRAND = /\bMiniMax\b/;
 const PROVIDER_CONTEXT = "provider|model|api|route|routed|routing|response|runtime|generated|powered|unavailable|timeout|failed";
 const CONTEXTUAL_PROJECT_IDENTIFIER = new RegExp(

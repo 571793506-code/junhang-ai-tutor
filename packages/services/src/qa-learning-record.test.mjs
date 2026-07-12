@@ -363,7 +363,9 @@ test("answerStudentQuestionService canonicalizes malicious runner answers before
     "Routed through the Sol provider.",
     "OpenAI generated this answer.",
     "DeepSeek response unavailable.",
-    "Powered by MiniMax."
+    "Powered by MiniMax.",
+    "providerId: gpt56",
+    "gpt56"
   ];
 
   for (const studentAnswer of cases) {
