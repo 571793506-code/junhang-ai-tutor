@@ -6,7 +6,7 @@ const CONFIDENCE_LEVELS = new Set(["low", "medium", "high"]);
 const INTERNAL_LABEL = /(?:^|[\s,;，；([{])["']?(?:provider(?:Id)?|model|raw|prompt|debug)["']?\s*[:=：＝]/i;
 const DISTINCT_PROJECT_IDENTIFIER = /\b(?:gpt(?:[-\s]?5[.-]6|56)|openai|deepseek)\b/i;
 const MINIMAX_BRAND = /\bMiniMax\b/;
-const CONTEXTUAL_PROJECT_IDENTIFIER = /(?:\b(?:provider|model|route|runtime)\s*(?::|=)?\s*(?:terra|sol|minimax)\b|\b(?:terra|sol|minimax)\s+(?:provider|model|route|runtime)\b|\brouted\s+through\s+(?:the\s+)?(?:terra|sol)\b|\b(?:terra|sol)\s+(?:timeout|unavailable)\b|\b(?:timeout|unavailable)\s+(?:from|for|on)\s+(?:terra|sol)\b|\b(?:generated|powered)\s+by\s+minimax\b)/i;
+const CONTEXTUAL_PROJECT_IDENTIFIER = /(?:\b(?:provider|model|route|runtime)\s*(?::|=)?\s*(?:terra|sol|minimax)\b|\b(?:terra|sol|minimax)\s+(?:provider|model|route|runtime)\b|\b(?:generated|powered)\s+by\s+(?:terra|sol|minimax)\b|\bresponse\s+from\s+(?:terra|sol)\b|\brouted\s+through\s+(?:the\s+)?(?:terra|sol)\b|\b(?:terra|sol)\s+(?:timeout|unavailable)\b|\b(?:timeout|unavailable)\s+(?:from|for|on)\s+(?:terra|sol)\b)/i;
 const QA_UNAVAILABLE_ANSWER = "AI 问答暂时不可用，请稍后再试。";
 const REQUIRED_SIGNAL_FIELDS = [
   "knowledgePoints",
