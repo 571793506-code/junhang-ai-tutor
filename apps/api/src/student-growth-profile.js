@@ -69,15 +69,17 @@ export function buildProfileEvidencePack(student, options = {}) {
     confidence: "confirmed"
   }));
   const qaEvidence = buildQaEvidence(qaSessions, blockedEvidence);
-  const classroomEvidence = voiceInteractions.map((item) => ({
-    id: item.id,
-    type: "classroom",
-    subject: subjectFromValue(item.subject || item.metadata?.subject),
-    title: item.question || item.action || "课堂互动",
-    at: isoDate(item.occurredAt),
-    summary: item.answer || item.result || "",
-    confidence: "supported"
-  }));
+  const classroomEvidence = voiceInteractions
+    .filter((item) => !hasQaSessionMarker(item?.metadata))
+    .map((item) => ({
+      id: item.id,
+      type: "classroom",
+      subject: subjectFromValue(item.subject || item.metadata?.subject),
+      title: item.question || item.action || "课堂互动",
+      at: isoDate(item.occurredAt),
+      summary: item.answer || item.result || "",
+      confidence: "supported"
+    }));
 
   return {
     period,
@@ -177,6 +179,14 @@ export function filterStudentProfileSnapshot(snapshot, role = "student") {
   if (role === "teacher") return removeInternalFields(snapshot);
   const { teacherReview, profileEvidencePack, ...publicSnapshot } = snapshot;
   return removeInternalFields(publicSnapshot, new Set(["learningSignal", "profileEligibility", "blockedReason", "question", "answer"]));
+}
+
+export function selectProfileSnapshotForRole(profiles, role = "student") {
+  if (!Array.isArray(profiles)) return null;
+  const profile = role === "teacher"
+    ? profiles.find((item) => isPlainObject(item?.snapshot))
+    : profiles.find((item) => isPlainObject(item?.snapshot) && item.snapshot.draftStatus === "published");
+  return profile?.snapshot || null;
 }
 
 export function mergeStudentProfileAiDraft(baseSnapshot, aiDraft) {
@@ -974,6 +984,12 @@ function isPlainObject(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function hasQaSessionMarker(metadata) {
+  return metadata !== null
+    && typeof metadata === "object"
+    && "qaSessionId" in metadata;
 }
 
 function mergePublishedView(baseView, draftView) {

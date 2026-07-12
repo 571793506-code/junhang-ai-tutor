@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import * as profileModule from "./student-growth-profile.js";
 import {
   buildProfileEvidencePack,
   buildStudentGrowthSnapshot,
@@ -224,6 +225,89 @@ test("only eligible qa-learning-signal-v1 records enter qaEvidence", () => {
   assert.equal(pack.qaEvidence[0].knowledgePoint, "小数意义");
   assert.equal(pack.qaEvidence[0].sessionCount, 2);
   assert.deepEqual(pack.qaEvidence[0].sourceRefs, ["qa_eligible_1", "qa_eligible_2"]);
+});
+
+test("qa-backed voice for unavailable unsafe or unconfirmed qa enters neither evidence group", () => {
+  const fixture = studentFixture();
+  fixture.qaSessions = fixture.qaSessions.filter((session) => [
+    "qa_unconfirmed_classroom",
+    "qa_unavailable",
+    "qa_unsafe"
+  ].includes(session.id));
+  fixture.voiceInteractions = [
+    {
+      id: "voice_unconfirmed",
+      occurredAt: new Date("2026-07-05T09:21:00.000Z"),
+      subject: "数学",
+      metadata: { qaSessionId: "qa_unconfirmed_classroom", available: true, mode: "GUIDED_THINKING" }
+    },
+    {
+      id: "voice_unavailable",
+      occurredAt: new Date("2026-07-05T09:31:00.000Z"),
+      subject: "数学",
+      metadata: { qaSessionId: "qa_unavailable", available: false, mode: "KNOWLEDGE_EXPLANATION" }
+    },
+    {
+      id: "voice_unsafe",
+      occurredAt: new Date("2026-07-05T09:41:00.000Z"),
+      subject: "数学",
+      metadata: { qaSessionId: "qa_unsafe", available: true, mode: "KNOWLEDGE_EXPLANATION" }
+    },
+    {
+      id: "voice_unmatched",
+      occurredAt: new Date("2026-07-05T09:42:00.000Z"),
+      subject: "数学",
+      metadata: { qaSessionId: "qa_missing", available: true, mode: "KNOWLEDGE_EXPLANATION" }
+    }
+  ];
+
+  const pack = buildProfileEvidencePack(fixture, { periodType: "weekly", now });
+
+  assert.equal(pack.qaEvidence.length, 0);
+  assert.equal(pack.classroomEvidence.length, 0);
+  assert.equal(pack.sourceQuality.qaCount, 0);
+  assert.equal(pack.sourceQuality.classroomCount, 0);
+});
+
+test("eligible qa-backed voice appears once through qaEvidence", () => {
+  const fixture = studentFixture();
+  fixture.qaSessions = [fixture.qaSessions[0]];
+  fixture.voiceInteractions = [{
+    id: "voice_eligible",
+    occurredAt: new Date("2026-07-05T08:01:00.000Z"),
+    subject: "数学",
+    question: "课堂问题不得重复计数",
+    answer: "课堂回答不得重复计数",
+    metadata: { qaSessionId: "qa_eligible_1", available: true, mode: "KNOWLEDGE_EXPLANATION" }
+  }];
+
+  const snapshot = buildStudentGrowthSnapshot(fixture, { periodType: "weekly", now });
+
+  assert.deepEqual(snapshot.profileEvidencePack.qaEvidence[0].sourceRefs, ["qa_eligible_1"]);
+  assert.equal(snapshot.profileEvidencePack.classroomEvidence.length, 0);
+  assert.equal(snapshot.sourceCounts.qaSessions, 1);
+  assert.equal(snapshot.sourceCounts.voiceInteractions, 0);
+  assert.equal(snapshot.publishedView.timelinePreview.filter((item) => item.id === "qa_eligible_1").length, 1);
+});
+
+test("standalone non-qa voice remains classroom evidence", () => {
+  const fixture = studentFixture();
+  fixture.qaSessions = [];
+  fixture.voiceInteractions = [{
+    id: "voice_standalone",
+    occurredAt: new Date("2026-07-05T11:00:00.000Z"),
+    subject: "语文",
+    question: "朗读后主动复述",
+    answer: "能概括主要内容",
+    metadata: { available: true, mode: "CLASSROOM_OBSERVATION" }
+  }];
+
+  const pack = buildProfileEvidencePack(fixture, { periodType: "weekly", now });
+
+  assert.equal(pack.qaEvidence.length, 0);
+  assert.equal(pack.classroomEvidence.length, 1);
+  assert.equal(pack.classroomEvidence[0].id, "voice_standalone");
+  assert.equal(pack.sourceQuality.classroomCount, 1);
 });
 
 test("qaEvidence contains only bounded summaries and refs, never full qa or internal fields", () => {
@@ -728,6 +812,50 @@ test("filterStudentProfileSnapshot keeps teacher review for teacher role", () =>
 
   assert.ok(filtered.teacherReview);
   assert.ok(filtered.profileEvidencePack);
+});
+
+test("selectProfileSnapshotForRole keeps newest teacher snapshot and newest exact published student snapshot", () => {
+  assert.equal(typeof profileModule.selectProfileSnapshotForRole, "function");
+  const { selectProfileSnapshotForRole } = profileModule;
+  const newestDraft = { draftStatus: "draft", marker: "newest-draft" };
+  const newestPublished = { draftStatus: "published", marker: "newest-published" };
+  const olderPublished = { draftStatus: "published", marker: "older-published" };
+  const profiles = [
+    { snapshot: newestDraft },
+    { snapshot: { draftStatus: "PUBLISHED", marker: "wrong-case" } },
+    { snapshot: newestPublished },
+    { snapshot: olderPublished }
+  ];
+
+  assert.equal(selectProfileSnapshotForRole(profiles, "teacher"), newestDraft);
+  assert.equal(selectProfileSnapshotForRole(profiles, "student"), newestPublished);
+  assert.equal(selectProfileSnapshotForRole([{ snapshot: newestDraft }], "student"), null);
+  assert.equal(selectProfileSnapshotForRole([], "teacher"), null);
+});
+
+test("student profile routes enforce teacher drafts and role-based published selection", () => {
+  const server = fs.readFileSync(new URL("./server.js", import.meta.url), "utf8");
+  const aggregateRoute = server.slice(
+    server.indexOf('app.post("/api/students/:studentId/profile/aggregate"'),
+    server.indexOf('app.get("/api/students/:studentId/profile"')
+  );
+  const getRoute = server.slice(
+    server.indexOf('app.get("/api/students/:studentId/profile"'),
+    server.indexOf('app.post("/api/students/:studentId/term-report/draft"')
+  );
+  const bootstrapRoute = server.slice(
+    server.indexOf('app.get("/api/bootstrap"'),
+    server.indexOf('app.post("/api/ai/qa"')
+  );
+
+  assert.match(aggregateRoute, /requireSession\(config, \["teacher"\]\)/);
+  assert.match(aggregateRoute, /draftStatus: "draft"/);
+  assert.match(aggregateRoute, /draftGeneratedAt: new Date\(\)\.toISOString\(\)/);
+  assert.match(aggregateRoute, /filterStudentProfileSnapshot\(snapshot, "teacher"\)/);
+  assert.match(getRoute, /profiles: \{ orderBy: \{ createdAt: "desc" \}, take: 20 \}/);
+  assert.match(getRoute, /selectProfileSnapshotForRole\(student\.profiles, req\.session\.role\)/);
+  assert.match(getRoute, /mapStudent\(student, req\.session\.role\)/);
+  assert.match(bootstrapRoute, /profiles: \{ orderBy: \{ createdAt: "desc" \}, take: 20 \}/);
 });
 
 test("mergeStudentProfileAiDraft only merges safe structured AI fields", () => {

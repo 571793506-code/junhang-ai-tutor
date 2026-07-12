@@ -13,12 +13,9 @@
 ## Current Evidence And Review Reconciliation
 
 - 当前集成分支：`codex/agent-skills-system-integration`。
-- 计划起始基线为 `c814807`，设计提交为 `d31a508` 和 `c814807`；Task 9 开始时集成分支 HEAD 为 `5fa2325`。
-- Sol 工作树：`.worktrees/gpt56-sol-escalation`，分支 `codex/gpt56-sol-escalation`，HEAD `e52e9a6`。
-- 本计划生成前的未提交范围只有 `AGENTS.md`、`SKILLS.md` 和 `skills/project-grill-review/`；计划文档随后作为独立未跟踪文件加入。
-- 第二次审查比第一次多看到了已完成的 Sol 工作树。因此生成/批改的 Terra-to-Sol 实现已从“待开发”变成“待合并并验证”，并不是两次审查互相否定。
-- AI 视频活动路由已经不在根 `SKILLS.md` 中，仓库也没有受 Git 跟踪的 `skills/ai-video-production`；仍需删除的是 Grill 规则中的 AI 视频/MiniMax 专属残余和机器绝对路径。
-- Tasks 1-8 已由下方执行证据所列提交实现；Task 9 负责规则、契约和最终分层验证，Task 10 仍未执行。
+- Tasks 1-10 已全部完成；历史提交与分层验证证据保留在下方执行记录中。
+- Sol 分支 `codex/gpt56-sol-escalation` 继续保留并已纳入当前集成线；本地 Sol worktree 注册与目录已在验证后移除。
+- 当前执行结论以本节状态和下方证据为准；本摘要不预先声明后续修复提交 SHA。
 
 ## File Map
 

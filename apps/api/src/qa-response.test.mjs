@@ -397,10 +397,14 @@ test("QA routes use server-confirmed actor context and response cleaners", () =>
   assert.match(qaRoute, /buildQaActorContext\(session, input,/);
   assert.match(qaRoute, /answerStudentQuestionService\(config, \{ \.\.\.input, \.\.\.actorContext \}, options\)/);
   assert.match(qaRoute, /cleanQaResultForClient\(result\)/);
+  assert.doesNotMatch(qaRoute, /\bpersistence\b/);
+  assert.match(qaRoute, /res\.json\(\{ ok: true, result: cleanQaResultForClient\(result\) \}\)/);
   assert.match(classroomRoute, /assertClassroomStudentScope\(\{ session: req\.session \}, res, input\.studentId\)/);
   assert.doesNotMatch(classroomRoute, /prisma\.student\.findFirst/);
   assert.match(classroomRoute, /text: qa\.studentAnswer \|\| qa\.answer/);
   assert.match(classroomRoute, /cleanClassroomQaResultForClient/);
+  assert.doesNotMatch(classroomRoute, /\bpersistence\b/);
+  assert.match(classroomRoute, /res\.json\(\{\s*ok: true,\s*result: cleanClassroomQaResultForClient/);
   const qaServiceIndex = classroomRoute.indexOf("const qa = await answerStudentQuestionService");
   const speechIndex = classroomRoute.indexOf("const speech = await createMiniMaxSpeechTask");
   assert.equal(qaServiceIndex >= 0 && speechIndex > qaServiceIndex, true);

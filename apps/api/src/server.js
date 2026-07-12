@@ -53,7 +53,8 @@ import {
   buildStudentGrowthSnapshot,
   filterStudentProfileSnapshot,
   mergeStudentProfileAiDraft,
-  renderStudentGrowthProfilePrintHtml
+  renderStudentGrowthProfilePrintHtml,
+  selectProfileSnapshotForRole
 } from "./student-growth-profile.js";
 import {
   buildTermReportDraft,
@@ -1037,10 +1038,11 @@ function enrollmentStatusToDb(status) {
   return "ACTIVE";
 }
 
-function mapStudent(student) {
-  const profile = student.profiles?.[0]?.snapshot || {};
+function mapStudent(student, role = "teacher") {
+  const selectedProfile = selectProfileSnapshotForRole(student.profiles, role);
+  const profile = selectedProfile || {};
   const publishedProfileSnapshot = Object.keys(profile).length
-    ? filterStudentProfileSnapshot(profile, "student")
+    ? filterStudentProfileSnapshot(profile, role)
     : null;
   const guardianLink = student.guardians?.[0];
   return {
@@ -2923,7 +2925,7 @@ app.get("/api/bootstrap", requireDatabase, requireSession(config, ["student", "t
         guardians: { include: { guardian: true }, take: 1 },
         responsibleTeacher: true,
         teacherAssignments: { where: { activeTo: null } },
-        profiles: { orderBy: { createdAt: "desc" }, take: 1 }
+        profiles: { orderBy: { createdAt: "desc" }, take: 20 }
       }
     }),
     prisma.learningTask.findMany({
@@ -3003,7 +3005,9 @@ app.get("/api/bootstrap", requireDatabase, requireSession(config, ["student", "t
           accessCode: teacher.accessCodes?.[0]?.codePreview || "",
           status: teacherStatusToClient(teacher.status)
         }),
-    students: req.session.role === "classroom" ? visibleStudents.map(mapClassroomStudent) : visibleStudents.map(mapStudent),
+    students: req.session.role === "classroom"
+      ? visibleStudents.map(mapClassroomStudent)
+      : visibleStudents.map((student) => mapStudent(student, req.session.role)),
     tasks: visibleTasks.map(mapTask),
     assignments: visibleAssignments.map(mapAssignment),
     classroomDevices: req.session.role === "classroom"
@@ -3048,9 +3052,9 @@ app.post("/api/ai/qa", requireSession(config, ["student", "teacher", "classroom"
   const actorContext = buildQaActorContext(session, input, {
     classroomStudentConfirmed: session.role === "classroom" && Boolean(input.studentId)
   });
-  const { options, persistence } = await persistenceOptions(input);
+  const { options } = await persistenceOptions(input);
   const result = await answerStudentQuestionService(config, { ...input, ...actorContext }, options);
-  res.json({ ok: true, persistence, result: cleanQaResultForClient(result) });
+  res.json({ ok: true, result: cleanQaResultForClient(result) });
 }));
 
 app.post("/api/ai/vocabulary", requireSession(config, ["student", "teacher", "classroom"]), asyncRoute(async (req, res) => {
@@ -3587,7 +3591,7 @@ app.post("/api/classroom/voice-qa", requireDatabase, requireSession(config, ["cl
     classroomStudentConfirmed
   });
 
-  const { options, persistence } = await persistenceOptions({
+  const { options } = await persistenceOptions({
     ...input,
     deviceId,
     question: transcript
@@ -3620,7 +3624,6 @@ app.post("/api/classroom/voice-qa", requireDatabase, requireSession(config, ["cl
 
   res.json({
     ok: true,
-    persistence,
     result: cleanClassroomQaResultForClient({ qa, transcript, voice: speech })
   });
 }));
@@ -4426,9 +4429,7 @@ app.post("/api/students/:studentId/profile/print", requireDatabase, requireSessi
   });
 }));
 
-app.post("/api/students/:studentId/profile/aggregate", requireDatabase, requireSession(config, ["student", "teacher"]), asyncRoute(async (req, res) => {
-  const scopeError = assertStudentOwnsRequest(req, req.params.studentId);
-  if (scopeError) return res.status(403).json(scopeError);
+app.post("/api/students/:studentId/profile/aggregate", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
   if (!(await assertTeacherStudentScope(req, res, req.params.studentId))) return;
 
   const student = await loadStudentProfileSources(req.params.studentId);
@@ -4455,7 +4456,9 @@ app.post("/api/students/:studentId/profile/aggregate", requireDatabase, requireS
       aiGenerated: narrativeResult.aiGenerated,
       generatedBy: narrativeResult.generatedBy,
       unavailableReason: narrativeResult.unavailableReason
-    }
+    },
+    draftStatus: "draft",
+    draftGeneratedAt: new Date().toISOString()
   };
   await prisma.studentProfile.create({ data: { studentId: student.id, snapshot } });
   await auditEvent(req, {
@@ -4471,8 +4474,8 @@ app.post("/api/students/:studentId/profile/aggregate", requireDatabase, requireS
 
   res.json({
     ok: true,
-    student: mapStudent({ ...student, profiles: [{ snapshot }] }),
-    snapshot: filterStudentProfileSnapshot(snapshot, req.session.role)
+    student: mapStudent({ ...student, profiles: [{ snapshot }] }, "teacher"),
+    snapshot: filterStudentProfileSnapshot(snapshot, "teacher")
   });
 }));
 
@@ -4487,7 +4490,7 @@ app.get("/api/students/:studentId/profile", requireDatabase, requireSession(conf
       accessCodes: { where: { status: "ACTIVE" }, take: 1 },
       guardians: { include: { guardian: true }, take: 1 },
       responsibleTeacher: true,
-      profiles: { orderBy: { createdAt: "desc" }, take: 1 },
+      profiles: { orderBy: { createdAt: "desc" }, take: 20 },
       reports: { orderBy: { createdAt: "desc" }, take: 20 },
       mistakes: { orderBy: { createdAt: "desc" }, take: 50, include: { knowledgePoint: true } }
     }
@@ -4495,10 +4498,11 @@ app.get("/api/students/:studentId/profile", requireDatabase, requireSession(conf
   if (!student) {
     return res.status(404).json({ ok: false, error: "STUDENT_NOT_FOUND", message: "未找到学生档案。" });
   }
+  const snapshot = selectProfileSnapshotForRole(student.profiles, req.session.role);
   res.json({
     ok: true,
-    student: mapStudent(student),
-    snapshot: filterStudentProfileSnapshot(student.profiles?.[0]?.snapshot || null, req.session.role),
+    student: mapStudent(student, req.session.role),
+    snapshot: filterStudentProfileSnapshot(snapshot, req.session.role),
     reports: student.reports.map((report) => mapReport(report, req.session.role)).filter(Boolean),
     unresolvedMistakes: student.mistakes.filter((item) => !item.masteryResolved).map(mapCorrection)
   });
