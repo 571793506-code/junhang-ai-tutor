@@ -13,12 +13,12 @@
 ## Current Evidence And Review Reconciliation
 
 - 当前集成分支：`codex/agent-skills-system-integration`。
-- 当前基线提交：`c814807`，设计提交为 `d31a508` 和 `c814807`。
+- 计划起始基线为 `c814807`，设计提交为 `d31a508` 和 `c814807`；Task 9 开始时集成分支 HEAD 为 `5fa2325`。
 - Sol 工作树：`.worktrees/gpt56-sol-escalation`，分支 `codex/gpt56-sol-escalation`，HEAD `e52e9a6`。
 - 本计划生成前的未提交范围只有 `AGENTS.md`、`SKILLS.md` 和 `skills/project-grill-review/`；计划文档随后作为独立未跟踪文件加入。
 - 第二次审查比第一次多看到了已完成的 Sol 工作树。因此生成/批改的 Terra-to-Sol 实现已从“待开发”变成“待合并并验证”，并不是两次审查互相否定。
 - AI 视频活动路由已经不在根 `SKILLS.md` 中，仓库也没有受 Git 跟踪的 `skills/ai-video-production`；仍需删除的是 Grill 规则中的 AI 视频/MiniMax 专属残余和机器绝对路径。
-- 仍未实现的范围是：`.agents/skills`、`check:skills`、小程序反向同步、问答结构化信号、身份/准入持久化、档案过滤聚合、规则和契约收口。
+- Tasks 1-8 已由下方执行证据所列提交实现；Task 9 负责规则、契约和最终分层验证，Task 10 仍未执行。
 
 ## File Map
 
@@ -74,7 +74,7 @@
 - Modify: `SKILLS.md`
 - Modify: `skills/project-grill-review/SKILLS.md`
 
-- [ ] **Step 1: Reconfirm the exact dirty scope**
+- [x] **Step 1: Reconfirm the exact dirty scope**
 
 Run:
 
@@ -85,7 +85,7 @@ git diff -- AGENTS.md SKILLS.md skills/project-grill-review/SKILLS.md
 
 Expected: only the three approved rule paths appear. Do not proceed if another staged path appears.
 
-- [ ] **Step 2: Correct the review boundary in `AGENTS.md`**
+- [x] **Step 2: Correct the review boundary in `AGENTS.md`**
 
 Replace the universal “all model output requires teacher review” wording with these task-aware rules:
 
@@ -98,7 +98,7 @@ Replace the universal “all model output requires teacher review” wording wit
 
 Keep the existing parse/normalize/validate/repair and multi-end visibility rules. Restrict `review-state handling` to the task-specific policy instead of asserting that every Q&A response waits for review.
 
-- [ ] **Step 3: Correct the root `SKILLS.md` routing text**
+- [x] **Step 3: Correct the root `SKILLS.md` routing text**
 
 Use the same boundary in concise form and add the missing Prompt/Context route:
 
@@ -108,7 +108,7 @@ Use the same boundary in concise form and add the missing Prompt/Context route:
 
 The current module table must contain no AI video row and no link to `skills/ai-video-production`.
 
-- [ ] **Step 4: Make the Grill Playbook portable and project-scoped**
+- [x] **Step 4: Make the Grill Playbook portable and project-scoped**
 
 Apply all of these exact changes to `skills/project-grill-review/SKILLS.md`:
 
@@ -117,7 +117,7 @@ Apply all of these exact changes to `skills/project-grill-review/SKILLS.md`:
 - Replace the stale restart statement with: “外部 Skill 是否在当前任务可见必须以当前 Skills 列表为准；不可见时仍按本项目 Playbook 执行，不假设重启一定生效。”
 - Preserve one-question-at-a-time, source-first investigation, recommendation, reversibility, and explicit verification rules.
 
-- [ ] **Step 5: Verify the rule-only change**
+- [x] **Step 5: Verify the rule-only change**
 
 Run:
 
@@ -129,7 +129,7 @@ rg -n "ai-video-production|AI 视频|mmx\.cmd|C:\\Users\\86188\\.codex\\skills|�
 
 Expected: encoding exits `0`, `git diff --check` is empty, and `rg` returns no matches.
 
-- [ ] **Step 6: Commit only the rule group**
+- [x] **Step 6: Commit only the rule group**
 
 ```powershell
 git add -- AGENTS.md SKILLS.md skills/project-grill-review/SKILLS.md
@@ -144,7 +144,7 @@ Expected: one commit containing exactly those three paths.
 **Files:**
 - Merge commit only; no manual source edit is expected.
 
-- [ ] **Step 1: Prove both worktrees and commits are in the expected state**
+- [x] **Step 1: Prove both worktrees and commits are in the expected state**
 
 ```powershell
 git status --short --branch
@@ -155,7 +155,7 @@ git rev-parse e52e9a6
 
 Expected: integration worktree is clean, Sol branch and `e52e9a6` resolve to the same object, and the Sol worktree still exists.
 
-- [ ] **Step 2: Perform the approved non-fast-forward merge**
+- [x] **Step 2: Perform the approved non-fast-forward merge**
 
 ```powershell
 git merge --no-ff codex/gpt56-sol-escalation -m "merge: integrate GPT-5.6 Sol escalation"
@@ -163,7 +163,7 @@ git merge --no-ff codex/gpt56-sol-escalation -m "merge: integrate GPT-5.6 Sol es
 
 Expected: merge succeeds without overwriting Task 1. If a conflict appears, resolve only by preserving Task 1’s Q&A/routing wording and Sol’s generation/grading implementation; then inspect every conflict path before continuing.
 
-- [ ] **Step 3: Verify merge ancestry and scope**
+- [x] **Step 3: Verify merge ancestry and scope**
 
 ```powershell
 git merge-base --is-ancestor e52e9a6 HEAD
@@ -179,7 +179,7 @@ Expected: ancestry command exits `0`, HEAD is a merge commit, and the worktree i
 - No source edits unless a deterministic regression is reproduced.
 - Append verification evidence later in Task 9.
 
-- [ ] **Step 1: Run focused fake-server and pure unit tests**
+- [x] **Step 1: Run focused fake-server and pure unit tests**
 
 ```powershell
 $aiTests = Get-ChildItem packages\ai\src -Filter *.test.mjs | Select-Object -ExpandProperty FullName
@@ -192,7 +192,7 @@ node --test apps\api\src\assessment-print-export-gate.test.mjs apps\api\src\grad
 
 Expected: all tests pass with zero failures. A deterministic failure must be fixed before Task 4; do not weaken an escalation or learner-visibility gate.
 
-- [ ] **Step 2: Run project checks affected by the merge**
+- [x] **Step 2: Run project checks affected by the merge**
 
 ```powershell
 cmd /c npm.cmd run check:generation:blueprint
@@ -205,7 +205,7 @@ cmd /c npm.cmd run check:encoding
 
 Expected: every command exits `0`.
 
-- [ ] **Step 3: Probe the real intermediary once after formal merge**
+- [x] **Step 3: Probe the real intermediary once after formal merge**
 
 ```powershell
 cmd /c npm.cmd run check:gpt56 -- --include-sol
@@ -213,7 +213,7 @@ cmd /c npm.cmd run check:gpt56 -- --include-sol
 
 Expected: Terra and Sol pass text, JSON object, reasoning effort, JSON Schema, and synthetic grading probes. Image input may remain unsupported because MiniMax owns OCR.
 
-- [ ] **Step 4: Re-run the explicit Sol generation acceptance gate**
+- [x] **Step 4: Re-run the explicit Sol generation acceptance gate**
 
 ```powershell
 cmd /c npm.cmd run check:generation:quality:sol
@@ -221,7 +221,7 @@ cmd /c npm.cmd run check:generation:quality:sol
 
 Expected: six samples pass with Sol `high` and `usedDynamicFallback=false`. Record latency and any external `524`. One unchanged retry is allowed only to distinguish transient intermediary failure from a deterministic code failure.
 
-- [ ] **Step 5: Preserve the known grading-accuracy limitation**
+- [x] **Step 5: Preserve the known grading-accuracy limitation**
 
 ```powershell
 $goldPath = 'materials\evaluation\teacher-grading-gold-cases.json'
@@ -245,7 +245,7 @@ Expected: either the teacher-confirmed gold gate passes or the missing operation
 - Modify: `SKILLS.md`
 - Modify: `package.json`
 
-- [ ] **Step 1: Write failing Skill guard tests**
+- [x] **Step 1: Write failing Skill guard tests**
 
 Create `scripts/skills-check.test.mjs` with temporary workspace fixtures covering:
 
@@ -290,7 +290,7 @@ test("rejects validation commands that are absent from package scripts", () => {
 });
 ```
 
-- [ ] **Step 2: Run the new tests and verify RED**
+- [x] **Step 2: Run the new tests and verify RED**
 
 ```powershell
 node --test scripts\skills-check.test.mjs
@@ -298,7 +298,7 @@ node --test scripts\skills-check.test.mjs
 
 Expected: FAIL because `scripts/skills-check-lib.mjs` does not exist.
 
-- [ ] **Step 3: Implement the Skill guard core and CLI**
+- [x] **Step 3: Implement the Skill guard core and CLI**
 
 Implement `validateSkillsWorkspace(root, options)` in `scripts/skills-check-lib.mjs` with this fixed route map:
 
@@ -336,7 +336,7 @@ console.log(JSON.stringify(result, null, 2));
 if (!result.ok) process.exitCode = 1;
 ```
 
-- [ ] **Step 4: Add the nine thin discovery wrappers**
+- [x] **Step 4: Add the nine thin discovery wrappers**
 
 Each wrapper must contain only valid frontmatter, the route to read, cross-module requirements, and the smallest verification command. Use these exact names and triggering descriptions:
 
@@ -354,7 +354,7 @@ Each wrapper must contain only valid frontmatter, the route to read, cross-modul
 
 Every body must state that `AGENTS.md` has higher project-rule priority and that the routed Playbook must be read before editing.
 
-- [ ] **Step 5: Remove the remaining absolute Skill path and register the command**
+- [x] **Step 5: Remove the remaining absolute Skill path and register the command**
 
 In `skills/miniprogram/SKILLS.md`, replace the machine path with:
 
@@ -368,7 +368,7 @@ Add to `package.json`:
 "check:skills": "node scripts/skills-check.mjs"
 ```
 
-- [ ] **Step 6: Run GREEN and full Skill checks**
+- [x] **Step 6: Run GREEN and full Skill checks**
 
 ```powershell
 node --test scripts\skills-check.test.mjs
@@ -379,7 +379,7 @@ git diff --check
 
 Expected: all tests and checks pass; output reports nine checked Skills and zero failures.
 
-- [ ] **Step 7: Commit the discovery layer**
+- [x] **Step 7: Commit the discovery layer**
 
 ```powershell
 git add -- .agents/skills scripts/skills-check-lib.mjs scripts/skills-check.test.mjs scripts/skills-check.mjs package.json SKILLS.md skills/miniprogram/SKILLS.md
@@ -397,7 +397,7 @@ git commit -m "feat: add repository skill discovery guard"
 - Modify: `skills/miniprogram/SKILLS.md`
 - Modify: `docs/44-miniprogram-migration-runbook.md`
 
-- [ ] **Step 1: Write failing sync tests**
+- [x] **Step 1: Write failing sync tests**
 
 Create tests using temporary source/repository directories. The test matrix must assert:
 
@@ -420,7 +420,7 @@ source/miniprogram_npm/x.js     excluded
 source/.cache/tool-state.json   excluded
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```powershell
 node --test scripts\miniprogram-sync-lib.test.mjs
@@ -428,7 +428,7 @@ node --test scripts\miniprogram-sync-lib.test.mjs
 
 Expected: FAIL because `scripts/miniprogram-sync-lib.mjs` does not exist.
 
-- [ ] **Step 3: Implement deterministic comparison and write protection**
+- [x] **Step 3: Implement deterministic comparison and write protection**
 
 Export these functions from `scripts/miniprogram-sync-lib.mjs`:
 
@@ -453,7 +453,7 @@ export function assertRepositoryMirrorClean(repoRoot, runGit) {}
 
 `compareMiniprogramTrees` must return sorted POSIX-style arrays `{ added, changed, deleted }` using byte comparison. `applyMiniprogramSync` must create parent directories, copy added/changed files, delete only allowed target files, remove only newly empty allowed directories, and run `assertPathInside` before every write or delete.
 
-- [ ] **Step 4: Implement the CLI modes**
+- [x] **Step 4: Implement the CLI modes**
 
 Create `scripts/sync-miniapp-to-repo.mjs` with:
 
@@ -464,7 +464,7 @@ Create `scripts/sync-miniapp-to-repo.mjs` with:
 
 Resolve the source from `JH_MINIAPP_TARGET` or `path.join(os.homedir(), "WeChatProjects", "miniapp-1")`. Resolve the target as `<repo>/apps/miniprogram`. Reject any mode other than `--check` or `--write`.
 
-- [ ] **Step 5: Register commands and documentation**
+- [x] **Step 5: Register commands and documentation**
 
 Add to `package.json`:
 
@@ -482,7 +482,7 @@ miniapp-1 -> apps/miniprogram: check:miniprogram-sync then explicit sync:minipro
 
 State that no ordinary validation command performs `--write` automatically.
 
-- [ ] **Step 6: Run GREEN and static checks**
+- [x] **Step 6: Run GREEN and static checks**
 
 ```powershell
 node --test scripts\miniprogram-sync-lib.test.mjs
@@ -494,7 +494,7 @@ git diff --check
 
 Expected: unit tests and static checks pass.
 
-- [ ] **Step 7: Commit the reverse-sync guard**
+- [x] **Step 7: Commit the reverse-sync guard**
 
 ```powershell
 git add -- scripts/miniprogram-sync-lib.mjs scripts/miniprogram-sync-lib.test.mjs scripts/sync-miniapp-to-repo.mjs package.json skills/miniprogram/SKILLS.md docs/44-miniprogram-migration-runbook.md
@@ -502,7 +502,7 @@ git diff --cached --check
 git commit -m "feat: guard miniprogram reverse sync"
 ```
 
-- [ ] **Step 8: Compare the live runtime tree and explicitly close any source drift**
+- [x] **Step 8: Compare the live runtime tree and explicitly close any source drift**
 
 Run the read-only comparison after the guard commit:
 
@@ -540,7 +540,7 @@ Do not create this commit when the original read-only comparison is already clea
 - Modify: `packages/ai/src/gpt56-runtime.test.mjs`
 - Modify: `packages/ai/src/index.d.ts`
 
-- [ ] **Step 1: Write failing normalization tests**
+- [x] **Step 1: Write failing normalization tests**
 
 Cover this exact contract:
 
@@ -570,7 +570,7 @@ Tests must prove:
 - malformed JSON can return a sanitized plain-text answer but has no eligible learning signal;
 - provider, model, raw, prompt, and debug fields never enter `studentAnswer` or `learningSignal`.
 
-- [ ] **Step 2: Run the helper test and verify RED**
+- [x] **Step 2: Run the helper test and verify RED**
 
 ```powershell
 node --test packages\ai\src\qa-learning-signal.test.mjs
@@ -578,7 +578,7 @@ node --test packages\ai\src\qa-learning-signal.test.mjs
 
 Expected: FAIL because the module does not exist.
 
-- [ ] **Step 3: Implement the Q&A parser and normalizer**
+- [x] **Step 3: Implement the Q&A parser and normalizer**
 
 Export from `packages/ai/src/qa-learning-signal.js`:
 
@@ -592,7 +592,7 @@ export function unavailableQaOutput(reason) {}
 
 Use strict enum sets, trim strings, cap `studentAnswer` at 2000 characters, knowledge points at 8 items/80 characters each, misconception hypotheses at 5 items/160 characters each, and never trust model-provided `profileEligibility` as the final service eligibility.
 
-- [ ] **Step 4: Write failing runtime request tests**
+- [x] **Step 4: Write failing runtime request tests**
 
 Extend `packages/ai/src/gpt56-runtime.test.mjs` to assert that `answerStudentQuestion`:
 
@@ -602,7 +602,7 @@ Extend `packages/ai/src/gpt56-runtime.test.mjs` to assert that `answerStudentQue
 - returns normalized `studentAnswer`, `learningSignal`, and `structureValid`;
 - does not call or mention Sol after an unavailable, malformed, or blocked response.
 
-- [ ] **Step 5: Implement the minimal runtime change**
+- [x] **Step 5: Implement the minimal runtime change**
 
 In `packages/ai/src/runtime.js`, keep the provider route on `gpt56` Terra and change the call to:
 
@@ -615,7 +615,7 @@ const result = await timedCall(() => callGpt56Chat(config, messages, {
 
 Parse with `normalizeQaModelOutput`. Return `answer` as an internal compatibility alias of `studentAnswer`; retain raw/model fields only inside the internal runtime result and model run, never in public API helpers.
 
-- [ ] **Step 6: Run GREEN and all AI regressions**
+- [x] **Step 6: Run GREEN and all AI regressions**
 
 ```powershell
 node --test packages\ai\src\qa-learning-signal.test.mjs packages\ai\src\gpt56-runtime.test.mjs
@@ -626,7 +626,7 @@ git diff --check
 
 Expected: all AI tests pass and existing generation/grading Sol behavior is unchanged.
 
-- [ ] **Step 7: Commit the runtime contract**
+- [x] **Step 7: Commit the runtime contract**
 
 ```powershell
 git add -- packages/ai/src/qa-learning-signal.js packages/ai/src/qa-learning-signal.test.mjs packages/ai/src/runtime.js packages/ai/src/gpt56-runtime.test.mjs packages/ai/src/index.d.ts
@@ -644,7 +644,7 @@ git commit -m "feat: structure student qa learning signals"
 - Create: `apps/api/src/qa-response.test.mjs`
 - Modify: `apps/api/src/server.js`
 
-- [ ] **Step 1: Write the service eligibility matrix first**
+- [x] **Step 1: Write the service eligibility matrix first**
 
 Create tests for `buildQaLearningRecord(input, result)` with these expected outcomes:
 
@@ -674,7 +674,7 @@ The returned metadata must contain only:
 }
 ```
 
-- [ ] **Step 2: Run the service test and verify RED**
+- [x] **Step 2: Run the service test and verify RED**
 
 ```powershell
 node --test packages\services\src\qa-learning-record.test.mjs
@@ -682,7 +682,7 @@ node --test packages\services\src\qa-learning-record.test.mjs
 
 Expected: FAIL because the helper does not exist.
 
-- [ ] **Step 3: Implement service-level eligibility and persistence**
+- [x] **Step 3: Implement service-level eligibility and persistence**
 
 In `packages/services/src/qa-learning-record.js`, compute eligibility in service code; never accept the client’s or model’s final boolean. Use deterministic blocked reasons:
 
@@ -696,7 +696,7 @@ malformed-output
 
 Update `answerStudentQuestionService` to use `options.qaRunner || answerStudentQuestion`, persist the approved metadata to `QaSession.metadata`, persist `studentAnswer` to `QaSession.answer`, and store only `{ qaSessionId, available, mode }` on `VoiceInteraction.metadata`. Do not duplicate the full learning signal into `VoiceInteraction`.
 
-- [ ] **Step 4: Write API helper tests before changing routes**
+- [x] **Step 4: Write API helper tests before changing routes**
 
 Create `apps/api/src/qa-response.test.mjs` for:
 
@@ -723,7 +723,7 @@ Also assert learner responses contain only approved fields:
 
 Classroom voice responses may additionally contain `transcript` and `voice: { available, status, audioUrl, reason }`; they must not expose `providerId`, `model`, `raw`, `error`, `learningSignal`, `profileEligibility`, `blockedReason`, or `persisted`.
 
-- [ ] **Step 5: Run the API helper test and verify RED**
+- [x] **Step 5: Run the API helper test and verify RED**
 
 ```powershell
 node --test apps\api\src\qa-response.test.mjs
@@ -731,7 +731,7 @@ node --test apps\api\src\qa-response.test.mjs
 
 Expected: FAIL because `apps/api/src/qa-response.js` does not exist.
 
-- [ ] **Step 6: Implement API identity and response helpers**
+- [x] **Step 6: Implement API identity and response helpers**
 
 Export these functions from `apps/api/src/qa-response.js`:
 
@@ -743,7 +743,7 @@ export function cleanClassroomQaResultForClient({ qa, transcript, voice }) {}
 
 Move the current `cleanQaResultForClient` behavior out of `server.js`. The helper must sanitize display text and whitelist fields; it must not recursively pass unknown properties.
 
-- [ ] **Step 7: Wire both routes using server-confirmed context**
+- [x] **Step 7: Wire both routes using server-confirmed context**
 
 For `/api/ai/qa`, perform existing scope checks first, then call the service with:
 
@@ -756,7 +756,7 @@ const result = await answerStudentQuestionService(config, { ...input, ...actorCo
 
 For `/api/classroom/voice-qa`, replace the broad active-student lookup with `assertClassroomStudentScope({ session: req.session }, res, input.studentId)` so a student outside the device grade/class cannot be treated as confirmed. Only set `classroomStudentConfirmed=true` after that check succeeds. Pass `qa.studentAnswer || qa.answer` to speech and use `cleanClassroomQaResultForClient` for the response.
 
-- [ ] **Step 8: Run GREEN and service/API regressions**
+- [x] **Step 8: Run GREEN and service/API regressions**
 
 ```powershell
 node --test packages\services\src\qa-learning-record.test.mjs apps\api\src\qa-response.test.mjs
@@ -769,7 +769,7 @@ git diff --check
 
 Expected: all tests pass; Q&A still returns immediately and no teacher-review state is required by either learner endpoint.
 
-- [ ] **Step 9: Commit service and API wiring**
+- [x] **Step 9: Commit service and API wiring**
 
 ```powershell
 git add -- packages/services/src/qa-learning-record.js packages/services/src/qa-learning-record.test.mjs packages/services/src/index.js apps/api/src/qa-response.js apps/api/src/qa-response.test.mjs apps/api/src/server.js
@@ -783,7 +783,7 @@ git commit -m "feat: enforce qa profile eligibility"
 - Modify: `apps/api/src/student-growth-profile.js`
 - Modify: `apps/api/src/student-growth-profile.test.mjs`
 
-- [ ] **Step 1: Replace the old permissive fixture with explicit eligible and blocked records**
+- [x] **Step 1: Replace the old permissive fixture with explicit eligible and blocked records**
 
 Add fixtures for:
 
@@ -796,7 +796,7 @@ Add fixtures for:
 - one malformed result;
 - one legacy record with `{ confirmed: true }` but no schema version.
 
-- [ ] **Step 2: Write failing profile tests**
+- [x] **Step 2: Write failing profile tests**
 
 Tests must prove:
 
@@ -810,7 +810,7 @@ test("teacher blocked evidence contains only a minimal reason summary", () => {}
 test("student and parent views hide learningSignal, profileEvidencePack, and full qa text", () => {});
 ```
 
-- [ ] **Step 3: Run the focused test and verify RED**
+- [x] **Step 3: Run the focused test and verify RED**
 
 ```powershell
 node --test apps\api\src\student-growth-profile.test.mjs
@@ -818,7 +818,7 @@ node --test apps\api\src\student-growth-profile.test.mjs
 
 Expected: at least the eligibility and no-full-text assertions fail against the current permissive `qaSessions.map(...)` implementation.
 
-- [ ] **Step 4: Implement eligibility filtering and signal aggregation**
+- [x] **Step 4: Implement eligibility filtering and signal aggregation**
 
 In `buildProfileEvidencePack`:
 
@@ -829,7 +829,7 @@ In `buildProfileEvidencePack`:
 5. Do not copy `question`, `answer`, provider, model, raw, prompt, or debug into `qaEvidence`.
 6. Put ineligible current records and legacy records into teacher-only `blockedEvidence` using only ID, type, date, and a fixed reason.
 
-- [ ] **Step 5: Prevent Q&A-only strong conclusions**
+- [x] **Step 5: Prevent Q&A-only strong conclusions**
 
 Apply these deterministic rules:
 
@@ -838,7 +838,7 @@ Apply these deterministic rules:
 - `buildFocusSubjects` may mention Q&A only as “继续观察” unless grading, mistake, task, or classroom evidence supports the same subject.
 - conflicts between Q&A and confirmed grading/mistake evidence add a teacher review note rather than choosing one side automatically.
 
-- [ ] **Step 6: Run GREEN and profile/API checks**
+- [x] **Step 6: Run GREEN and profile/API checks**
 
 ```powershell
 node --test apps\api\src\student-growth-profile.test.mjs apps\api\src\student-term-report.test.mjs
@@ -849,7 +849,7 @@ git diff --check
 
 Expected: all tests pass; teacher snapshots can inspect minimal blocked reasons, while student/parent snapshots contain neither internal evidence packs nor Q&A learning signals.
 
-- [ ] **Step 7: Commit profile aggregation**
+- [x] **Step 7: Commit profile aggregation**
 
 ```powershell
 git add -- apps/api/src/student-growth-profile.js apps/api/src/student-growth-profile.test.mjs
@@ -870,7 +870,7 @@ git commit -m "feat: aggregate eligible qa profile evidence"
 - Modify: `docs/44-miniprogram-migration-runbook.md`
 - Modify: `docs/superpowers/plans/2026-07-11-agent-skills-system-integration.md` - mark executed checkboxes and append evidence only during execution
 
-- [ ] **Step 1: Document the final Q&A contract**
+- [x] **Step 1: Document the final Q&A contract**
 
 The Playbook and API contract must state:
 
@@ -882,7 +882,7 @@ The Playbook and API contract must state:
 - learner responses expose no learning signal or model-routing metadata;
 - weekly/monthly profiles, stage reports, parent summaries, print, and PDF remain teacher-confirmed outputs.
 
-- [ ] **Step 2: Resolve stale grading wording after the Sol merge**
+- [x] **Step 2: Resolve stale grading wording after the Sol merge**
 
 In `skills/grading/SKILLS.md`, make the sequence unambiguous:
 
@@ -892,7 +892,7 @@ In `skills/grading/SKILLS.md`, make the sequence unambiguous:
 
 Preserve teacher per-question review, low-confidence blocking, and teacher-confirmed archive rules.
 
-- [ ] **Step 3: Run every focused automated suite**
+- [x] **Step 3: Run every focused automated suite**
 
 ```powershell
 node --test scripts\skills-check.test.mjs scripts\miniprogram-sync-lib.test.mjs
@@ -906,7 +906,7 @@ node --test scripts\gpt56-capability-check.test.mjs scripts\generation-quality-c
 
 Expected: all suites pass with zero failures.
 
-- [ ] **Step 4: Run layered project validation**
+- [x] **Step 4: Run layered project validation**
 
 ```powershell
 cmd /c npm.cmd run check:skills
@@ -922,7 +922,7 @@ cmd /c npm.cmd run check:encoding
 
 Expected: all commands exit `0`. If live miniprogram sync reports a real source difference, classify it separately; do not silently write it during verification.
 
-- [ ] **Step 5: Run only the cross-cutting E2E justified by this scope**
+- [x] **Step 5: Run only the cross-cutting E2E justified by this scope**
 
 ```powershell
 cmd /c npm.cmd run check:content-context
@@ -941,13 +941,36 @@ git log --oneline --decorate -12
 
 Expected: no whitespace/encoding errors, no unrelated staged paths, and the planned commit sequence is visible.
 
-- [ ] **Step 7: Commit documentation and completion evidence**
+- [x] **Step 7: Commit documentation and completion evidence**
 
 ```powershell
 git add -- AGENTS.md SKILLS.md skills/ai-qa/SKILLS.md skills/student-profile/SKILLS.md skills/grading/SKILLS.md docs/14-api-contract.md docs/41-prompt-context-engineering-playbook.md docs/44-miniprogram-migration-runbook.md docs/superpowers/plans/2026-07-11-agent-skills-system-integration.md
 git diff --cached --check
 git commit -m "docs: close agent skills system integration"
 ```
+
+## Execution Evidence
+
+### Tasks 1-8
+
+- Task 1: `14121e8` aligned root agent/Skill boundaries and project Grill routing.
+- Task 2: `414a86d` is the non-fast-forward merge of `14121e8` and Sol HEAD `e52e9a6`; `git merge-base --is-ancestor e52e9a6 HEAD` exits `0`.
+- Task 3: `1337a2e` closed Sol quality-budget findings. Preserved ignored logs under `tmp/task3a-sol-integration-verification/` record AI `58/58`, services `44/44`, scripts `30/30`, and API gate `7/7`, all with exit `0`; generation blueprint, API, Web typecheck, Mini Program JS, services, encoding, diff, and status checks also record exit `0`. Real capability and six-case Sol generation quality checks record exit `0`; a later first Sol quality attempt recorded exit `1` for one transient case and `02b-sol-generation-quality-retry` recorded exit `0` with overall `status=passed`. Gold data is absent, so production grading accuracy remains unverified.
+- Task 4: `3747b6c` added nine repository Skill routes and `check:skills`.
+- Task 5: `1baa53a` added read-only reverse-sync comparison and explicit protected writes; follow-up hardening commits `b10a646`, `26155a3`, `da09238`, `01f0daa`, `f866a73`, and source alignment `7b357cb` are present.
+- Task 6: `6c4b40f` added the single-call structured Q&A contract; parser and sanitizer hardening commits through `3d92710` are present.
+- Task 7: `6198568` added service/API actor, identity, eligibility, persistence, and learner-response filtering; follow-up security and normalization commits through `e4c9830` are present.
+- Task 8: `42dd955` added eligible Q&A profile aggregation; follow-up validity, timeline, conflict, source-date, and evidence-priority commits `b4f58a3`, `945750c`, `354d961`, and `5fa2325` are present.
+
+### Task 9
+
+- Steps 1-2 documentation audit: required Q&A contract terms are present across the module Playbooks/contracts, and the exact grading sequence sentence is present in `skills/grading/SKILLS.md`, `docs/14-api-contract.md`, and `docs/41-prompt-context-engineering-playbook.md`; all focused text audits exited `0`.
+- Step 3 focused suites: Skill/sync tests `74/74`, all AI tests `91/91`, all services tests `64/64`, listed API tests `58/58`, and generation/grading script tests `36/36`; total `323/323`, zero failures, every command exit `0`.
+- Step 4 layered checks: `check:skills` found all nine routes; read-only `check:miniprogram-sync` reported `added=[]`, `changed=[]`, `deleted=[]`; Mini Program JS checked 28 files; `check:miniapp1` checked 103 files; generation blueprint passed all nine subject/kind cases; API check passed with database connected; service smoke passed QA/task/assessment/dictation in 62973 ms; Web typecheck exited `0`; encoding checked 527 files with zero issues. Every layered command exited `0`, and no reverse sync was written.
+- Step 5 E2E: `check:content-context` exited `0`; all 16 reported checks passed, including teacher auth, protected/input-path guards, content-context injection, draft export, pre-review print block, teacher acceptance, two final PDF assets with HTTP 200, and content-index cleanup. Scope remained `link-guard`; it does not claim generation quality.
+- Initial `workspace:guard` on `5fa2325` exited `1` only for the known local condition: 71 ignored Task 3 runtime-residue files and 57 approved ignored local PDF/PNG/helper assets. These files remain untouched and untracked; the branch has no upstream. Task 9 integrity evidence below must preserve this classification rather than deleting or staging the files.
+- Step 6 integrity classification: `git diff --check`, `git status --short --branch`, and `git log --oneline --decorate -12` exited `0`; status listed exactly the nine Task 9 owned documentation files and no untracked/staged paths. `workspace:guard` exited `1`, so this checkbox remains open and Task 9 is `DONE_WITH_CONCERNS`: it reported the expected nine visible Task 9 docs, 75 ignored runtime-residue files (the preserved 71 Task 3 files plus four `check:content-context` fixtures), the approved 57 ignored local assets, and no upstream. No ignored files or assets were deleted or staged.
+- Step 7 commit: explicit staging contained exactly the nine owned documentation files; `git diff --cached --check` exited `0`; commit `docs: close agent skills system integration` succeeded. The final SHA is reported from Git after this plan-only amend because a commit cannot contain its own stable SHA.
 
 ## Task 10: Remove The Local Sol Worktree After Verification
 

@@ -38,7 +38,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 | 学生登录 | `POST /api/student-login` | 学生 Web/小程序共用登录校验 | 只返回学生可见身份和学习状态 | `check --workspace apps/api` |
 | 教师登录 | `POST /api/teacher-login` | 教师 Web/小程序共用登录校验 | 可返回教师工作台所需状态，不返回完整密钥或数据库配置 | `check --workspace apps/api` |
 | 课堂设备登录 | `POST /api/classroom/device-login` | 课堂平板绑定设备后拉取课堂状态 | 只显示课堂任务、解锁状态和必要学生互动信息 | `check --workspace apps/api`、`check:miniprogram-js` |
-| AI 问答 | `POST /api/ai/qa`、`POST /api/classroom/voice-qa` | 学生端、课堂平板复用同一问答服务 | 学生/平板只显示 `AI生成` 或可用状态，不展示供应商 | `check --workspace apps/api`、`check:miniprogram-js` |
+| AI 问答 | `POST /api/ai/qa`、`POST /api/classroom/voice-qa` | 学生端、课堂平板复用同一服务端问答契约 | 一次 Terra 低推理调用即时返回；学习者响应不含学习信号或内部路由元数据 | `check --workspace apps/api`、`check:miniprogram-js` |
 | 今日任务 | `POST /api/teacher/tasks`、`GET /api/bootstrap` | 教师创建，学生/平板从启动数据或任务接口读取 | 未发布或教师未确认内容不进入学生/平板可见区 | `check --workspace apps/api` |
 | 组卷草稿 | `POST /api/assessments/draft` | 教师端提交要求，服务层生成并修复草稿 | 草稿只供教师复核，不直接展示给学生/家长 | `check:content-context`、`check:teaching-content` |
 | 草稿审查导出 | `POST /api/assessments/:assignmentId/draft-export` | 教师端打开审查 PDF | 返回审查资产和 `pending_teacher_review` 状态 | `check:content-context` |
@@ -87,7 +87,8 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 返回教师可见结构：`period`, `publishedView`, `teacherReview`, `profileEvidencePack`, `sourceCounts`, `timeline`, `narrative`。
   - 周/月档案统一使用综合成长档案模板，不提供单科独立模板入口。
   - 返回 `printView` 打印模板结构，用于教师端审查后打印、保存或后续生成 PDF。`printView.templateType=comprehensive_growth_archive`，`printView.renderingPolicy.pdfTextSource=html_template`，`printView.renderingPolicy.imagePreviewUsage=visual_reference_only`。
-  - `profileEvidencePack` 由任务、已复核批改、错题、阶段报告、课堂行为、AI 问答和语音互动组成；低置信、未复核、`provisionalScore` 或 `archiveEligible=false` 来源进入 `blockedEvidence`，不能进入学生/家长端发布视图。
+  - `profileEvidencePack` 由任务、已复核批改、错题、阶段报告、课堂行为、AI 问答和语音互动组成。问答只接受服务端计算合格且精确匹配 `qa-learning-signal-v1` 的记录；教师测试、匿名或身份未确认课堂、不可用、不安全、结构异常、日期无效和 legacy 问答排除在公开证据外，并仅以最小原因摘要进入教师侧 `blockedEvidence`。
+  - 单条来源问答不能提高掌握度、分数或形成强结论；同知识点重复信号可形成 `supported` 但仍是辅助证据。教师确认的非问答证据优先，冲突进入教师复核备注。
 
 - `POST /api/students/:studentId/profile/publish`
   - 教师确认并发布档案。
@@ -204,9 +205,17 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 ## AI 问答与任务
 
 - `POST /api/ai/qa`
-  - 学生端/课堂平板共用问答入口。
+  - 学生端问答入口，与课堂语音问答复用同一服务端契约。
   - 会自动判断 `GUIDED_THINKING` 或 `KNOWLEDGE_EXPLANATION`。
   - 关键字段：`studentId`, `studentName`, `deviceId`, `subject`, `question`。
+  - 服务端固定执行一次 `gpt-5.6-terra` 低推理文本调用，由同一次调用生成严格结构化的 `studentAnswer + learningSignal`；问答不调用 Sol。
+  - 安全、结构有效且可用的回答立即返回，不需要教师预审。actor、身份确认、准入和阻断原因由服务端计算，不能由客户端或模型决定。
+  - 只有 `schemaVersion=qa-learning-signal-v1` 且服务端判定合格的学生/已确认课堂记录进入档案辅助分析；教师测试、匿名或身份未确认课堂、不可用、不安全、结构异常、日期无效和 legacy 记录均排除。
+  - 学生响应只返回 `available`, `mode`, `answer`；不得包含 `learningSignal`, provider/model/routing, raw, prompt, debug, `profileEligibility`, `blockedReason` 或其他准入/阻断元数据。
+
+- `POST /api/classroom/voice-qa`
+  - 先由服务端确认课堂设备范围和当前学生身份，再复用同一问答契约；未确认身份的课堂问答不进入档案公开证据。
+  - 响应可在学生问答白名单字段外增加 `transcript` 和 `voice: { available, status, audioUrl, reason }`，不得返回学习信号或内部模型/准入元数据。
 
 - `POST /api/teacher/tasks`
   - 教师端输入要求，生成今日任务草稿；`createTask=true` 且数据库可用时落库。
@@ -246,9 +255,9 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 有 `assignmentId` 时优先使用生成记录里的题目和答案；没有答案键时先生成 `referenceAnswers` 再批改。
   - 若关联作业含 `questionLayoutManifest`，服务层必须优先使用该清单进行逐题参考答案、分值、解析和近似图片标注位置对齐，避免把整页 OCR 文本重新猜分题。
   - 单一明确答案的选择、短填空和数值题优先在服务层保守比较；混合题只把未解决题目发送给 GPT-5.6。外部材料没有答案键时由 GPT-5.6 生成参考答案和评分点。
-  - `uncertain`、低置信、答案冲突、图形证据不足或模型顶层分数与逐题汇总不一致时，只触发一次 GPT-5.6 风险审查；失败时进入教师复核，不继续串行调用多个模型。
-  - Terra 参考答案或批改出现可恢复 availability 故障，或在证据充分时出现答案/解析缺失、结论冲突、低置信等明确 quality 故障，可将最小失败题升级一次到 `gpt-5.6-sol/high`。configuration 故障不升级；OCR、题干、作答或参考证据不足时不调用 Sol，直接教师复核。
-  - 局部 Sol 参考答案或批改预算为 180 秒 / 12000 tokens；Sol 后不串接第三个文本模型。内部升级元数据不得进入普通端，所有 Sol 结果仍须教师逐题确认。Sol availability 或合成质量检查不构成批改正确率证明，正确率必须由教师确认的 gold 数据评估。
+  - 正常批改先完成一次 Terra 主批改/风险复判；只有已分类为可恢复 availability 或证据充分的 quality 故障时，才允许对最小失败题追加一次 Sol。这里的“一次风险复判”不包含条件式 Sol 升级，也不允许 Sol 后再串接第三个文本模型。
+  - configuration 故障不升级；OCR、题干、作答或参考证据不足属于 evidence 故障，不调用 Sol，直接进入教师复核。局部 Sol 参考答案或批改预算为 180 秒 / 12000 tokens，每个失败题最多一次。
+  - 内部升级元数据不得进入普通端，所有结果仍须教师逐题确认。Sol availability 或合成质量检查不构成批改正确率证明，正确率必须由教师确认的 gold 数据评估。
   - 总分由服务层按逐题得分计算，模型顶层 `score` 不得覆盖逐题结果。
   - API 在 OCR 前执行本地图片质量检查，记录 `imageQuality`；分辨率、亮度、对比度或清晰度不达标时进入教师复核。
   - 视觉 OCR 会尽量生成 `ocrQuestions[]`，每项包含 `questionNo`, `printedPrompt`, `studentAnswer`, `observedWork`, `bbox`, `confidence`，用于逐题批改和图片标注。

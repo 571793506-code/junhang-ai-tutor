@@ -92,7 +92,12 @@
 - 缺少某学科记录时，只写“记录不足，继续观察”，不要补编表现。
 - `REVIEWED` 以外的批改、`needsTeacherReview=true`、`archiveEligible=false`、低置信 OCR、仅有 `provisionalScore` 的结果进入 `blockedEvidence`。
 - `blockedEvidence` 可给教师看，用于复核提示；不得进入学生/家长端 `publishedView`。
-- 问答和课堂互动属于辅助证据，除非教师确认或有多个来源互相支撑，不应单独形成强结论。
+- 问答只接受服务端计算为合格且精确匹配 `schemaVersion=qa-learning-signal-v1` 的记录；actor、身份、可用性、安全、结构、日期和 `profileEligibility` 任一不满足即不进入公开证据。
+- 教师测试、匿名或身份未确认的课堂问答、不可用、不安全、结构异常、日期无效和 legacy 记录只进入教师侧最小 `blockedEvidence`，不得包含完整问题、回答、学习信号或模型运行数据。
+- 单条来源问答只能形成 `weak` 辅助观察，不能提高 `mastery`、`weeklyScore` 或形成强结论；同一知识点至少两条合格信号可形成 `supported`，但仍不得替代教师确认的正式证据。
+- 已确认的批改、错题、任务和课堂证据高于问答关注点；两者冲突时保留教师复核备注，不自动选择问答结论。
+- 学生和家长视图不得包含 `learningSignal`、`profileEvidencePack`、完整问答文本、准入/阻断原因或模型运行元数据。
+- 周/月档案、期中/期末报告、家长摘要和正式打印/PDF 必须经过教师确认；小程序档案页只展示教师已发布内容。
 
 ## 推荐输出形态
 
