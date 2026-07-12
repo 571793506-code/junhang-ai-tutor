@@ -4,6 +4,14 @@ const QUESTION_INTENTS = new Set(["concept", "method", "error_reasoning", "expre
 const DIFFICULTY_SIGNALS = new Set(["none", "possible", "clear"]);
 const CONFIDENCE_LEVELS = new Set(["low", "medium", "high"]);
 const INTERNAL_LABEL = /(?:^|[\s,;，；([{])["']?(?:provider|model|raw|prompt|debug)["']?\s*[:=：＝]/i;
+const DISTINCT_PROJECT_IDENTIFIER = /\b(?:gpt[-\s]?5[.-]6|openai|deepseek)\b/i;
+const MINIMAX_BRAND = /\bMiniMax\b/;
+const PROVIDER_CONTEXT = "provider|model|api|route|routed|routing|response|runtime|generated|powered|unavailable|timeout|failed";
+const CONTEXTUAL_PROJECT_IDENTIFIER = new RegExp(
+  `(?:\\b(?:${PROVIDER_CONTEXT})\\b[\\s\\S]{0,32}\\b(?:terra|sol|minimax)\\b|` +
+  `\\b(?:terra|sol|minimax)\\b[\\s\\S]{0,32}\\b(?:${PROVIDER_CONTEXT})\\b)`,
+  "i"
+);
 const QA_UNAVAILABLE_ANSWER = "AI 问答暂时不可用，请稍后再试。";
 const REQUIRED_SIGNAL_FIELDS = [
   "knowledgePoints",
@@ -66,6 +74,12 @@ function hasEmbeddedJson(value) {
   return false;
 }
 
+function hasProjectIdentifier(value) {
+  return DISTINCT_PROJECT_IDENTIFIER.test(value)
+    || MINIMAX_BRAND.test(value)
+    || CONTEXTUAL_PROJECT_IDENTIFIER.test(value);
+}
+
 export function sanitizeQaText(value, { maxLength = 2000, rejectInternal = true } = {}) {
   if (typeof value !== "string") return "";
   const text = value
@@ -73,7 +87,7 @@ export function sanitizeQaText(value, { maxLength = 2000, rejectInternal = true 
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .trim();
   if (!text) return "";
-  if (rejectInternal && (INTERNAL_LABEL.test(text) || hasEmbeddedJson(text))) return "";
+  if (rejectInternal && (INTERNAL_LABEL.test(text) || hasProjectIdentifier(text) || hasEmbeddedJson(text))) return "";
   return Array.from(text).slice(0, maxLength).join("");
 }
 
@@ -87,8 +101,12 @@ export function sanitizeQaAnswer(value) {
 function sanitizeSignalList(value, maxItems, maxLength) {
   if (!Array.isArray(value)) return { items: [], valid: false };
   const items = [];
-  let valid = value.length <= maxItems;
-  for (let index = 0; index < value.length; index += 1) {
+  const declaredLength = value.length;
+  const inspectedLength = Number.isSafeInteger(declaredLength) && declaredLength >= 0
+    ? Math.min(declaredLength, maxItems)
+    : 0;
+  let valid = declaredLength <= maxItems;
+  for (let index = 0; index < inspectedLength; index += 1) {
     if (!Object.hasOwn(value, index) || typeof value[index] !== "string") {
       valid = false;
       continue;
