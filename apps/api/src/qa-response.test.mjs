@@ -62,6 +62,11 @@ const genericJsonFragments = [
   `prefix [["secret"`
 ];
 const unsafeSemanticArrays = [
+  `['alpha', 'beta']`,
+  `['alpha\\'s', 'beta']`,
+  `[{'custom': 'secret'}]`,
+  `[1, 'secret']`,
+  `['${"A".repeat(5000)}']`,
   `[true, false]`,
   `prefix [true, false] suffix`,
   `[true`,
@@ -170,6 +175,8 @@ test("QA response cleaners preserve ordinary list, vector, set, and interval not
     "The list [1, 2, 3] has three numbers.",
     "The vector [-1, 0, 1] crosses zero.",
     "The matrix [[1, 2], [3, 4]] has two rows.",
+    "The vector [1, 2] isn't empty.",
+    "The teacher quoted 'alpha and beta' in prose.",
     "The set is {1, 2, 3}.",
     "Use [a, b] for the interval."
   ];

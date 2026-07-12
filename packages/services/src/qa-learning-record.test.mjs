@@ -71,6 +71,11 @@ const genericJsonFragments = [
   `prefix [["secret"`
 ];
 const unsafeSemanticArrays = [
+  `['alpha', 'beta']`,
+  `['alpha\\'s', 'beta']`,
+  `[{'custom': 'secret'}]`,
+  `[1, 'secret']`,
+  `['${"A".repeat(5000)}']`,
   `[true, false]`,
   `prefix [true, false] suffix`,
   `[true`,
@@ -569,6 +574,8 @@ test("answerStudentQuestionService preserves plain and blocked canonical answers
     ["The list [1, 2, 3] has three numbers.", validLearningSignal, true],
     ["The vector [-1, 0, 1] crosses zero.", validLearningSignal, true],
     ["The matrix [[1, 2], [3, 4]] has two rows.", validLearningSignal, true],
+    ["The vector [1, 2] isn't empty.", validLearningSignal, true],
+    ["The teacher quoted 'alpha and beta' in prose.", validLearningSignal, true],
     ["The interval is [0, 1).", validLearningSignal, true],
     ["Compare the intervals (a, b] and [c, d).", validLearningSignal, true],
     ['The word "content" appears in quoted prose.', validLearningSignal, true],

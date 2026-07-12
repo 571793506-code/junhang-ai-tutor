@@ -52,6 +52,7 @@ function malformedArrayIsUnsafe(source, complete) {
 function inspectArrayAt(value, start) {
   let depth = 0;
   let inString = false;
+  let stringQuote = null;
   let escaped = false;
   let containsString = false;
   let containsObject = false;
@@ -61,12 +62,16 @@ function inspectArrayAt(value, start) {
     if (inString) {
       if (escaped) escaped = false;
       else if (character === "\\") escaped = true;
-      else if (character === '"') inString = false;
+      else if (character === stringQuote) {
+        inString = false;
+        stringQuote = null;
+      }
       continue;
     }
-    if (character === '"') {
+    if (character === '"' || character === "'") {
       containsString = true;
       inString = true;
+      stringQuote = character;
       continue;
     }
     if (character === "{") containsObject = true;
