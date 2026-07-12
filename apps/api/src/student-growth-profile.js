@@ -1,6 +1,9 @@
+import { sanitizeQaText } from "@junhang/services";
+
 const SUBJECTS = ["语文", "数学", "英语"];
 const QA_SCHEMA_VERSION = "qa-learning-signal-v1";
 const QA_ACTOR_ROLES = new Set(["student", "classroom"]);
+const QA_MODES = new Set(["GUIDED_THINKING", "KNOWLEDGE_EXPLANATION"]);
 const QA_QUESTION_INTENTS = new Set(["concept", "method", "error_reasoning", "expression", "other"]);
 const QA_DIFFICULTY_SIGNALS = new Set(["none", "possible", "clear"]);
 const QA_CONFIDENCE_LEVELS = new Set(["low", "medium", "high"]);
@@ -108,10 +111,10 @@ export function buildProfileEvidencePack(student, options = {}) {
       taskCount: taskEvidence.length,
       gradingCount: gradingEvidence.length,
       mistakeCount: mistakeEvidence.length,
-      qaCount: qaEvidence.length,
+      qaCount: qaSessionCount({ qaEvidence }),
       classroomCount: classroomEvidence.length,
       hasBlockedEvidence: blockedEvidence.length > 0,
-      hasSparseEvidence: taskEvidence.length + gradingEvidence.length + mistakeEvidence.length + qaEvidence.length + classroomEvidence.length < 3,
+      hasSparseEvidence: taskEvidence.length + gradingEvidence.length + mistakeEvidence.length + qaSessionCount({ qaEvidence }) + classroomEvidence.length < 3,
       missingSubjects: SUBJECTS.filter((subject) => !hasSubjectEvidence(subject, { taskEvidence, gradingEvidence, mistakeEvidence, qaEvidence, classroomEvidence }))
     }
   };
@@ -266,7 +269,7 @@ li { margin: 2px 0; }
 function buildPublishedView(pack) {
   const periodName = pack.period.type === "weekly" ? "本周" : "本月";
   const focusSubjects = buildFocusSubjects(pack);
-  const evidenceTotal = pack.taskEvidence.length + pack.gradingEvidence.length + pack.mistakeEvidence.length + pack.qaEvidence.length + pack.classroomEvidence.length;
+  const evidenceTotal = pack.taskEvidence.length + pack.gradingEvidence.length + pack.mistakeEvidence.length + qaSessionCount(pack) + pack.classroomEvidence.length;
   const sparse = evidenceTotal < 3;
   return {
     periodType: pack.period.type,
@@ -280,10 +283,11 @@ function buildPublishedView(pack) {
     ),
     subjectOverview: SUBJECTS.map((subject) => {
       const refs = subjectRefs(pack, subject);
+      const evidenceCount = subjectEvidenceCount(pack, subject);
       const confidence = subjectEvidenceConfidence(pack, subject);
       return withSubjectEvidence(
         subject,
-        refs.length ? `${subject}已有 ${refs.length} 条记录，可结合订正和课堂表现继续观察。` : `本周期${subject}记录不足，继续观察。`,
+        evidenceCount ? `${subject}已有 ${evidenceCount} 条记录，可结合订正和课堂表现继续观察。` : `本周期${subject}记录不足，继续观察。`,
         refs,
         confidence
       );
@@ -514,21 +518,32 @@ function buildQaEvidence(qaSessions, blockedEvidence) {
       return;
     }
 
-    const uniqueKnowledgePoints = new Set(signal.knowledgePoints.map((item) => normalizeQaGroupValue(item)));
-    uniqueKnowledgePoints.forEach((normalizedKnowledgePoint) => {
+    const uniqueKnowledgePoints = new Map();
+    signal.knowledgePoints.forEach((knowledgePoint) => {
+      const normalizedKnowledgePoint = normalizeQaGroupValue(knowledgePoint);
+      const current = uniqueKnowledgePoints.get(normalizedKnowledgePoint);
+      if (!current || knowledgePoint.localeCompare(current, "zh-CN") < 0) {
+        uniqueKnowledgePoints.set(normalizedKnowledgePoint, knowledgePoint);
+      }
+    });
+    uniqueKnowledgePoints.forEach((knowledgePoint, normalizedKnowledgePoint) => {
       const key = `${subject}:${normalizedKnowledgePoint}`;
       const group = groups.get(key) || {
         id: `qa:${key}`,
         type: "qa",
-        title: `${normalizedKnowledgePoint}问答观察`,
+        title: `${knowledgePoint}问答观察`,
         subject,
-        knowledgePoint: normalizedKnowledgePoint,
+        knowledgePoint,
         dates: [],
         sourceRefs: new Set(),
         questionIntents: new Set(),
         difficultySignals: new Set(),
         followUpNeeded: false
       };
+      if (knowledgePoint.localeCompare(group.knowledgePoint, "zh-CN") < 0) {
+        group.knowledgePoint = knowledgePoint;
+        group.title = `${knowledgePoint}问答观察`;
+      }
       group.dates.push(isoDate(session.createdAt));
       group.sourceRefs.add(sourceId);
       group.questionIntents.add(signal.questionIntent);
@@ -566,16 +581,17 @@ function buildQaEvidence(qaSessions, blockedEvidence) {
 function qaEligibilityBlockReason(metadata) {
   if (!metadata) return "malformed-output";
   if (!Object.hasOwn(metadata, "schemaVersion") || metadata.schemaVersion !== QA_SCHEMA_VERSION) return "legacy-qa-record";
-  const requiredMetadataFields = ["actorRole", "identityConfirmed", "available", "profileEligibility", "blockedReason", "learningSignal"];
+  const requiredMetadataFields = ["actorRole", "identityConfirmed", "available", "mode", "profileEligibility", "blockedReason", "learningSignal"];
   if (!requiredMetadataFields.every((field) => Object.hasOwn(metadata, field))) return "malformed-output";
   if (!QA_ACTOR_ROLES.has(metadata.actorRole)) return "teacher-test";
   if (metadata.identityConfirmed !== true) return "identity-unconfirmed";
   if (metadata.available !== true) return "model-unavailable";
+  if (!QA_MODES.has(metadata.mode)) return "malformed-output";
   if (!Object.hasOwn(metadata, "learningSignal") || !isPlainObject(metadata.learningSignal)) return "malformed-output";
-  if (metadata.learningSignal.safetyStatus === "blocked") return "unsafe-content";
-  if (metadata.learningSignal.safetyStatus !== "pass") return "malformed-output";
+  if (Object.hasOwn(metadata.learningSignal, "safetyStatus") && metadata.learningSignal.safetyStatus === "blocked") return "unsafe-content";
+  if (!sanitizeQaLearningSignal(metadata.learningSignal)) return "malformed-output";
   if (metadata.profileEligibility !== true || metadata.blockedReason !== null) return "malformed-output";
-  return sanitizeQaLearningSignal(metadata.learningSignal) ? null : "malformed-output";
+  return null;
 }
 
 function sanitizeQaLearningSignal(value) {
@@ -611,26 +627,21 @@ function sanitizeQaLearningSignal(value) {
 
 function sanitizeQaStringList(value, maxItems, maxLength) {
   if (!Array.isArray(value)) return null;
+  if (value.length > maxItems) return null;
   const items = [];
-  const inspectedLength = Math.min(value.length, maxItems);
-  for (let index = 0; index < inspectedLength; index += 1) {
+  for (let index = 0; index < value.length; index += 1) {
     if (!Object.hasOwn(value, index)) return null;
-    const item = sanitizeQaLabel(value[index], maxLength);
-    if (!item) return null;
-    items.push(item);
+    const item = value[index];
+    if (typeof item !== "string") return null;
+    const sanitized = sanitizeQaText(item, { maxLength });
+    if (!sanitized || sanitized !== item) return null;
+    items.push(sanitized);
   }
   return items;
 }
 
-function sanitizeQaLabel(value, maxLength) {
-  if (typeof value !== "string") return "";
-  return Array.from(value.toWellFormed().replace(/[\u0000-\u001f\u007f]/g, " ").trim().replace(/\s+/g, " "))
-    .slice(0, maxLength)
-    .join("");
-}
-
 function normalizeQaGroupValue(value) {
-  return sanitizeQaLabel(value, 80).normalize("NFKC").toLocaleLowerCase("zh-CN");
+  return value.normalize("NFKC").replace(/\s+/g, " ").toLocaleLowerCase("zh-CN");
 }
 
 function strongestDifficultySignal(values) {
@@ -649,7 +660,7 @@ function minimalBlockedEvidence(item, type, date, reason) {
 }
 
 function qaSessionCount(pack) {
-  return pack.qaEvidence.reduce((total, item) => total + item.sessionCount, 0);
+  return uniqueQaSourceRefs(pack.qaEvidence).length;
 }
 
 function buildQaConflictNotes(pack) {
@@ -701,8 +712,17 @@ function filterByPeriod(items, period, getDate) {
 
 function buildFocusSubjects(pack) {
   const counts = new Map();
-  [...pack.gradingEvidence, ...pack.mistakeEvidence, ...pack.qaEvidence, ...pack.taskEvidence, ...pack.classroomEvidence].forEach((item) => {
+  [...pack.gradingEvidence, ...pack.mistakeEvidence, ...pack.taskEvidence, ...pack.classroomEvidence].forEach((item) => {
     counts.set(item.subject, (counts.get(item.subject) || 0) + 1);
+  });
+  const qaSourcesBySubject = new Map();
+  pack.qaEvidence.forEach((item) => {
+    const sources = qaSourcesBySubject.get(item.subject) || new Set();
+    item.sourceRefs.forEach((sourceRef) => sources.add(sourceRef));
+    qaSourcesBySubject.set(item.subject, sources);
+  });
+  qaSourcesBySubject.forEach((sources, subject) => {
+    counts.set(subject, (counts.get(subject) || 0) + sources.size);
   });
   const subjects = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([subject]) => subject).filter(Boolean);
   const selected = (subjects.length ? subjects : ["数学"]).slice(0, pack.period.type === "weekly" ? 1 : 2);
@@ -796,7 +816,7 @@ function buildTimelinePreview(pack) {
       subject: item.subject,
       at: item.at || item.date,
       text: item.summary || item.cause || item.title,
-      evidenceRefs: [item.id],
+      evidenceRefs: item.type === "qa" ? item.sourceRefs : [item.id],
       confidence: item.confidence || "supported"
     }));
 }
@@ -822,13 +842,23 @@ function computeScore(pack) {
 }
 
 function collectRefs(pack) {
-  return [...pack.taskEvidence, ...pack.gradingEvidence, ...pack.mistakeEvidence, ...pack.qaEvidence, ...pack.classroomEvidence].map((item) => item.id);
+  return [
+    ...pack.taskEvidence.map((item) => item.id),
+    ...pack.gradingEvidence.map((item) => item.id),
+    ...pack.mistakeEvidence.map((item) => item.id),
+    ...uniqueQaSourceRefs(pack.qaEvidence),
+    ...pack.classroomEvidence.map((item) => item.id)
+  ];
 }
 
 function subjectRefs(pack, subject) {
-  return [...pack.taskEvidence, ...pack.gradingEvidence, ...pack.mistakeEvidence, ...pack.qaEvidence, ...pack.classroomEvidence]
-    .filter((item) => item.subject === subject)
-    .map((item) => item.id);
+  return [
+    ...pack.taskEvidence.filter((item) => item.subject === subject).map((item) => item.id),
+    ...pack.gradingEvidence.filter((item) => item.subject === subject).map((item) => item.id),
+    ...pack.mistakeEvidence.filter((item) => item.subject === subject).map((item) => item.id),
+    ...uniqueQaSourceRefs(pack.qaEvidence.filter((item) => item.subject === subject)),
+    ...pack.classroomEvidence.filter((item) => item.subject === subject).map((item) => item.id)
+  ];
 }
 
 function nonQaSubjectRefs(pack, subject) {
@@ -840,6 +870,15 @@ function nonQaSubjectRefs(pack, subject) {
 function subjectEvidenceConfidence(pack, subject) {
   if (nonQaSubjectRefs(pack, subject).length) return "supported";
   return pack.qaEvidence.some((item) => item.subject === subject && item.sessionCount >= 2) ? "supported" : "weak";
+}
+
+function subjectEvidenceCount(pack, subject) {
+  return nonQaSubjectRefs(pack, subject).length
+    + uniqueQaSourceRefs(pack.qaEvidence.filter((item) => item.subject === subject)).length;
+}
+
+function uniqueQaSourceRefs(qaEvidence) {
+  return [...new Set(qaEvidence.flatMap((item) => item.sourceRefs))].sort();
 }
 
 function hasSubjectEvidence(subject, groups) {
