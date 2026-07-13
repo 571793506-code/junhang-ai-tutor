@@ -126,6 +126,9 @@
 - `/api/ai/qa`
 - `/api/teacher/tasks`
 - `/api/assessments/draft`
+- `/api/assessments/:assignmentId/draft-export`
+- `/api/assessments/:assignmentId/draft-review`
+- `/api/assessments/:assignmentId/print-export`
 - `/api/submissions/batches`
 - `/api/submissions/grade`
 - `/api/review/submissions`
@@ -134,6 +137,8 @@
 `/api/ai/qa` 和 `/api/classroom/voice-qa` 均由服务端最多执行一次 Terra 低推理文本调用；Terra 不可用时调用数为 0，且绝不调用 Sol。实际调用成功时，同一次调用返回 `studentAnswer + learningSignal`；服务端校验和规范化模型 `safetyStatus`，并计算最终 actor、身份、可用性、结构和准入。小程序只消费 `available`、`mode`、`answer` 及课堂语音白名单字段，不接收 `learningSignal` 或内部模型/准入元数据。
 
 学生档案页面只读取教师已发布的周/月档案或阶段报告状态；问答准入、证据优先级、冲突备注和正式报告确认全部留在 API/服务层，不新增前端业务逻辑。
+
+教师小程序后续接入生成工作台时，小测/练习题量使用整数 `requestedItemCount`。教材小测必须先选择符合贵州遵义基准的真实 `textbookAssetId`，章节下拉再提交 `textbookChapterId` / `textbookChapterTitle`；端侧不提交或覆盖版本、系列、册次和地区。没有教材资产或已审批资料来源时展示 API 的 422 失败态，不调用模型猜教材。草稿导出后读取服务端 `layoutValidation`：始终允许教师打开草稿 PDF 查看，但只有 `layoutValidation.ok=true` 才启用确认和正式导出。小程序不自行计算 PDF 页数、坐标有效性或导出资格。
 
 资料上传和生成上下文链路继续复用：
 

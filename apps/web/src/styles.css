@@ -2443,6 +2443,18 @@ button:disabled {
 
 .generation-record-card {
   min-height: 128px;
+  color: inherit;
+  text-align: left;
+}
+
+.generation-record-card:not(:disabled):hover,
+.generation-record-card.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.generation-record-card.active {
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .print-asset-list {

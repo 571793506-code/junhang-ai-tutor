@@ -164,6 +164,19 @@ export type VocabularyCard = {
   aiGenerated?: boolean;
 };
 
+export type AssessmentLayoutValidation = {
+  version: "assessment-layout-validation-v1";
+  ok: boolean;
+  coordinateManifestValid: boolean;
+  plannedPageCount: number | null;
+  htmlPageCount: number | null;
+  pdfPageCount: number | null;
+  measuredPageCount: number | null;
+  pdfGenerated: boolean;
+  measurementOk: boolean;
+  issues: string[];
+};
+
 export async function generateVocabularyCard(input: {
   word: string;
   studentId?: string;
@@ -371,6 +384,7 @@ export async function exportAssessmentDraft(assignmentId: string) {
     ok: boolean;
     reviewStatus: string;
     asset: { id: string; url: string; title: string; kind?: string };
+    layoutValidation: AssessmentLayoutValidation;
   }>(response);
 }
 
@@ -847,6 +861,10 @@ export type KnowledgeSource = {
   allowedForGeneration: boolean;
   confidence: number | null;
   summary: string;
+  textbookAssetId: string;
+  textbookTitle: string;
+  curriculumSeries: string;
+  curriculumRegion: string;
   metadata: Record<string, unknown>;
   chunkCount: number;
   createdAt: string;
@@ -863,11 +881,12 @@ export async function getContentIndex() {
   }>(response);
 }
 
-export async function listKnowledgeSources(filters: { subject?: string; grade?: string; sourceType?: string; reviewStatus?: string; search?: string } = {}) {
+export async function listKnowledgeSources(filters: { subject?: string; grade?: string; sourceType?: string; reviewStatus?: string; search?: string; limit?: number } = {}) {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
-    if (value) query.set(key, value);
+    if (value) query.set(key, String(value));
   }
+  query.set("limit", String(filters.limit || 200));
   const response = await fetch(`${API_BASE_URL}/api/knowledge/sources${query.toString() ? `?${query.toString()}` : ""}`, {
     headers: authHeaders()
   });
@@ -902,7 +921,15 @@ export async function createKnowledgeSource(input: Record<string, unknown>) {
   }>(response);
 }
 
-export async function reviewKnowledgeSource(sourceId: string, input: Record<string, unknown>) {
+export type KnowledgeSourceReviewInput = {
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  allowedForGeneration: boolean;
+  licenseStatus?: string;
+  note?: string;
+  textbookAssetId?: string;
+};
+
+export async function reviewKnowledgeSource(sourceId: string, input: KnowledgeSourceReviewInput) {
   const response = await fetch(`${API_BASE_URL}/api/knowledge/sources/${sourceId}/review`, {
     method: "PATCH",
     headers: jsonHeaders(),
@@ -952,11 +979,12 @@ export async function uploadTeachingMaterials(files: File[], input: { outDir?: s
   }>(response);
 }
 
-export async function listTextbooks(filters: { subject?: string; grade?: string; volume?: string; search?: string } = {}) {
+export async function listTextbooks(filters: { subject?: string; grade?: string; volume?: string; search?: string; limit?: number } = {}) {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
-    if (value) query.set(key, value);
+    if (value) query.set(key, String(value));
   }
+  query.set("limit", String(filters.limit || 200));
   const response = await fetch(`${API_BASE_URL}/api/textbooks${query.toString() ? `?${query.toString()}` : ""}`, {
     headers: authHeaders()
   });
