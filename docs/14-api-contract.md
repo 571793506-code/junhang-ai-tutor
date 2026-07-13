@@ -40,9 +40,9 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 | 课堂设备登录 | `POST /api/classroom/device-login` | 课堂平板绑定设备后拉取课堂状态 | 只显示课堂任务、解锁状态和必要学生互动信息 | `check --workspace apps/api`、`check:miniprogram-js` |
 | AI 问答 | `POST /api/ai/qa`、`POST /api/classroom/voice-qa` | 学生端、课堂平板复用同一服务端问答契约 | 最多一次 Terra 低推理调用，Terra 不可用时零调用且绝不调用 Sol；学习者响应不含学习信号或内部路由元数据 | `check --workspace apps/api`、`check:miniprogram-js` |
 | 今日任务 | `POST /api/teacher/tasks`、`GET /api/bootstrap` | 教师创建，学生/平板从启动数据或任务接口读取 | 未发布或教师未确认内容不进入学生/平板可见区 | `check --workspace apps/api` |
-| 组卷草稿 | `POST /api/assessments/draft` | 教师端提交要求，服务层生成并修复草稿 | 草稿只供教师复核，不直接展示给学生/家长 | `check:content-context`、`check:teaching-content` |
-| 草稿审查导出 | `POST /api/assessments/:assignmentId/draft-export` | 教师端打开审查 PDF | 返回审查资产和 `pending_teacher_review` 状态 | `check:content-context` |
-| 教师复核 | `POST /api/assessments/:assignmentId/draft-review` | 教师端确认或拒绝草稿 | `accept` 后才允许正式导出和学生侧发布 | `check:content-context` |
+| 组卷草稿 | `POST /api/assessments/draft` | 教师端提交要求、结构化题量和章节，服务层生成并修复草稿 | 草稿只供教师复核，不直接展示给学生/家长 | `check:content-context`、`check:teaching-content` |
+| 草稿审查导出 | `POST /api/assessments/:assignmentId/draft-export` | 教师端打开审查 PDF | 返回审查资产、`pending_teacher_review` 和统一 `layoutValidation` | `check:content-context` |
+| 教师复核 | `POST /api/assessments/:assignmentId/draft-review` | 教师端确认或拒绝草稿 | 只有 `layoutValidation.ok=true` 的草稿才允许 `accept` | `check:content-context` |
 | 正式导出 | `POST /api/assessments/:assignmentId/print-export` | 教师确认后导出学生卷和解析卷 | 学生卷不包含答案；解析卷只给教师或授权场景 | `check:content-context`、`check:teaching-content` |
 | 图片提交批改 | `POST /api/submissions/grade` | 学生端、教师端批量上传复用同一接口 | 不确定 OCR 或批改结果进入教师复核，不向学生发布未确认结论 | `check --workspace apps/api` |
 | 批改工作台 | `GET /api/grading/workbench`、`GET /api/grading/workbench/:submissionId`、`PATCH /api/grading/workbench/:submissionId/questions/:questionId` | 教师 Web/小程序读取同一套页面、逐题、标注、置信度和复核状态，并可逐题修正 | 只给教师端使用；学生/家长端不展示未确认逐题批改；逐题修正后仍需教师确认归档 | `check --workspace apps/api`、`typecheck --workspace apps/web` |
@@ -227,6 +227,10 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 - `POST /api/assessments/draft`
   - 生成小测、练习、试卷草稿。
   - 关键字段：`kind`, `grade`, `subject`, `difficulty`, `requirement`。
+  - 小测和练习可传整数 `requestedItemCount`；服务层按学科蓝图缩放各题型并守住最终总题量，模型分区也接收同一题量目标。试卷仍按正式结构和页数规划，不使用该字段缩成小测结构。
+  - 贵州遵义教材基准固定为：语文统编版 / 人教体系、数学人教版、英语人教版 PEP。教材小测或任何带教材标题、章节 ID、章节标题的请求必须提交真实 `textbookAssetId`；不能只传 `textbookChapterTitle` 让模型猜教材。
+  - 服务端以 `TextbookAsset` 为权威，派生 `textbookEdition`, `textbookSeries`, `textbookVolume`, `textbookRegion` 并写入 `generationContext.teaching.textbook`。客户端同名字段不能覆盖服务端教材记录。
+  - 未绑定任何教材字段的综合测评仍可作为通用生成请求；一旦声明教材或章节，若教材不符合遵义基准，返回 `422 ASSESSMENT_TEXTBOOK_BASELINE_MISMATCH`；若没有已复核且允许生成的同学科、年级且不与版本、系列和册次冲突的资料，返回 `422 ASSESSMENT_CONTENT_CONTEXT_REQUIRED`，且不调用模型。
   - 可选字段：`generationProfile`, `assessmentTotalTimeoutMs` / `generationTimeoutMs`, `assessmentMaxTokens` / `generationMaxTokens`。其中 timeout 控制最多等待多久，maxTokens 控制模型最大输出长度；预算耗尽后服务层返回可复核动态兜底草稿，不继续等待后续模型 fallback。
   - 默认生成预算由服务层按场景推导：E2E/联调可显式传短预算；小测使用 `quiz-standard`，默认 120s / 16000 tokens；普通练习使用 `practice-standard`，默认 150s / 16000 tokens；试卷和个性化练习使用 `formal-full`，默认 240s / 24000 tokens。小测/练习的 2 个紧凑分区单区最多 8000 tokens，试卷的 4 个分区按默认预算各 6000 tokens。
   - `check:content-context` 中的低预算 E2E 已降级为 `link-guard`，只验证资料上下文、预算退出、教师复核和 PDF 导出链路，不作为生成内容质量验收。
@@ -239,12 +243,14 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - `model`、`reasoningEffort`、`usedModelEscalation`、触发原因和预算均为服务端内部诊断字段；前端请求不得提交模型或档位，学生、家长、课堂平板和公共屏响应不得暴露这些字段。任何 Sol 结果仍是结构化草稿，必须通过服务层校验和教师复核。
 - `POST /api/assessments/:assignmentId/draft-export`
   - 将已生成内容导出为“内容审查 PDF 草稿”，只供教师打开 PDF 审查，不在 Web/小程序内展示完整题面。
-  - 返回 `asset.url`、`reviewStatus=pending_teacher_review` 和更新后的 `generationPipeline`。
+  - 返回 `asset.url`、`reviewStatus=pending_teacher_review`、`layoutValidation` 和更新后的 `generationPipeline`。
+  - `layoutValidation` 比较目标页数、HTML 预分页、浏览器测量页数和 PDF 实际页数；页数不一致时 `ok=false`，题目坐标清单同时标记为不可用，但仍保留草稿 PDF 供教师查看问题。
 - `POST /api/assessments/:assignmentId/draft-review`
   - 教师提交 `{ decision: "accept" | "reject" }`。
-  - `accept` 后才允许正式导出；`reject` 后前端按原要求重新生成新草稿；返回更新后的 `generationPipeline`。
+  - 只有 Assignment 中的 `layoutValidation.ok=true` 才允许 `accept`；否则返回 `409 ASSESSMENT_LAYOUT_INVALID`。`reject` 后前端按原要求重新生成新草稿；返回更新后的 `generationPipeline`。
 - `POST /api/assessments/:assignmentId/print-export`
   - 教师确认草稿后导出正式题目 PDF 和解析 PDF。
+  - 正式导出前再次检查草稿 `layoutValidation`，正式题目渲染后再次比较实际页数；任何失败均返回 `409 ASSESSMENT_LAYOUT_INVALID`，不把错误布局写成已完成正式导出。
   - 正式题目资产 `metadata.questionLayoutManifest` 会记录每道题的 `assignmentItemId`, `questionNo`, `page`, `bbox`, `bboxSource`, `score`, `answer`, `analysisSteps`, `knowledgePoint`，并同步写回作业元数据，供后续拍照批改对齐题号、答案和页内标注区域。
   - `coordinateSource=browser-dom` 表示已通过本地浏览器渲染后的真实 DOM 坐标测量；浏览器不可用时才降级为 `estimated`。
   - 正式导出会把学生卷、解析卷、`questionLayoutManifest` 来源和导出时间写回 `generationPipeline.assets` 与 `generationPipeline.print`。
@@ -360,7 +366,9 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 - `POST /api/assessments/draft`
   - 生成默认写入 `Assignment`，生成和后续批改共享同一个 `assignmentId`。
   - 前端传入 `items`、`layoutTemplate`、`printProfile`、`targetScope`、`targetGrade`、`studentId` 时会保存到 `metadata`，作为 A4 排版、年级/学生归档和后续批改的数据结构。
+  - 小测/练习前端选择的题量使用 `requestedItemCount` 传入；教材小测的章节下拉必须和真实 `textbookAssetId` 一起提交。服务端解析教材后把版本、系列、册次、地区和章节写入统一 `generationContext`，不能只留在 Web 页面状态或自由文本中。
   - 正式打印前必须经过 `draft-export` 生成 PDF 草稿，以及 `draft-review` 教师确认，避免未复核内容直接进入打印。
+  - `draft-export` 会把 `layoutValidation` 写入 Assignment 元数据；页数或坐标校验失败的草稿保持待审查，不能确认或正式导出。
   - `metadata.modelReviews` 只在显式 GPT-5.6 风险审查执行时保存结论、风险、建议和 `modelRunId`；默认草稿生成只保存服务层本地审查结果，完整模型运行记录只通过 `ModelRun` 查询，避免把内部运行对象直接暴露给多端前端。
 - `POST /api/submissions/grade`
   - 如果没有传 `assignmentId`，API 会自动创建一个用于图片提交和批改的 `Assignment`，并写入 `Submission` 与 `GradingResult`。

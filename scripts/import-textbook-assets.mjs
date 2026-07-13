@@ -1,25 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "@junhang/db";
+import { findStaleTextbookAssetIds, mergeTextbookAssetMetadata } from "./textbook-asset-metadata.mjs";
 
 const indexPath = path.resolve(process.argv[2] || "exports/textbook-index/textbooks-index.json");
 
 function requiredText(value, fallback = "") {
   const text = String(value || "").trim();
   return text || fallback;
-}
-
-function toMetadata(asset) {
-  return {
-    relativePath: asset.relativePath || "",
-    ext: asset.ext || "",
-    size: asset.size || 0,
-    mtime: asset.mtime || null,
-    importState: asset.importState || "只读索引",
-    openWith: asset.openWith || "智慧中小学",
-    readOnly: true,
-    sourceKind: asset.ext === ".edupdf" ? "智慧中小学教材文件" : "教材辅助资料"
-  };
 }
 
 if (!fs.existsSync(indexPath)) {
@@ -29,12 +17,21 @@ if (!fs.existsSync(indexPath)) {
 
 const index = JSON.parse(fs.readFileSync(indexPath, "utf8"));
 const assets = Array.isArray(index.assets) ? index.assets : [];
+const existingAssets = await prisma.textbookAsset.findMany({
+  where: { path: { not: null } },
+  select: { id: true, source: true, path: true }
+});
 let upserted = 0;
 
 for (const asset of assets) {
   const id = requiredText(asset.id);
   const title = requiredText(asset.title);
   if (!id || !title) continue;
+  const existing = await prisma.textbookAsset.findUnique({
+    where: { id },
+    select: { metadata: true }
+  });
+  const metadata = mergeTextbookAssetMetadata(asset, existing?.metadata);
 
   await prisma.textbookAsset.upsert({
     where: { id },
@@ -49,7 +46,7 @@ for (const asset of assets) {
       path: requiredText(asset.path, null),
       url: null,
       hash: requiredText(asset.hash, null),
-      metadata: toMetadata(asset)
+      metadata
     },
     update: {
       subject: requiredText(asset.subject, "未识别"),
@@ -60,10 +57,15 @@ for (const asset of assets) {
       source: requiredText(asset.source, index.root || ""),
       path: requiredText(asset.path, null),
       hash: requiredText(asset.hash, null),
-      metadata: toMetadata(asset)
+      metadata
     }
   });
   upserted += 1;
+}
+
+const staleIds = findStaleTextbookAssetIds(existingAssets, assets, index.root || "");
+if (staleIds.length) {
+  await prisma.textbookAsset.deleteMany({ where: { id: { in: staleIds } } });
 }
 
 console.log(JSON.stringify({
@@ -71,7 +73,9 @@ console.log(JSON.stringify({
   indexPath,
   sourceRoot: index.root || "",
   scanned: assets.length,
-  upserted
+  upserted,
+  retired: staleIds.length,
+  retiredIds: staleIds
 }, null, 2));
 
 await prisma.$disconnect();

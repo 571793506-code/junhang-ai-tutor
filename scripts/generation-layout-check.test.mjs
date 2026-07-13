@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import { buildPythonExtractorEnv, evaluateGenerationLayoutPdf } from "./generation-layout-check.mjs";
+
+const source = fs.readFileSync(new URL("./generation-layout-check.mjs", import.meta.url), "utf8");
 
 test("layout checker forces Python PDF extraction to emit UTF-8 on Windows", () => {
   assert.equal(buildPythonExtractorEnv({}).PYTHONIOENCODING, "utf-8");
@@ -27,6 +30,23 @@ test("layout check infers subject and kind from file name before explanatory bod
   assert.equal(mathPractice.detail.kind, "练习");
 });
 
+test("layout check infers quiz from the rendered header before guidance mentioning exams", () => {
+  const check = evaluateGenerationLayoutPdf({
+    name: "assignment-draft-review-123.pdf",
+    pages: 3,
+    text: [
+      "AI生成 · 教师内容审查草稿",
+      "四年级英语下册第三单元小测（Weather）",
+      "英语 · 小测围绕教材单元生成，不套用完整试卷结构。",
+      "小测 · A4 · 第1/2页"
+    ].join("\n"),
+    pageMetrics: []
+  });
+
+  assert.equal(check.detail.kind, "小测");
+  assert.equal(check.detail.targetPages, 2);
+});
+
 test("layout check rejects quiz PDF when real pages exceed the target and header total is stale", () => {
   const check = evaluateGenerationLayoutPdf({
     name: "五年级英语第四单元小测-题目.pdf",
@@ -43,6 +63,36 @@ test("layout check rejects quiz PDF when real pages exceed the target and header
   assert.ok(check.issues.includes("题目 PDF 实际页数 3 与目标 2 不一致。"));
   assert.ok(check.issues.includes("页眉总页数 2 与真实页数 3 不一致。"));
   assert.ok(check.issues.includes("第 2 页后续仍有内容，但本页底部留白 218.5mm，疑似预分页和真实分页脱节。"));
+});
+
+test("layout check inspects draft-review and final print student PDFs", () => {
+  for (const name of ["assignment-draft-review-123.pdf", "assignment-print.pdf"]) {
+    const check = evaluateGenerationLayoutPdf({
+      name,
+      pages: 3,
+      text: "四年级英语 Unit 3 Weather 小测\n小测 · A4 · 第1/2页\n一、词汇与短语\n二、句子运用",
+      pageMetrics: [
+        { page: 1, bottomBlankMm: 40, drawingCount: 8 },
+        { page: 2, bottomBlankMm: 210, drawingCount: 2 },
+        { page: 3, bottomBlankMm: 60, drawingCount: 8 }
+      ]
+    });
+
+    assert.equal(check.detail.skipped, undefined, name);
+    assert.equal(check.ok, false, name);
+    assert.ok(check.issues.includes("题目 PDF 实际页数 3 与目标 2 不一致。"), name);
+  }
+});
+
+test("layout PDF extractor includes draft-review and final print file names", () => {
+  assert.match(source, /draft-review/);
+  assert.match(source, /-print\.pdf/);
+});
+
+test("layout PDF extractor includes answer-line drawings in bottom blank measurement", () => {
+  assert.match(source, /drawing_bottoms\s*=\s*\[\]/);
+  assert.match(source, /content_bottom\s*=\s*max\(text_bottom, drawing_bottom\)/);
+  assert.match(source, /float\(page\.rect\.height\) - content_bottom/);
 });
 
 test("layout check rejects English quiz when it uses exam-style cloze patterns", () => {

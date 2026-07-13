@@ -13,8 +13,7 @@ import {
   solEscalationEnabled
 } from "@junhang/ai";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { matchesTextbookEvidenceScope } from "@junhang/core";
 import {
   createAssignmentDraft,
   createLearningTask,
@@ -27,21 +26,6 @@ import {
 import { buildQaLearningRecord, sanitizeQaAnswer } from "./qa-learning-record.js";
 
 export { buildQaLearningRecord, sanitizeQaAnswer, sanitizeQaText } from "./qa-learning-record.js";
-
-const workspaceRoot = findWorkspaceRoot();
-
-function findWorkspaceRoot(startDir = process.cwd()) {
-  let current = resolve(startDir);
-  for (let depth = 0; depth < 8; depth += 1) {
-    if (existsSync(join(current, "scripts", "build-content-index.mjs"))) {
-      return current;
-    }
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return resolve(startDir);
-}
 
 function normalizeAssessmentKind(kind) {
   const text = String(kind || "");
@@ -142,88 +126,171 @@ function normalizedSearchText(value) {
     .replace(/\s+/g, "");
 }
 
-function readContentIndex(indexPath = "exports/content-index/index.json") {
-  const absolutePath = resolve(workspaceRoot, indexPath);
-  if (!existsSync(absolutePath)) {
-    return {
-      available: false,
-      path: absolutePath,
-      documents: [],
-      reason: "CONTENT_INDEX_NOT_FOUND"
-    };
-  }
-  try {
-    const index = JSON.parse(readFileSync(absolutePath, "utf8"));
-    return {
-      available: true,
-      path: absolutePath,
-      generatedAt: index.generatedAt || null,
-      documents: Array.isArray(index.documents) ? index.documents : [],
-      documentCount: index.documentCount || 0
-    };
-  } catch (error) {
-    return {
-      available: false,
-      path: absolutePath,
-      documents: [],
-      reason: error instanceof Error ? error.message : String(error)
-    };
-  }
+function contentMetadata(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-function matchContentContext(input = {}, indexPath) {
-  const index = readContentIndex(indexPath || input.contentIndexPath);
-  const subject = normalizedSearchText(input.subject);
-  const grade = normalizedSearchText(input.grade || input.targetGrade);
-  const requirement = normalizedSearchText(`${input.requirement || ""} ${input.specialRequirements || ""}`);
-  const knowledgePoints = Array.isArray(input.knowledgePoints) ? input.knowledgePoints.map(normalizedSearchText) : [];
-  const textbookText = normalizedSearchText(`${input.textbookTitle || ""} ${input.textbookChapterTitle || ""}`);
-  const scored = index.documents.map((document) => {
-    const haystack = normalizedSearchText([
-      document.title,
-      document.summary,
-      ...(document.subjects || []),
-      ...(document.grades || []),
-      ...(document.knowledgePoints || []),
-      ...(document.chunks || []).map((chunk) => chunk.preview)
-    ].join(" "));
-    let score = 0;
-    if (subject && haystack.includes(subject)) score += 4;
-    if (grade && haystack.includes(grade)) score += 3;
-    if (textbookText && haystack.includes(textbookText)) score += 3;
-    for (const point of knowledgePoints) {
-      if (point && haystack.includes(point)) score += 3;
-    }
-    for (const token of requirement.split(/[，。；、,.;:：\s]+/).filter((item) => item.length >= 2).slice(0, 16)) {
-      if (haystack.includes(token)) score += 1;
-    }
-    return { document, score };
-  }).filter((item) => item.score > 0);
-  const matches = scored
-    .sort((a, b) => b.score - a.score)
+function contextValues(...values) {
+  return values.flatMap((value) => Array.isArray(value) ? value : [value]).filter(Boolean);
+}
+
+function canonicalContentSubject(value) {
+  const text = normalizedSearchText(value);
+  if (!text) return "";
+  if (text.includes("英语") || text.includes("english")) return "英语";
+  if (text.includes("语文") || text.includes("chinese")) return "语文";
+  if (text.includes("数学") || text.includes("math")) return "数学";
+  return text;
+}
+
+function canonicalContentGrade(value) {
+  const text = normalizedSearchText(value);
+  const chineseGrade = text.match(/([一二三四五六])年级/);
+  if (chineseGrade) return String({ 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 }[chineseGrade[1]]);
+  const numericGrade = text.match(/([1-6])年级/);
+  return numericGrade ? numericGrade[1] : text;
+}
+
+function matchesContentDimension(requestedValue, sourceValues, normalizer) {
+  const requested = normalizer(requestedValue);
+  if (!requested) return true;
+  return sourceValues.map(normalizer).filter(Boolean).some((value) => value === requested);
+}
+
+function assessmentContentSearchTerms(input = {}) {
+  const weighted = new Map();
+  const add = (value, weight) => {
+    const normalized = normalizedSearchText(value);
+    if (normalized.length < 2) return;
+    weighted.set(normalized, Math.max(weight, weighted.get(normalized) || 0));
+  };
+  add(input.textbookTitle, 6);
+  add(input.textbookChapterTitle, 8);
+  add(input.textbookEdition, 2);
+  add(input.textbookSeries, 2);
+  add(input.textbookVolume, 2);
+  for (const point of Array.isArray(input.knowledgePoints) ? input.knowledgePoints : []) add(point, 8);
+  for (const token of `${input.requirement || ""} ${input.specialRequirements || ""}`
+    .split(/[，。；、,.;:：\s]+/)
+    .filter(Boolean)
+    .slice(0, 20)) {
+    add(token, 2);
+  }
+  return [...weighted].map(([text, weight]) => ({ text, weight }));
+}
+
+function scoreAssessmentContent(value, terms) {
+  const haystack = normalizedSearchText(value);
+  return terms.reduce((score, term) => score + (haystack.includes(term.text) ? term.weight : 0), 0);
+}
+
+export function matchApprovedContentContext(input = {}, sources = []) {
+  const terms = assessmentContentSearchTerms(input);
+  const requestedGrade = input.grade || input.targetGrade;
+  const textbookBound = Boolean(input.textbookAssetId);
+  const textbookScope = {
+    id: input.textbookAssetId,
+    subject: input.subject,
+    grade: requestedGrade,
+    edition: input.textbookEdition,
+    curriculumSeries: input.textbookSeries,
+    volume: input.textbookVolume,
+    curriculumRegion: input.textbookRegion
+  };
+  const approvedSources = (Array.isArray(sources) ? sources : []).filter((source) => {
+    const metadata = contentMetadata(source.metadata);
+    return source.reviewStatus === "APPROVED"
+      && source.allowedForGeneration === true
+      && source.licenseStatus !== "NOT_ALLOWED"
+      && matchesContentDimension(input.subject, contextValues(source.subject, metadata.subjects), canonicalContentSubject)
+      && matchesContentDimension(requestedGrade, contextValues(source.grade, metadata.grades), canonicalContentGrade)
+      && (!textbookBound || matchesTextbookEvidenceScope(textbookScope, source));
+  });
+  const matches = approvedSources
+    .map((source) => {
+      const metadata = contentMetadata(source.metadata);
+      const sourceScore = scoreAssessmentContent([
+        source.title,
+        source.summary,
+        source.unit,
+        source.lesson,
+        ...contextValues(metadata.knowledgePoints)
+      ].join(" "), terms);
+      const chunks = (Array.isArray(source.chunks) ? source.chunks : [])
+        .map((chunk) => ({
+          chunk,
+          score: scoreAssessmentContent([
+            chunk.text,
+            chunk.preview,
+            ...contextValues(chunk.knowledgePoints)
+          ].join(" "), terms)
+        }))
+        .filter((item) => item.score > 0)
+        .sort((left, right) => right.score - left.score || Number(left.chunk.orderIndex || 0) - Number(right.chunk.orderIndex || 0))
+        .slice(0, 2);
+      return { source, metadata, sourceScore, chunks, score: sourceScore + chunks.reduce((sum, item) => sum + item.score, 0) };
+    })
+    .filter((item) => item.chunks.length > 0 && item.score > 0)
+    .sort((left, right) => right.score - left.score)
     .slice(0, 4)
-    .map(({ document, score }) => ({
-      id: document.id,
-      title: document.title,
+    .map(({ source, metadata, score, chunks }) => ({
+      id: source.id,
+      title: source.title,
       score,
-      sourceType: document.sourceType,
-      markdownPath: document.relativeMarkdownPath || document.markdownPath,
-      summary: document.summary,
-      subjects: document.subjects || [],
-      grades: document.grades || [],
-      knowledgePoints: document.knowledgePoints || [],
-      chunks: (document.chunks || []).slice(0, 2).map((chunk) => ({
+      sourceType: source.sourceType,
+      subject: source.subject || null,
+      grade: source.grade || null,
+      textbookAssetId: metadata.textbookAssetId || null,
+      edition: source.edition || null,
+      volume: source.volume || null,
+      curriculumSeries: metadata.curriculumSeries || null,
+      curriculumRegion: metadata.curriculumRegion || null,
+      markdownPath: source.markdownPath || null,
+      summary: source.summary || null,
+      knowledgePoints: contextValues(metadata.knowledgePoints),
+      chunks: chunks.map(({ chunk, score: chunkScore }) => ({
         id: chunk.id,
-        preview: chunk.preview
+        orderIndex: chunk.orderIndex,
+        score: chunkScore,
+        text: String(chunk.text || chunk.preview || "").slice(0, 1800),
+        preview: String(chunk.preview || chunk.text || "").slice(0, 600)
       }))
     }));
   return {
-    available: index.available,
-    indexPath: index.path,
-    generatedAt: index.generatedAt || null,
-    reason: index.reason || null,
+    available: matches.length > 0,
+    approvedOnly: true,
+    approvedSourceCount: approvedSources.length,
     matchedCount: matches.length,
+    reason: matches.length ? null : "APPROVED_CONTENT_CONTEXT_NOT_FOUND",
     matches
+  };
+}
+
+export function validateAssessmentContentContext(input = {}, contentContext = {}) {
+  const required = Boolean(
+    input.textbookAssetId ||
+    input.textbookTitle ||
+    input.textbookEdition ||
+    input.textbookEditionDisplay ||
+    input.textbookSeries ||
+    input.textbookVolume ||
+    input.textbookRegion ||
+    input.textbookChapterId ||
+    input.textbookChapterTitle
+  );
+  const assetRequired = required && !input.textbookAssetId;
+  const hasApprovedMatch = contentContext?.approvedOnly === true
+    && Number(contentContext?.matchedCount || 0) > 0
+    && Array.isArray(contentContext?.matches)
+    && contentContext.matches.length > 0;
+  return {
+    ok: !assetRequired && (!required || hasApprovedMatch),
+    required,
+    error: assetRequired
+      ? "TEXTBOOK_ASSET_REQUIRED"
+      : required && !hasApprovedMatch
+        ? "ASSESSMENT_CONTENT_CONTEXT_REQUIRED"
+        : null
   };
 }
 
@@ -251,6 +318,45 @@ function wantsBonusQuestions(input = {}) {
     return false;
   }
   return /附加题|附加|拓展题|挑战题|bonus/i.test(text);
+}
+
+function requestedAssessmentItemCount(input = {}) {
+  const value = Number(input.requestedItemCount);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return Math.min(80, Math.round(value));
+}
+
+function scaleAssessmentBlueprint(blueprint, input = {}) {
+  const requestedItemCount = requestedAssessmentItemCount(input);
+  if (!requestedItemCount || normalizeAssessmentKind(input.kind) === "试卷") return blueprint;
+  const sections = Array.isArray(blueprint.sections) ? blueprint.sections : [];
+  const targetItemCount = Math.max(sections.length, requestedItemCount);
+  const currentTotal = Math.max(1, sections.reduce((sum, section) => sum + Math.max(0, Number(section.target) || 0), 0));
+  const allocations = sections.map((section, index) => {
+    const exact = (Math.max(0, Number(section.target) || 0) / currentTotal) * targetItemCount;
+    const minimum = section.type !== "writing" && targetItemCount >= sections.length * 2 ? 2 : 1;
+    return { index, minimum, count: Math.max(minimum, Math.round(exact)), remainder: exact - Math.floor(exact) };
+  });
+  let remaining = targetItemCount - allocations.reduce((sum, allocation) => sum + allocation.count, 0);
+  const order = [...allocations].sort((left, right) => right.remainder - left.remainder || left.index - right.index);
+  for (let index = 0; remaining > 0; index = (index + 1) % order.length) {
+    order[index].count += 1;
+    remaining -= 1;
+  }
+  while (remaining < 0) {
+    const candidate = [...allocations]
+      .filter((allocation) => allocation.count > allocation.minimum)
+      .sort((left, right) => right.count - left.count || left.index - right.index)[0];
+    if (!candidate) break;
+    candidate.count -= 1;
+    remaining += 1;
+  }
+  return {
+    ...blueprint,
+    minItems: targetItemCount,
+    maxItems: targetItemCount,
+    sections: sections.map((section, index) => ({ ...section, target: allocations[index].count }))
+  };
 }
 
 function buildAssessmentBlueprint(input = {}) {
@@ -320,7 +426,8 @@ function buildAssessmentBlueprint(input = {}) {
       ] }
     }
   };
-  return blueprints[subject]?.[kind] || blueprints[subject]?.练习 || blueprints.英语.练习;
+  const blueprint = blueprints[subject]?.[kind] || blueprints[subject]?.练习 || blueprints.英语.练习;
+  return scaleAssessmentBlueprint(blueprint, input);
 }
 
 function buildPrintProfile(input = {}) {
@@ -1894,21 +2001,14 @@ function reviewAndRepairAssessmentItems(items = [], input = {}) {
   const usedFingerprints = new Set();
   const recentFingerprints = recentAssessmentFingerprints(input);
   let recentReuseCount = 0;
+  let usedRepairFallback = false;
   const repaired = [];
   const takeForSection = (sourceItems, fallbackSourceItems, section) => {
     const candidates = shouldReplaceReading && section.type === "reading" ? [] : sourceItems;
-    const preferFallback =
-      (subject === "英语" && section.type === "fill") ||
-      (subject === "英语" && section.type === "reading") ||
-      (subject === "数学" && (section.type === "calculation" || section.type === "solution")) ||
-      (subject === "语文" && (section.type === "fill" || section.type === "solution"));
-    const rawTarget = Math.max(1, section.target || 1);
-    const shouldKeepSectionEven = section.type !== "writing";
-    const target = shouldKeepSectionEven && rawTarget % 2 === 1 ? rawTarget + 1 : rawTarget;
+    const target = Math.max(1, section.target || 1);
     const picked = [];
-    const orderedCandidates = [...(preferFallback ? fallbackSourceItems : candidates), ...(preferFallback ? candidates : fallbackSourceItems)];
-    for (const allowRecentReuse of [false, true]) {
-      for (const item of orderedCandidates) {
+    const pickFrom = (source, allowRecentReuse, fallback) => {
+      for (const item of source) {
         if (picked.length >= target) break;
         if (printableType(item) !== section.type) continue;
         const key = assessmentUniquePromptKey(item);
@@ -1918,34 +2018,17 @@ function reviewAndRepairAssessmentItems(items = [], input = {}) {
         if (allowRecentReuse && recentFingerprints.has(fingerprint)) recentReuseCount += 1;
         usedPrompts.add(key);
         if (fingerprint) usedFingerprints.add(fingerprint);
+        if (fallback) usedRepairFallback = true;
         picked.push(withAssessmentSection(item, section.title, section.type, input));
       }
-      if (picked.length >= target) break;
-    }
-    if (shouldKeepSectionEven && picked.length % 2 === 1) {
-      for (const allowRecentReuse of [false, true]) {
-        for (const item of orderedCandidates) {
-          if (printableType(item) !== section.type) continue;
-          const key = assessmentUniquePromptKey(item);
-          const fingerprint = assessmentPromptFingerprint(item);
-          if (!key || usedPrompts.has(key) || usedFingerprints.has(fingerprint)) continue;
-          if (!allowRecentReuse && recentFingerprints.has(fingerprint)) continue;
-          if (allowRecentReuse && recentFingerprints.has(fingerprint)) recentReuseCount += 1;
-          usedPrompts.add(key);
-          if (fingerprint) usedFingerprints.add(fingerprint);
-          picked.push(withAssessmentSection(item, section.title, section.type, input));
-          break;
-        }
-        if (picked.length % 2 === 0) break;
-      }
-    }
+    };
+    pickFrom(candidates, false, false);
+    if (picked.length < target) pickFrom(candidates, true, false);
+    if (picked.length < target) pickFrom(fallbackSourceItems, false, true);
+    if (picked.length < target) pickFrom(fallbackSourceItems, true, true);
     if (recentReuseCount > 0) {
       notes.push("近期题目池已尽量避开重复题干；少量复用只在题量不足时触发，需后续扩充题库。");
       recentReuseCount = 0;
-    }
-    if (shouldKeepSectionEven && picked.length % 2 === 1 && picked.length > 1) {
-      picked.pop();
-      notes.push(`${section.title}题量已调整为偶数，便于排版和作答。`);
     }
     if (picked.length < target) {
       notes.push(`${section.title}题量不足，已按动态兜底题池补足到 ${target} 题。`);
@@ -1959,21 +2042,11 @@ function reviewAndRepairAssessmentItems(items = [], input = {}) {
     repaired.push(...takeForSection(sectionItems, sectionFallback, section));
   }
 
-  const maxItemCount = Math.max(2, blueprint.maxItems % 2 === 0 ? blueprint.maxItems : blueprint.maxItems - 1);
-  const evenRepaired = repaired.slice(0, maxItemCount);
-  if (evenRepaired.length % 2 === 1) {
-    const lastItem = evenRepaired[evenRepaired.length - 1];
-    if (printableType(lastItem) === "writing") {
-      notes.push("写作题按老师要求保留 1 题，因此总题量不强制调整为偶数。");
-    } else {
-      evenRepaired.pop();
-      notes.push("已将生成类题目数量调整为偶数，便于排版和作答。");
-    }
-  }
-  if (ensureRequestedMathBonusItem(evenRepaired, input)) {
+  const limitedRepaired = repaired.slice(0, Math.max(1, blueprint.maxItems));
+  if (ensureRequestedMathBonusItem(limitedRepaired, input)) {
     notes.push("老师明确要求附加题，已将最后一道数学解答题标记为附加题。");
   }
-  const limitedRaw = evenRepaired.map((item, index) => ({
+  const limitedRaw = limitedRepaired.map((item, index) => ({
     ...item,
     metadata: {
       ...(item.metadata || {}),
@@ -1990,7 +2063,7 @@ function reviewAndRepairAssessmentItems(items = [], input = {}) {
     notes.push(`${kind}题量仍低于最低要求，请教师重点复核。`);
   }
 
-  return { items: limited, notes, totalScore: scored.totalScore };
+  return { items: limited, notes, totalScore: scored.totalScore, usedRepairFallback };
 }
 
 function printableType(item) {
@@ -2199,7 +2272,8 @@ function shouldReplaceReadingSection(items = [], input = {}, blueprint = buildAs
   }).length;
   if (subject === "英语") {
     const minWords = kind === "试卷" ? 560 : kind === "练习" ? 150 : 120;
-    return uniquePassages.size < (kind === "试卷" ? 2 : 1) || totalEnglishWords < minWords || contextualQuestionCount < 6;
+    const minContextualQuestions = Math.min(6, Math.max(1, readingTarget));
+    return uniquePassages.size < (kind === "试卷" ? 2 : 1) || totalEnglishWords < minWords || contextualQuestionCount < minContextualQuestions;
   }
   if (subject === "语文") {
     const minChars = kind === "试卷" ? 950 : 700;
@@ -2422,6 +2496,10 @@ function fallbackSeed(input = {}, scope = "") {
     input.kind || "",
     input.difficulty || "",
     input.textbookTitle || "",
+    input.textbookEdition || "",
+    input.textbookSeries || "",
+    input.textbookVolume || "",
+    input.textbookRegion || "",
     input.textbookChapterTitle || "",
     input.requirement || input.specialRequirements || "",
     input.regenerationIndex || input.retryIndex || "",
@@ -2482,6 +2560,7 @@ function ensureLongEnglishPassage(id, text, targetWords = 260) {
   const words = String(text || "").match(/[A-Za-z]+/g)?.length || 0;
   if (words >= targetWords) return text;
   const extras = {
+    "grade4-unit3-weather": "Before going home, Lily checks the forecast again with her teacher. The temperature is lower than it was at noon, and the wind is stronger after the rain. She keeps her light coat on and puts her notebook in a dry bag. Her classmates move football practice to the gym because the playground is still wet. On Tuesday, Lily compares the new forecast with Monday's record. She learns that weather reports help people prepare, while looking at the sky and feeling the temperature help them respond when conditions change.",
     "grade5-unit4-special-days": "Before each special day, Amy's group checks the class calendar and writes a short plan. On Monday, they choose what to prepare. On Tuesday, they ask classmates who can help. Before the art show, Amy and Chen Jie put pictures into different boxes, so younger students could find their work quickly. Before the sports meet, Zhang Peng made a small running chart and wrote every practice day on it. Their teacher said a special day is not only a date on the wall. It is also a chance to plan, practise, share and thank the people who help. After the singing contest, the class wrote thank-you cards to the music teacher because she helped them listen carefully and sing together.",
     "english-practice-short": "After two weeks, Mia did not stop practising. She made a new table with three columns: new words, difficult sounds and useful sentences. Every Friday, she checked the table with her partner. Sometimes she still made mistakes, but now she could find the reason. Her partner wrote one friendly suggestion after each practice. Mia also listened to two short recordings from her teacher and copied the best sentence into her notebook. At the end of the month, she gave a one-minute talk about her reading plan. She was nervous, but she spoke more slowly and clearly than before. Her teacher said the best practice was not doing many exercises once, but using a small method again and again.",
     "english-reading-a": "The next week, Jack's group did not stop at the blue box. They counted the paper again and asked two younger classes why they sometimes forgot to use the other side. One child said the notice was too high to see, so the group moved it lower and added a small picture. Another child said there was no place to put clean half-used paper, so Jack divided the box into two parts. These small changes made the plan easier to follow. When the class wrote their final report, they included numbers, photos and short interviews instead of only saying the project was useful. The report also showed a problem they had not expected. Some students used the saved paper for quick notes and then threw it away again. Jack's group decided to make a second notice: Good paper deserves a second job, not only a second touch. After that, art teachers began to keep small paper baskets on every table. The project became part of the school's Green Week display, and younger students used the notebooks to record plant changes in science class.",
@@ -2615,6 +2694,98 @@ function sectionTitleByType(input, type) {
   return buildAssessmentBlueprint(input).sections.find((section) => section.type === type)?.title || "";
 }
 
+function buildEnglishWeatherUnitQuizItems(input = {}) {
+  const fillSection = sectionTitleByType(input, "fill") || "一、词汇与短语";
+  const sentenceSection = sectionTitleByType(input, "solution") || "二、句子运用";
+  const choiceSection = sectionTitleByType(input, "choice") || "三、单项选择题";
+  const readingSection = sectionTitleByType(input, "reading") || "四、阅读理解";
+  const point = compactText(input.textbookChapterTitle || input.requirement || input.specialRequirements, "Unit 3 Weather");
+  const fillItems = [
+    ["根据中文写英文单词：多云的 ______。", "cloudy", "天气词汇"],
+    ["根据中文写英文单词：下雨的 ______。", "rainy", "天气词汇"],
+    ["根据中文写英文单词：有风的 ______。", "windy", "天气词汇"],
+    ["根据中文写英文单词：下雪的 ______。", "snowy", "天气词汇"],
+    ["英文译中文：sunny ______。", "晴朗的", "天气词汇"],
+    ["英文译中文：weather report ______。", "天气预报", "天气短语"],
+    ["中文译英文：穿上外套 ______。", "put on a coat", "天气与穿衣"],
+    ["中文译英文：带一把雨伞 ______。", "take an umbrella", "天气与出行"]
+  ].map(([prompt, answer, knowledgePoint]) => ({
+    itemType: "fill",
+    sectionTitle: fillSection,
+    prompt,
+    answer,
+    knowledgePoint,
+    answerFormat: "english-four-line",
+    analysisSteps: ["先判断题目要求是中译英、英译中还是单词拼写。", "联系天气主题核对词义和固定搭配。", `参考答案：${answer}。`],
+    commonMistake: "注意天气形容词的完整拼写和短语中的冠词。"
+  }));
+  const sentenceItems = [
+    ["用 What's the weather like? 和 It's ... 写一个天气问答。", "示例：What's the weather like today? It's cloudy.", "天气问答"],
+    ["用 cold 和 put on 造句，给出合适的穿衣建议。", "示例：It is cold outside. Please put on your coat.", "天气与穿衣建议"]
+  ].map(([prompt, answer, knowledgePoint]) => ({
+    itemType: "solution",
+    sectionTitle: sentenceSection,
+    prompt,
+    answer,
+    knowledgePoint,
+    answerFormat: "english-four-line",
+    answerSpaceMm: 24,
+    analysisSteps: ["先确定天气状态或建议内容。", "再使用完整的天气问答或祈使句结构。", "最后检查大小写、be 动词和标点。"],
+    commonMistake: "描述天气时不要漏写 be 动词。"
+  }));
+  const choiceItems = [
+    ["- What's the weather like today? - ______", ["A. It's rainy.", "B. It's Tuesday.", "C. I'm ten.", "D. At school."], "A", "天气问答"],
+    ["It is cold outside. Please ______ your coat.", ["A. put on", "B. take off", "C. look at", "D. listen to"], "A", "天气与穿衣"],
+    ["Take an umbrella. It is ______ outside.", ["A. rainy", "B. hot", "C. dry", "D. warm"], "A", "天气与出行"],
+    ["The sun is bright and the sky is clear. It is ______.", ["A. sunny", "B. snowy", "C. foggy", "D. rainy"], "A", "天气描述"]
+  ].map(([prompt, options, answer, knowledgePoint]) => ({
+    itemType: "choice",
+    sectionTitle: choiceSection,
+    prompt,
+    options,
+    answer,
+    knowledgePoint,
+    analysisSteps: ["先读取天气或穿衣线索。", "再比较各选项的词义和句型。", `正确答案是 ${answer}。`],
+    commonMistake: "不要只看单个词，要结合整句天气语境。"
+  }));
+  const passage = ensureLongEnglishPassage(
+    "grade4-unit3-weather",
+    "On Monday morning, Lily checks the weather report before school. The sky is cloudy and the wind is cool, so she takes a light coat. At noon, the sun comes out and the playground becomes warm. Lily and her classmates record the temperature and draw weather symbols in their science notebooks. After lunch, dark clouds move over the school. Their teacher asks everyone to close the windows before a short rain shower begins. By three o'clock, the rain stops. The children compare the morning, noon and afternoon weather and learn that conditions can change during one day. Lily writes that checking the forecast helps people choose suitable clothes and plan outdoor activities safely. She also notes that a forecast is useful, but people should still observe the sky around them.",
+    220
+  );
+  const readingItems = [
+    ["What is the weather like on Monday morning?", ["A. Cloudy and cool.", "B. Snowy and cold.", "C. Sunny and hot.", "D. Dry and warm."], "A", "天气细节"],
+    ["Why does Lily take a light coat?", ["A. Because the wind is cool.", "B. Because she is going swimming.", "C. Because it is snowing.", "D. Because the classroom is hot."], "A", "原因理解"],
+    ["What do the children record at noon?", ["A. The temperature and weather symbols.", "B. Their lunch menu.", "C. Bus numbers.", "D. Homework scores."], "A", "信息定位"],
+    ["What happens after lunch?", ["A. A short rain shower begins.", "B. Heavy snow falls.", "C. The sun stays bright all day.", "D. The children go home."], "A", "事件顺序"],
+    ["What is the main idea of the passage?", ["A. Weather can change during one day.", "B. School coats are expensive.", "C. Science notebooks are difficult.", "D. Monday is always rainy."], "A", "主旨理解"],
+    ["What can we learn from Lily's weather record?", ["A. Use forecasts and observe real conditions.", "B. Never plan outdoor activities.", "C. Wear the same clothes every day.", "D. Ignore changes in the sky."], "A", "推理理解"]
+  ].map(([prompt, options, answer, knowledgePoint], index) => ({
+    itemType: "reading",
+    sectionTitle: readingSection,
+    prompt,
+    options,
+    answer,
+    knowledgePoint,
+    passageGroupId: "grade4-unit3-weather",
+    passageTitle: "A Changing Weather Day",
+    passageText: passage,
+    passageQuestionIndex: index + 1,
+    showPassage: index === 0,
+    analysisSteps: ["先通读短文，梳理早晨、中午和下午的天气变化。", "再回到原文定位题干中的天气或时间线索。", `本题答案为 ${answer}。`],
+    commonMistake: "阅读天气变化时要注意时间顺序和原因。"
+  }));
+  return markDynamicFallback([
+    ...fillItems,
+    ...sentenceItems,
+    ...choiceItems,
+    ...readingItems
+  ].map((item) => ({
+    ...item,
+    knowledgePoint: item.knowledgePoint || point
+  })), input, "english-weather-unit-quiz");
+}
+
 function buildEnglishUnitQuizItems(input = {}) {
   const seed = fallbackSeed(input, "english-unit-quiz");
   const fillSection = sectionTitleByType(input, "fill") || "一、词汇与短语";
@@ -2622,6 +2793,9 @@ function buildEnglishUnitQuizItems(input = {}) {
   const choiceSection = sectionTitleByType(input, "choice") || "三、单项选择题";
   const readingSection = sectionTitleByType(input, "reading") || "四、阅读理解";
   const point = compactText(input.textbookChapterTitle || input.requirement || input.specialRequirements, "五年级下册第四单元");
+  if (/weather|天气|气温|温度|晴|雨|多云/i.test(point)) {
+    return buildEnglishWeatherUnitQuizItems(input);
+  }
   const wordBanks = rotateBySeed([
     [
       ["中文译英文：艺术展览 ______。", "art show", "单元核心短语"],
@@ -3597,13 +3771,15 @@ function normalizeAssessmentDraft(result = {}, input = {}) {
       : sectionItems;
   const items = rawItems.map(normalizeAssessmentItem).filter((item) => item.prompt);
   const usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
-  const usedDynamicFallback = !result.available || !items.length || result.modelRun?.metadata?.partialGeneration === true;
+  const providerUsedDynamicFallback = !result.available || !items.length || result.modelRun?.metadata?.partialGeneration === true;
   const review = reviewAndRepairAssessmentItems(items.length ? items : buildFallbackAssessmentItems(input), input);
+  const usedDynamicFallback = providerUsedDynamicFallback || review.usedRepairFallback;
   const safeItems = review.items;
   const printNotes = [
     ...(Array.isArray(parsed.printNotes) ? parsed.printNotes : Array.isArray(parsed.notes) ? parsed.notes : []),
     ...review.notes,
-    ...(usedDynamicFallback ? ["模型超时、部分分区不可用或返回内容未形成完整标准题目结构，系统已按动态兜底题池和 A4 排版规则修复草稿，教师需复核后使用。"] : [])
+    ...(providerUsedDynamicFallback ? ["模型超时、部分分区不可用或返回内容未形成完整标准题目结构，系统已按动态兜底题池和 A4 排版规则修复草稿，教师需复核后使用。"] : []),
+    ...(review.usedRepairFallback && !providerUsedDynamicFallback ? ["模型内容存在缺题或阅读材料不足，服务层已补题或替换内容，教师需复核后使用。"] : [])
   ];
   const audit = auditAssessmentDraft(safeItems, input, printNotes);
   if (usedDynamicFallback) {
@@ -3858,7 +4034,9 @@ export async function draftTeacherTaskService(config, input = {}, options = {}) 
 }
 
 export async function draftAssessmentService(config, input = {}, options = {}) {
-  const contentContext = input.contentContext || matchContentContext(input);
+  const contentContext = input.contentContext && typeof input.contentContext === "object"
+    ? input.contentContext
+    : matchApprovedContentContext(input, []);
   const generationBudget = resolveAssessmentGenerationBudget(input, config);
   const generationContext = {
     ...(input.generationContext && typeof input.generationContext === "object" ? input.generationContext : {}),
@@ -3874,8 +4052,22 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
       studentId: input.studentId || null
     },
     teaching: {
+      textbook: {
+        assetId: input.textbookAssetId || null,
+        title: input.textbookTitle || null,
+        edition: input.textbookEdition || null,
+        series: input.textbookSeries || null,
+        volume: input.textbookVolume || null,
+        region: input.textbookRegion || null,
+        chapterId: input.textbookChapterId || null,
+        chapterTitle: input.textbookChapterTitle || null
+      },
       textbookAssetId: input.textbookAssetId || null,
       textbookTitle: input.textbookTitle || null,
+      textbookEdition: input.textbookEdition || null,
+      textbookSeries: input.textbookSeries || null,
+      textbookVolume: input.textbookVolume || null,
+      textbookRegion: input.textbookRegion || null,
       textbookChapterId: input.textbookChapterId || null,
       textbookChapterTitle: input.textbookChapterTitle || null,
       knowledgePoints: input.knowledgePoints || [],
@@ -3884,6 +4076,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     output: {
       paper: "A4",
       kind: input.kind || null,
+      requestedItemCount: requestedAssessmentItemCount(input),
       generationProfile: generationBudget.profile,
       assessmentTotalTimeoutMs: generationBudget.assessmentTotalTimeoutMs,
       assessmentMaxTokens: generationBudget.assessmentMaxTokens,
@@ -4022,6 +4215,10 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
               difficulty: input.difficulty || null,
               textbookAssetId: input.textbookAssetId || null,
               textbookTitle: input.textbookTitle || null,
+              textbookEdition: input.textbookEdition || null,
+              textbookSeries: input.textbookSeries || null,
+              textbookVolume: input.textbookVolume || null,
+              textbookRegion: input.textbookRegion || null,
               textbookChapterId: input.textbookChapterId || null,
               textbookChapterTitle: input.textbookChapterTitle || null,
               generationContext,

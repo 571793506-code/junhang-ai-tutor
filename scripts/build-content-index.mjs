@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 
 const defaultInputRoots = ["exports/markdown-ingestion", "exports/markdown-ingestion-test"];
 const defaultOutDir = "exports/content-index";
+const noMarkdownDocumentsError = "CONTENT_INDEX_NO_MARKDOWN_DOCUMENTS";
 const subjectSignals = {
   数学: ["数学", "计算", "解答", "填空", "选择", "应用题", "小数", "分数", "几何", "面积", "周长", "方程"],
   语文: ["语文", "阅读", "作文", "习作", "文言", "拼音", "词语", "句子", "段落", "课文"],
@@ -208,6 +209,10 @@ function buildDocument(filePath, index, manifestRecords, maxChunksPerFile) {
     markdownPath: filePath,
     relativeMarkdownPath: relative(process.cwd(), filePath),
     sourceType: metadata.sourceType || manifestRecord?.sourceType || extname(sourcePath).slice(1) || "markdown",
+    edition: metadata.edition || manifestRecord?.edition || "",
+    volume: metadata.volume || manifestRecord?.volume || "",
+    curriculumSeries: metadata.curriculumSeries || manifestRecord?.curriculumSeries || "",
+    curriculumRegion: metadata.curriculumRegion || manifestRecord?.curriculumRegion || "",
     summary: normalizeDisplayText(summary),
     subjects: topLabels(subjectScores),
     grades: topLabels(gradeScores),
@@ -222,10 +227,17 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   const inputRoots = args.inputs.map((item) => resolve(item)).filter((item) => existsSync(item));
   const outDir = resolve(args.outDir);
-  mkdirSync(outDir, { recursive: true });
 
   const manifestRecords = loadManifestRecords(inputRoots);
   const markdownFiles = collectMarkdownFiles(inputRoots, manifestRecords);
+  if (!markdownFiles.length) {
+    rmSync(join(outDir, "index.json"), { force: true });
+    console.error(JSON.stringify({ ok: false, error: noMarkdownDocumentsError, inputRoots }, null, 2));
+    process.exitCode = 1;
+    return;
+  }
+
+  mkdirSync(outDir, { recursive: true });
   const documents = markdownFiles.map((file, index) => buildDocument(file, index, manifestRecords, args.maxChunksPerFile));
   const subjectCounts = {};
   const gradeCounts = {};

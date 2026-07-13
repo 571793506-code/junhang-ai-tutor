@@ -151,6 +151,41 @@ export interface AssignmentCard {
     nextPractice: string;
   } | null;
   draftReviewStatus?: "pending_teacher_review" | "accepted" | "rejected" | null;
+  draftReviewAsset?: {
+    id: string;
+    title: string;
+    url: string;
+  } | null;
+  draftRequest?: {
+    targetScope?: "student" | "grade";
+    studentId?: string;
+    targetGrade?: string;
+    subject?: SubjectLabel;
+    kind?: string;
+    difficulty?: string;
+    requirement?: string;
+    requestedItemCount?: number;
+    textbookAssetId?: string;
+    textbookTitle?: string;
+    textbookEdition?: string;
+    textbookSeries?: string;
+    textbookVolume?: string;
+    textbookRegion?: string;
+    textbookChapterId?: string;
+    textbookChapterTitle?: string;
+  } | null;
+  layoutValidation?: {
+    version?: string;
+    ok: boolean;
+    coordinateManifestValid?: boolean;
+    plannedPageCount?: number | null;
+    htmlPageCount?: number | null;
+    pdfPageCount?: number | null;
+    measuredPageCount?: number | null;
+    pdfGenerated?: boolean;
+    measurementOk?: boolean;
+    issues?: string[];
+  } | null;
   audit?: {
     reviewer?: string;
     status?: "passed" | "needs_teacher_review" | string;
@@ -181,6 +216,10 @@ export interface TextbookAssetCard {
   subject: SubjectLabel;
   grade: string;
   edition: string;
+  editionDisplay?: string;
+  curriculumSeries?: string;
+  curriculumRegion?: string;
+  baselineMatched?: boolean;
   volume: string;
   title: string;
   source: string;
@@ -205,6 +244,54 @@ export interface TextbookAssetCard {
   chapterCount: number;
   importState: string;
 }
+
+export declare const ZUNYI_TEXTBOOK_REGION: "贵州遵义";
+
+export declare function classifyTextbookBaseline(input?: {
+  subject?: string;
+  edition?: string;
+  series?: string;
+  title?: string;
+  source?: string;
+  path?: string;
+}): {
+  region: string;
+  edition: string;
+  series: string;
+  displayName: string;
+  baselineMatched: boolean;
+};
+
+export declare function matchesTextbookEvidenceScope(
+  textbook?: Partial<TextbookAssetCard> & {
+    assetId?: string;
+    series?: string | string[];
+    region?: string | string[];
+    metadata?: unknown;
+  },
+  source?: {
+    textbookAssetId?: string;
+    assetId?: string;
+    subject?: string | string[];
+    grade?: string | string[];
+    edition?: string | string[];
+    curriculumSeries?: string | string[];
+    series?: string | string[];
+    volume?: string | string[];
+    curriculumRegion?: string | string[];
+    region?: string | string[];
+    metadata?: unknown;
+  }
+): boolean;
+
+export declare function matchesTextbookAssetSearch(
+  asset?: Partial<TextbookAssetCard> & {
+    series?: string | string[];
+    region?: string | string[];
+    metadata?: unknown;
+  },
+  search?: string
+): boolean;
 
 export interface LearningLog {
   id: string;

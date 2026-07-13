@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -28,6 +29,7 @@ const generationRequestTimeoutMs = Number(env.CONTENT_CONTEXT_E2E_GENERATION_TIM
 const generationModelBudgetMs = Number(env.CONTENT_CONTEXT_E2E_GENERATION_MODEL_BUDGET_MS || 45000);
 const exportRequestTimeoutMs = Number(env.CONTENT_CONTEXT_E2E_EXPORT_TIMEOUT_MS || 120000);
 const nodeScriptTimeoutMs = Number(env.CONTENT_CONTEXT_E2E_NODE_SCRIPT_TIMEOUT_MS || 60000);
+const e2eContentSentinel = "E2E_CONTENT_CONTEXT_SENTINEL_20260712";
 const corruptNeedles = ["\u951f", "\ufffd", "\u935a", "\u947b", "\u93c1", "\u7487"];
 const zh = {
   math: "\u6570\u5b66",
@@ -50,9 +52,11 @@ export function buildContentContextE2eVerificationMeta({ generationModelBudgetMs
     qualityBoundary: "This low-budget E2E only proves the content-context, review-gate, timeout, fallback, and export link can close; it does not assess generation content quality.",
     proves: [
       "api-session-content-context-flow",
+      "approved-content-context-sync",
+      "approved-source-chunk-match",
       "bounded-assessment-draft-return",
       "teacher-review-gate",
-      "draft-and-final-pdf-export"
+      "draft-export-and-layout-review-gate"
     ]
   };
 }
@@ -61,16 +65,89 @@ export function isDirectContentContextE2eRun(moduleUrl, argvPath = process.argv[
   return Boolean(argvPath) && moduleUrl === pathToFileURL(path.resolve(argvPath)).href;
 }
 
+export function selectContentContextE2eTextbook(assets = [], { subject, grade } = {}) {
+  const candidates = Array.isArray(assets) ? assets : [];
+  return candidates.find((asset) =>
+    asset?.subject === subject &&
+    asset?.grade === grade &&
+    asset?.baselineMatched === true
+  ) || null;
+}
+
+export function resolveContentContextE2eStorageRoots(repositoryRoot = process.cwd()) {
+  const root = path.resolve(repositoryRoot);
+  return {
+    uploadRoot: path.join(root, "apps", "api", "storage", "uploads"),
+    generatedRoot: path.join(root, "apps", "api", "storage", "generated")
+  };
+}
+
+export function isContentContextE2eUploadFileName(fileName, runId) {
+  const name = path.basename(String(fileName || ""));
+  const escapedRunId = String(runId || "").trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (!escapedRunId) return false;
+  return new RegExp(`^\\d+-[a-z0-9]{6}-${escapedRunId}-(?:content-context-upload-fixture\\.md|protected-textbook\\.edupdf)$`, "i").test(name);
+}
+
+export function isContentContextE2eFixtureSource(source, runId) {
+  const sourcePath = String(source?.sourcePath || "").replace(/\\/g, "/");
+  const sourceFileName = path.posix.basename(sourcePath);
+  const normalizedRunId = String(runId || "").trim();
+  if (!normalizedRunId) return false;
+  const fixtureSuffix = `-${normalizedRunId}-content-context-upload-fixture.md`;
+  return sourceFileName.toLowerCase().endsWith(fixtureSuffix.toLowerCase())
+    && isContentContextE2eUploadFileName(sourceFileName, runId);
+}
+
+export function cleanContentContextE2eUploadFiles(uploadRoot, runId) {
+  if (!String(uploadRoot || "").trim() || !String(runId || "").trim()) return 0;
+  const root = path.resolve(uploadRoot);
+  if (!fs.existsSync(root)) return 0;
+  let deletedCount = 0;
+
+  function visit(dir) {
+    const relative = path.relative(root, dir);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error(`Refusing to scan unexpected upload directory: ${dir}`);
+    }
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        visit(fullPath);
+        continue;
+      }
+      if (isContentContextE2eUploadFileName(entry.name, runId)) {
+        fs.rmSync(fullPath, { force: true });
+        deletedCount += 1;
+      }
+    }
+  }
+
+  visit(root);
+  return deletedCount;
+}
+
 async function main() {
 const verificationMeta = buildContentContextE2eVerificationMeta({ generationModelBudgetMs });
 const checks = [];
+const e2eRunId = randomUUID();
+const fixtureUploadFileName = `${e2eRunId}-content-context-upload-fixture.md`;
+const protectedUploadFileName = `${e2eRunId}-protected-textbook.edupdf`;
 const fixtureDir = path.resolve("storage", "e2e-fixtures");
 const fixturePath = path.join(fixtureDir, "content-context-upload-fixture.md");
 const e2eMarkdownDir = "exports/markdown-ingestion-e2e";
 const e2eMarkdownPath = path.resolve(e2eMarkdownDir);
 const legacyMarkdownPath = path.resolve("exports/markdown-ingestion");
 const contentIndexPath = path.resolve("exports/content-index/index.json");
-const apiUploadRoot = path.resolve("apps/api/storage/uploads");
+const { uploadRoot: apiUploadRoot, generatedRoot } = resolveContentContextE2eStorageRoots();
+let originalContentIndex = null;
+let teacherToken = null;
+let fixtureSourceId = null;
+const sourceSnapshots = new Map();
+const touchedSourceIds = new Set();
+const createdAssignmentIds = new Set();
+const createdModelRunIds = new Set();
+const generatedArtifactPaths = new Set();
 
 function hasCorrupt(value) {
   const text = JSON.stringify(value);
@@ -97,21 +174,76 @@ function resetE2eMarkdownDir() {
   fs.mkdirSync(e2eMarkdownPath, { recursive: true });
 }
 
-function cleanE2eUploadFiles(dir = apiUploadRoot) {
-  if (!fs.existsSync(dir)) return;
-  const relative = path.relative(apiUploadRoot, dir);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`Refusing to scan unexpected upload directory: ${dir}`);
+function trackGeneratedAsset(asset) {
+  let assetPath = asset?.path ? path.resolve(asset.path) : null;
+  if (!assetPath && asset?.url) {
+    try {
+      assetPath = path.join(generatedRoot, path.basename(decodeURIComponent(new URL(asset.url).pathname)));
+    } catch {
+      assetPath = null;
+    }
   }
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      cleanE2eUploadFiles(fullPath);
-      continue;
+  if (!assetPath) return;
+  const relative = path.relative(generatedRoot, assetPath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return;
+  const basePath = assetPath.replace(/\.(?:html|pdf)$/i, "");
+  generatedArtifactPaths.add(`${basePath}.html`);
+  generatedArtifactPaths.add(`${basePath}.pdf`);
+}
+
+function cleanGeneratedArtifacts() {
+  for (const artifactPath of generatedArtifactPaths) {
+    const relative = path.relative(generatedRoot, artifactPath);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error(`Refusing to clean unexpected generated artifact: ${artifactPath}`);
     }
-    if (/content-context-upload-fixture|protected-textbook\.edupdf/.test(entry.name)) {
-      fs.rmSync(fullPath, { force: true });
-    }
+    fs.rmSync(artifactPath, { force: true });
+  }
+}
+
+function cleanE2eWorkspaceFiles() {
+  const markdownRelative = path.relative(process.cwd(), e2eMarkdownPath);
+  if (!markdownRelative || markdownRelative.startsWith("..") || path.isAbsolute(markdownRelative)) {
+    throw new Error(`Refusing to clean unexpected E2E markdown path: ${e2eMarkdownPath}`);
+  }
+  fs.rmSync(e2eMarkdownPath, { recursive: true, force: true });
+  fs.rmSync(fixturePath, { force: true });
+  if (fs.existsSync(fixtureDir) && fs.readdirSync(fixtureDir).length === 0) {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+}
+
+async function cleanE2eDatabaseRecords() {
+  if (!env.DATABASE_URL) throw new Error("DATABASE_URL is required for E2E cleanup");
+  process.env.DATABASE_URL = env.DATABASE_URL;
+  const { prisma } = await import("@junhang/db");
+  try {
+    const assignmentIds = [...createdAssignmentIds];
+    const modelRunIds = [...createdModelRunIds];
+    const sourceIds = [...touchedSourceIds];
+    const generatedAssets = assignmentIds.length
+      ? await prisma.generatedAsset.deleteMany({
+          where: { OR: assignmentIds.map((id) => ({ path: { contains: id } })) }
+        })
+      : { count: 0 };
+    const assignments = assignmentIds.length
+      ? await prisma.assignment.deleteMany({ where: { id: { in: assignmentIds } } })
+      : { count: 0 };
+    const modelRuns = modelRunIds.length
+      ? await prisma.modelRun.deleteMany({ where: { id: { in: modelRunIds } } })
+      : { count: 0 };
+    const sources = sourceIds.length
+      ? await prisma.knowledgeSource.deleteMany({ where: { id: { in: sourceIds } } })
+      : { count: 0 };
+    return {
+      assignments: assignments.count,
+      generatedAssets: generatedAssets.count,
+      modelRuns: modelRuns.count,
+      sources: sources.count,
+      expectedSources: sourceIds.length
+    };
+  } finally {
+    await prisma.$disconnect();
   }
 }
 
@@ -150,6 +282,38 @@ function restoreContentIndex(snapshot) {
   } else {
     fs.writeFileSync(contentIndexPath, snapshot, "utf8");
   }
+}
+
+function normalizeRepoPath(value) {
+  return String(value || "")
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "")
+    .replace(/\/+$/, "");
+}
+
+function isE2eMarkdownSource(source, markdownDir) {
+  const sourcePath = normalizeRepoPath(source?.markdownPath);
+  const root = normalizeRepoPath(markdownDir);
+  return Boolean(sourcePath && root && (sourcePath === root || sourcePath.startsWith(`${root}/`)));
+}
+
+function reviewRestorePayload(source, { forceUnavailable = false } = {}) {
+  const reviewStatus = String(source?.reviewStatus || "PENDING").toUpperCase();
+  const licenseStatus = String(source?.licenseStatus || "REVIEW_REQUIRED").toUpperCase();
+  if (forceUnavailable) {
+    return {
+      status: "PENDING",
+      allowedForGeneration: false,
+      licenseStatus,
+      note: "content-context-e2e cleanup: test source must remain unavailable for generation"
+    };
+  }
+  return {
+    status: reviewStatus,
+    allowedForGeneration: reviewStatus === "APPROVED" && source?.allowedForGeneration === true,
+    licenseStatus,
+    note: "content-context-e2e cleanup: restore previous review state"
+  };
 }
 
 async function runNodeScript(script, args, options = {}) {
@@ -267,7 +431,9 @@ async function fetchAsset(url) {
   }
 }
 
+try {
 progress(`api base ${apiBaseUrl}`);
+originalContentIndex = captureContentIndex();
 
 const health = await request("/health", { label: "api health", timeoutMs: 30000 });
 pass("api health", health.ok && health.body.database?.ok, {
@@ -276,9 +442,8 @@ pass("api health", health.ok && health.body.database?.ok, {
 });
 
 resetE2eMarkdownDir();
-cleanE2eUploadFiles();
+cleanContentContextE2eUploadFiles(apiUploadRoot, e2eRunId);
 cleanLegacyE2eMarkdownFiles();
-const originalContentIndex = captureContentIndex();
 
 const markdown = await runNodeScript("scripts/convert-to-markdown.mjs", [
   "docs/41-prompt-context-engineering-playbook.md",
@@ -301,10 +466,42 @@ const teacherLogin = await request("/api/teacher-login", {
   label: "teacher login",
   body: { phone: teacherPhone, accessCode: teacherCode }
 });
-const teacherToken = teacherLogin.body.sessionToken;
+teacherToken = teacherLogin.body.sessionToken;
 pass("teacher login", teacherLogin.ok && teacherToken, {
   status: teacherLogin.status,
   teacher: teacherLogin.body.teacher?.displayName || null
+});
+
+const textbookResponse = teacherToken
+  ? await request(`/api/textbooks?subject=${encodeURIComponent(zh.math)}&includeDemo=true&limit=200`, {
+      token: teacherToken,
+      label: "select server textbook asset"
+    })
+  : null;
+const e2eTextbook = selectContentContextE2eTextbook(textbookResponse?.body.assets, {
+  subject: zh.math,
+  grade: zh.grade5
+});
+pass("server resolves a real math textbook asset", Boolean(e2eTextbook?.id && e2eTextbook?.grade), {
+  status: textbookResponse?.status || 0,
+  assetId: e2eTextbook?.id || null,
+  title: e2eTextbook?.title || null,
+  grade: e2eTextbook?.grade || null
+});
+
+const sourcesBeforeSync = teacherToken
+  ? await request("/api/knowledge/sources?limit=200", {
+      token: teacherToken,
+      label: "knowledge sources before e2e sync"
+    })
+  : null;
+for (const source of sourcesBeforeSync?.body.sources || []) {
+  if (!isE2eMarkdownSource(source, e2eMarkdownDir)) continue;
+  sourceSnapshots.set(source.id, { ...source });
+}
+pass("knowledge source snapshot captured", !teacherToken || sourcesBeforeSync?.ok, {
+  status: sourcesBeforeSync?.status || 0,
+  existingE2eSourceCount: sourceSnapshots.size
 });
 
 fs.mkdirSync(fixtureDir, { recursive: true });
@@ -313,13 +510,13 @@ fs.writeFileSync(
   [
     "# E2E 上传资料",
     "",
-    "五年级数学资料：小数乘法、图形、面积。",
-    "本资料用于验证教师端上传资料可以转为 Markdown，并进入内容索引。"
+    `${e2eTextbook?.grade || zh.grade5}${zh.math}资料：${e2eTextbook?.title || "教材"}、${zh.decimalMultiplication}、${zh.figure}、面积。`,
+    `本资料用于验证教师端上传资料可以转为 Markdown，并进入内容索引。测试标记 ${e2eContentSentinel}。`
   ].join("\n"),
   "utf8"
 );
 const uploadForm = new FormData();
-uploadForm.append("files", new Blob([fs.readFileSync(fixturePath)], { type: "text/markdown" }), "content-context-upload-fixture.md");
+uploadForm.append("files", new Blob([fs.readFileSync(fixturePath)], { type: "text/markdown" }), fixtureUploadFileName);
 uploadForm.append("outDir", e2eMarkdownDir);
 const uploadResponse = teacherToken
   ? await formRequest("/api/content/markdown-ingestion", {
@@ -335,7 +532,7 @@ pass("teacher can upload materials for markdown ingestion", uploadResponse?.ok &
 });
 
 const protectedUploadForm = new FormData();
-protectedUploadForm.append("files", new Blob([Buffer.from("protected textbook placeholder")], { type: "application/octet-stream" }), "protected-textbook.edupdf");
+protectedUploadForm.append("files", new Blob([Buffer.from("protected textbook placeholder")], { type: "application/octet-stream" }), protectedUploadFileName);
 const protectedUploadResponse = teacherToken
   ? await formRequest("/api/content/markdown-ingestion", {
       token: teacherToken,
@@ -349,7 +546,7 @@ pass("protected edupdf upload is rejected", protectedUploadResponse?.status === 
 });
 
 const invalidOutDirForm = new FormData();
-invalidOutDirForm.append("files", new Blob([fs.readFileSync(fixturePath)], { type: "text/markdown" }), "content-context-upload-fixture.md");
+invalidOutDirForm.append("files", new Blob([fs.readFileSync(fixturePath)], { type: "text/markdown" }), fixtureUploadFileName);
 invalidOutDirForm.append("outDir", "../outside-workspace");
 const invalidOutDirUpload = teacherToken
   ? await formRequest("/api/content/markdown-ingestion", {
@@ -408,6 +605,81 @@ pass("content index rebuild via api", rebuilt?.ok && rebuiltIndex.available && r
   subjects: firstDocument.subjects || []
 });
 
+const synced = teacherToken
+  ? await request("/api/knowledge/sources/sync-content-index", {
+      method: "POST",
+      token: teacherToken,
+      label: "sync content index to knowledge library",
+      body: { indexPath: "exports/content-index/index.json" }
+    })
+  : null;
+pass("content index syncs to knowledge sources and chunks", synced?.ok && synced.body.sync?.sourceCount >= 1 && synced.body.sync?.chunkCount >= 1, {
+  status: synced?.status || 0,
+  sourceCount: synced?.body.sync?.sourceCount || 0,
+  chunkCount: synced?.body.sync?.chunkCount || 0,
+  error: synced?.body.error || null
+});
+
+const sourcesAfterSync = teacherToken
+  ? await request("/api/knowledge/sources?limit=200", {
+      token: teacherToken,
+      label: "knowledge sources after e2e sync"
+    })
+  : null;
+const e2eSources = (sourcesAfterSync?.body.sources || []).filter((source) => isE2eMarkdownSource(source, e2eMarkdownDir));
+for (const source of e2eSources) {
+  if (!sourceSnapshots.has(source.id)) sourceSnapshots.set(source.id, null);
+}
+const fixtureSource = e2eSources.find((source) => isContentContextE2eFixtureSource(source, e2eRunId));
+fixtureSourceId = fixtureSource?.id || null;
+pass("synced E2E fixture source has chunks", Boolean(fixtureSourceId && Number(fixtureSource?.chunkCount || 0) > 0), {
+  sourceId: fixtureSourceId,
+  sourceCount: e2eSources.length,
+  chunkCount: fixtureSource?.chunkCount || 0,
+  markdownPath: fixtureSource?.markdownPath || null
+});
+
+const reviewResponses = [];
+for (const source of e2eSources) {
+  const isFixture = source.id === fixtureSourceId;
+  touchedSourceIds.add(source.id);
+  reviewResponses.push({
+    source,
+    isFixture,
+    response: await request(`/api/knowledge/sources/${encodeURIComponent(source.id)}/review`, {
+      method: "PATCH",
+      token: teacherToken,
+      label: `${isFixture ? "approve" : "disable"} E2E knowledge source`,
+      body: {
+        status: isFixture ? "APPROVED" : "PENDING",
+        licenseStatus: isFixture ? "ALLOWED" : (source.licenseStatus || "REVIEW_REQUIRED"),
+        allowedForGeneration: isFixture,
+        textbookAssetId: e2eTextbook?.id,
+        note: "content-context-e2e temporary review state"
+      }
+    })
+  });
+}
+const approvedFixture = reviewResponses.find((item) => item.isFixture)?.response?.body.source;
+const disabledE2eSources = reviewResponses
+  .filter((item) => !item.isFixture)
+  .map((item) => item.response?.body.source)
+  .filter(Boolean);
+pass("only the E2E fixture source is approved for generation", Boolean(
+  fixtureSourceId
+    && approvedFixture?.id === fixtureSourceId
+    && approvedFixture.reviewStatus === "APPROVED"
+    && approvedFixture.allowedForGeneration === true
+    && reviewResponses.every((item) => item.response?.ok)
+    && disabledE2eSources.every((source) => source.reviewStatus !== "APPROVED" || source.allowedForGeneration !== true)
+), {
+  fixtureSourceId,
+  approvedSourceId: approvedFixture?.id || null,
+  approvedReviewStatus: approvedFixture?.reviewStatus || null,
+  approvedForGeneration: approvedFixture?.allowedForGeneration ?? null,
+  disabledSourceIds: disabledE2eSources.map((source) => source.id)
+});
+
 const assessment = teacherToken
   ? await request("/api/assessments/draft", {
       method: "POST",
@@ -416,18 +688,35 @@ const assessment = teacherToken
       timeoutMs: generationRequestTimeoutMs,
       body: {
         targetScope: "grade",
-        targetGrade: zh.grade5,
+        targetGrade: e2eTextbook?.grade || zh.grade5,
         subject: zh.math,
         kind: zh.quiz,
         difficulty: zh.base,
+        textbookAssetId: e2eTextbook?.id || null,
+        textbookTitle: "客户端伪造教材标题",
+        textbookChapterTitle: zh.decimalMultiplication,
         requirement: zh.guardRequirement,
         assessmentTotalTimeoutMs: generationModelBudgetMs,
-        knowledgePoints: [zh.decimalMultiplication, zh.figure]
+        knowledgePoints: [zh.decimalMultiplication, zh.figure, e2eContentSentinel]
       }
     })
   : null;
 const assessmentResult = assessment?.body.result || {};
 const assessmentId = assessmentResult.persisted?.assignmentId;
+if (assessmentId) createdAssignmentIds.add(assessmentId);
+for (const modelRunId of [
+  assessmentResult.persisted?.modelRunId,
+  ...(Array.isArray(assessmentResult.persisted?.draftReviewModelRunIds)
+    ? assessmentResult.persisted.draftReviewModelRunIds
+    : [])
+].filter(Boolean)) {
+  createdModelRunIds.add(modelRunId);
+}
+const matchedSources = assessmentResult.contentContext?.matches || [];
+const matchedFixture = matchedSources.find((source) => source.id === fixtureSourceId);
+const matchedFixtureChunk = matchedFixture?.chunks?.find((chunk) =>
+  `${chunk.text || ""} ${chunk.preview || ""}`.includes(e2eContentSentinel)
+);
 pass("assessment draft injects clean content context", assessment?.ok && assessmentId && assessmentResult.contentContext?.matchedCount >= 1 && !hasCorrupt(assessment.body), {
   verificationScope: verificationMeta.verificationScope,
   assessesGenerationQuality: verificationMeta.assessesGenerationQuality,
@@ -440,26 +729,49 @@ pass("assessment draft injects clean content context", assessment?.ok && assessm
   modelAvailable: assessmentResult.modelAvailable ?? null,
   usedDynamicFallback: assessmentResult.usedDynamicFallback ?? null,
   modelBudgetMs: generationModelBudgetMs,
-  requirement: assessmentResult.generationContext?.request?.requirement || null
+  requirement: assessmentResult.generationContext?.request?.requirement || null,
+  matchedSourceIds: matchedSources.map((source) => source.id),
+  matchedChunkIds: matchedFixture?.chunks?.map((chunk) => chunk.id) || []
+});
+pass("assessment context names the approved fixture source and matching chunk", Boolean(
+  assessment?.ok
+    && matchedSources.length === 1
+    && matchedFixture?.id === fixtureSourceId
+    && assessmentResult.contentContext?.textbookContext?.assetId === e2eTextbook?.id
+    && matchedFixtureChunk
+), {
+  fixtureSourceId,
+  textbookAssetId: assessmentResult.contentContext?.textbookContext?.assetId || null,
+  matchedSourceIds: matchedSources.map((source) => source.id),
+  matchedChunkId: matchedFixtureChunk?.id || null,
+  matchedChunkPreview: matchedFixtureChunk?.preview || null,
+  approvedOnly: assessmentResult.contentContext?.approvedOnly ?? null
 });
 
 const draftExport = teacherToken && assessmentId
   ? await request(`/api/assessments/${assessmentId}/draft-export`, { method: "POST", token: teacherToken, timeoutMs: exportRequestTimeoutMs, label: "assessment draft export", body: {} })
   : null;
 const draftAsset = draftExport?.body.asset || {};
+trackGeneratedAsset(draftAsset);
+const draftLayoutValidation = draftExport?.body.layoutValidation || null;
+const draftLayoutValid = draftLayoutValidation?.ok === true;
 const draftAssetFetch = await fetchAsset(draftAsset.url);
 pass("teacher can export review draft", draftExport?.ok && draftAsset.url && draftAssetFetch.ok && (!draftAssetFetch.text || !hasCorrupt(draftAssetFetch.text)), {
   url: draftAsset.url || null,
   fetchStatus: draftAssetFetch.status,
-  contentType: draftAssetFetch.contentType
+  contentType: draftAssetFetch.contentType,
+  layoutValidation: draftLayoutValidation
 });
 
 const blockedPrint = teacherToken && assessmentId
   ? await request(`/api/assessments/${assessmentId}/print-export`, { method: "POST", token: teacherToken, timeoutMs: exportRequestTimeoutMs, label: "blocked print export", body: {} })
   : null;
-pass("final print is blocked before review", blockedPrint?.status === 409 && blockedPrint.body.error === "DRAFT_REVIEW_REQUIRED", {
+const expectedPreReviewError = draftLayoutValid ? "DRAFT_REVIEW_REQUIRED" : "ASSESSMENT_LAYOUT_INVALID";
+pass("final print is blocked before review or valid layout", blockedPrint?.status === 409 && blockedPrint.body.error === expectedPreReviewError, {
   status: blockedPrint?.status || 0,
-  error: blockedPrint?.body.error || null
+  error: blockedPrint?.body.error || null,
+  expectedError: expectedPreReviewError,
+  draftLayoutValid
 });
 
 const review = teacherToken && assessmentId
@@ -470,30 +782,101 @@ const review = teacherToken && assessmentId
       body: { decision: "accept" }
     })
   : null;
-pass("teacher can accept review draft", review?.ok && review.body.reviewStatus === "accepted", {
-  reviewStatus: review?.body.reviewStatus || null
+pass("teacher review obeys layout validation", draftLayoutValid
+  ? review?.ok && review.body.reviewStatus === "accepted"
+  : review?.status === 409 && review.body.error === "ASSESSMENT_LAYOUT_INVALID", {
+  status: review?.status || 0,
+  error: review?.body.error || null,
+  reviewStatus: review?.body.reviewStatus || null,
+  draftLayoutValid
 });
 
 const printExport = teacherToken && assessmentId
   ? await request(`/api/assessments/${assessmentId}/print-export`, { method: "POST", token: teacherToken, timeoutMs: exportRequestTimeoutMs, label: "final print export", body: {} })
   : null;
 const printAssets = printExport?.body.assets || [];
+for (const asset of printAssets) trackGeneratedAsset(asset);
 const fetchedAssets = await Promise.all(printAssets.map((asset) => fetchAsset(asset.url)));
-pass("final print exports student and analysis assets", printExport?.ok && printAssets.length >= 2 && fetchedAssets.every((item) => item.ok) && !hasCorrupt(printAssets), {
+pass("final print export obeys layout validation", draftLayoutValid
+  ? printExport?.ok && printAssets.length >= 2 && fetchedAssets.every((item) => item.ok) && !hasCorrupt(printAssets)
+  : printExport?.status === 409 && printExport.body.error === "ASSESSMENT_LAYOUT_INVALID", {
   status: printExport?.status || 0,
   error: printExport?.body.error || null,
+  draftLayoutValid,
   assets: printAssets.map((asset) => ({ title: asset.title, url: asset.url })),
   fetchStatuses: fetchedAssets.map((item) => item.status),
   contentTypes: fetchedAssets.map((item) => item.contentType)
 });
+} finally {
+  let sourcesRestored = true;
+  const restoreResults = [];
+  if (teacherToken) {
+    for (const sourceId of touchedSourceIds) {
+      const snapshot = sourceSnapshots.get(sourceId);
+      const response = await request(`/api/knowledge/sources/${encodeURIComponent(sourceId)}/review`, {
+        method: "PATCH",
+        token: teacherToken,
+        label: "restore E2E knowledge source review state",
+        body: reviewRestorePayload(snapshot, { forceUnavailable: sourceId === fixtureSourceId })
+      });
+      const ok = response.ok;
+      sourcesRestored = sourcesRestored && ok;
+      restoreResults.push({ sourceId, ok, status: response.status, error: response.body?.error || null });
+    }
+  }
+  let fixtureUnavailable = !fixtureSourceId;
+  if (teacherToken && fixtureSourceId) {
+    const afterCleanup = await request("/api/knowledge/sources?limit=200", {
+      token: teacherToken,
+      label: "verify E2E source cleanup"
+    });
+    const source = (afterCleanup.body.sources || []).find((item) => item.id === fixtureSourceId);
+    fixtureUnavailable = Boolean(
+      afterCleanup.ok
+        && source
+        && (source.reviewStatus !== "APPROVED" || source.allowedForGeneration !== true)
+    );
+  }
+  pass("E2E test sources are unavailable after cleanup", sourcesRestored && fixtureUnavailable, {
+    fixtureSourceId,
+    fixtureUnavailable,
+    restoredSourceIds: restoreResults.map((item) => item.sourceId),
+    restoreResults
+  });
 
-restoreContentIndex(originalContentIndex);
-pass("content index is restored after e2e", true, {
-  restored: originalContentIndex != null,
-  indexPath: path.relative(process.cwd(), contentIndexPath)
-});
+  let indexRestored = true;
+  try {
+    restoreContentIndex(originalContentIndex);
+  } catch (error) {
+    indexRestored = false;
+    progress(`fail restore content index: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  pass("content index is restored after e2e", indexRestored, {
+    restored: originalContentIndex != null,
+    indexPath: path.relative(process.cwd(), contentIndexPath)
+  });
 
-cleanE2eUploadFiles();
+  try {
+    cleanContentContextE2eUploadFiles(apiUploadRoot, e2eRunId);
+    cleanGeneratedArtifacts();
+    cleanE2eWorkspaceFiles();
+    pass("E2E filesystem artifacts are cleaned", true, {
+      generatedArtifactCount: generatedArtifactPaths.size
+    });
+  } catch (error) {
+    pass("E2E filesystem artifacts are cleaned", false, {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+  try {
+    const deleted = await cleanE2eDatabaseRecords();
+    pass("E2E database records are cleaned", deleted.sources === deleted.expectedSources, deleted);
+  } catch (error) {
+    pass("E2E database records are cleaned", false, {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
 
 const failed = checks.filter((item) => !item.ok);
 console.log(JSON.stringify({

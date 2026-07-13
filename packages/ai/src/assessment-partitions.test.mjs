@@ -17,6 +17,17 @@ test("quiz and practice plans use two concurrent project-aware partitions", () =
   assert.equal(englishPractice.flatMap((item) => item.itemTypes).includes("writing"), false);
 });
 
+test("compact assessment partitions divide the requested item count", () => {
+  const englishQuiz = buildAssessmentPartitions({
+    subject: "英语",
+    kind: "小测",
+    requestedItemCount: 12
+  });
+
+  assert.deepEqual(englishQuiz.map((item) => item.targetItemCount), [8, 4]);
+  assert.equal(englishQuiz.reduce((sum, item) => sum + item.targetItemCount, 0), 12);
+});
+
 test("formal exams use four subject-specific partitions", () => {
   const chinese = buildAssessmentPartitions({ subject: "语文", kind: "试卷" });
   const english = buildAssessmentPartitions({ subject: "英语", kind: "试卷" });

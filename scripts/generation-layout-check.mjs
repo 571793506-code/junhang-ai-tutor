@@ -13,10 +13,12 @@ function normalizeText(value) {
 }
 
 function inferKind(name, text = "") {
+  const source = normalizeText(text);
+  const headerKind = source.match(/(?:^|\n)\s*(小测|练习|试卷)\s*·\s*A4\s*·\s*第\s*\d+\s*\/\s*\d+\s*页/m)?.[1];
+  if (headerKind) return headerKind;
   if (name.includes("试卷")) return "试卷";
   if (name.includes("小测")) return "小测";
   if (name.includes("练习")) return "练习";
-  const source = normalizeText(text);
   if (source.includes("试卷")) return "试卷";
   if (source.includes("小测")) return "小测";
   if (source.includes("练习")) return "练习";
@@ -102,6 +104,11 @@ function hasIntentionalMathWorkSpace(metric = {}, subject = "") {
   return (drawingCount >= 4 && (hasWorkSection || hasWorkPrompt)) || hasWorkPrompt;
 }
 
+function isStudentPaperPdfName(name = "") {
+  const normalized = normalizeText(name).toLowerCase();
+  return normalized.includes("题目") || normalized.includes("-draft-review-") || normalized.endsWith("-print.pdf");
+}
+
 export function evaluateGenerationLayoutPdf(pdf = {}) {
   const name = normalizeText(pdf.name);
   const text = normalizeText(pdf.text);
@@ -113,7 +120,7 @@ export function evaluateGenerationLayoutPdf(pdf = {}) {
   const pageMetrics = Array.isArray(pdf.pageMetrics) ? pdf.pageMetrics : [];
   const issues = [];
 
-  if (!name.includes("题目")) {
+  if (!isStudentPaperPdfName(name)) {
     return {
       name,
       ok: true,
@@ -214,7 +221,8 @@ if not pdf_dir.exists():
 student_marker = "\u9898\u76ee"
 items = []
 for pdf_path in sorted(pdf_dir.glob("*.pdf"), key=lambda item: item.name):
-    if student_marker not in pdf_path.name:
+    lower_name = pdf_path.name.lower()
+    if student_marker not in pdf_path.name and "-draft-review-" not in lower_name and not lower_name.endswith("-print.pdf"):
         continue
     doc = fitz.open(str(pdf_path))
     texts = []
@@ -228,12 +236,20 @@ for pdf_path in sorted(pdf_dir.glob("*.pdf"), key=lambda item: item.name):
             if str(block_text or "").strip():
                 bottoms.append(float(y1))
         text_bottom = max(bottoms) if bottoms else 0.0
-        bottom_blank_mm = max(0.0, (float(page.rect.height) - text_bottom) * 25.4 / 72.0)
+        drawings = page.get_drawings() or []
+        drawing_bottoms = []
+        for drawing in drawings:
+            rect = drawing.get("rect")
+            if rect is not None:
+                drawing_bottoms.append(float(rect.y1))
+        drawing_bottom = max(drawing_bottoms) if drawing_bottoms else 0.0
+        content_bottom = max(text_bottom, drawing_bottom)
+        bottom_blank_mm = max(0.0, (float(page.rect.height) - content_bottom) * 25.4 / 72.0)
         page_metrics.append({
             "page": page_number,
             "bottomBlankMm": round(bottom_blank_mm, 1),
             "textBlockCount": len(bottoms),
-            "drawingCount": len(page.get_drawings() or []),
+            "drawingCount": len(drawings),
             "text": text.strip()[:2000],
         })
     items.append({

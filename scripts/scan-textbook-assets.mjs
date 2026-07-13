@@ -1,12 +1,17 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { classifyTextbookBaseline } from "@junhang/core";
 
 const defaultRoot = "D:/\u541b\u822aAI\u52a9\u6559/textbooks";
 const rootArg = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
 const root = path.resolve(rootArg || process.env.TEXTBOOK_ROOT || defaultRoot);
 const write = process.argv.includes("--write");
 const outputPath = path.resolve("exports/textbook-index/textbooks-index.json");
+
+function isTextbookAsset(filePath) {
+  return path.extname(filePath).toLowerCase() === ".edupdf";
+}
 
 function walk(dir, files = []) {
   if (!fs.existsSync(dir)) return files;
@@ -35,10 +40,10 @@ function inferSubject(text) {
 }
 
 function inferGrade(text) {
-  const matches = [...text.matchAll(/([三四五六]|3|4|5|6)\s*年级/g)];
+  const matches = [...text.matchAll(/([一二三四五六]|1|2|3|4|5|6)\s*年级/g)];
   if (!matches.length) return "";
   const match = matches[matches.length - 1];
-  const map = { "3": "三", "4": "四", "5": "五", "6": "六" };
+  const map = { "1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六" };
   return `${map[match[1]] || match[1]}年级`;
 }
 
@@ -60,11 +65,23 @@ function toAsset(filePath) {
   const stat = fs.statSync(filePath);
   const relativePath = path.relative(root, filePath);
   const searchText = `${relativePath} ${path.basename(filePath, path.extname(filePath))}`;
+  const subject = inferSubject(searchText);
+  const baseline = classifyTextbookBaseline({
+    subject,
+    edition: inferEdition(searchText),
+    title: path.basename(filePath, path.extname(filePath)),
+    source: root,
+    path: filePath
+  });
   return {
     id: crypto.createHash("sha1").update(relativePath).digest("hex").slice(0, 16),
-    subject: inferSubject(searchText),
+    subject,
     grade: inferGrade(searchText),
-    edition: inferEdition(searchText),
+    edition: baseline.edition || inferEdition(searchText),
+    editionDisplay: baseline.displayName,
+    curriculumSeries: baseline.series,
+    curriculumRegion: baseline.region,
+    baselineMatched: baseline.baselineMatched,
     volume: inferVolume(searchText),
     title: path.basename(filePath, path.extname(filePath)),
     source: root,
@@ -78,7 +95,7 @@ function toAsset(filePath) {
   };
 }
 
-const files = walk(root);
+const files = walk(root).filter(isTextbookAsset);
 const assets = files.map(toAsset);
 const byExt = assets.reduce((acc, item) => {
   acc[item.ext || "(none)"] = (acc[item.ext || "(none)"] || 0) + 1;

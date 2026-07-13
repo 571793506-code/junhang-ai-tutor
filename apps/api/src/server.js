@@ -14,7 +14,7 @@ import {
   createMiniMaxSpeechTask,
   draftStudentProfileNarrative
 } from "@junhang/ai";
-import { inspectEncodingPayload } from "@junhang/core";
+import { classifyTextbookBaseline, inspectEncodingPayload, matchesTextbookAssetSearch } from "@junhang/core";
 import { recognizeImages } from "@junhang/ai/ocr-node";
 import {
   createClassroomBroadcast,
@@ -37,12 +37,19 @@ import {
   draftAssessmentService,
   draftTeacherTaskService,
   generateVocabularyCardService,
-  gradeSubmissionService
+  gradeSubmissionService,
+  matchApprovedContentContext,
+  validateAssessmentContentContext
 } from "@junhang/services";
 import { checkDatabaseStatus, persistenceOptions, requireDatabase } from "./db-status.js";
+import { resolveApprovedAssessmentContentContext } from "./approved-content-context.js";
+import { assessmentPageBalanceFillRatio, buildAssessmentLayoutValidation } from "./assessment-layout-validation.js";
+import { isNoMarkdownDocumentsError, summarizeContentIndexState } from "./content-index-state.js";
 import { createEncodingGuardMiddleware } from "./encoding-guard-middleware.js";
 import { loadRuntimeConfig, publicConfigSummary } from "./env.js";
 import { gradingQuestionReviewState, requireAllQuestionsReviewedForArchive } from "./grading-review-gates.js";
+import { resolveKnowledgeSourceId } from "./knowledge-source-id.js";
+import { buildKnowledgeSourceTextbookBinding, preserveKnowledgeSourceTextbookBinding } from "./knowledge-source-textbook-scope.js";
 import {
   buildQaActorContext,
   cleanClassroomQaResultForClient,
@@ -719,16 +726,17 @@ function readContentIndexSummary(indexPath = path.resolve(workspaceRoot, "export
   }
   try {
     const index = JSON.parse(fs.readFileSync(indexPath, "utf8"));
-    const documents = Array.isArray(index.documents) ? index.documents : [];
+    const state = summarizeContentIndexState(index);
     return {
-      available: true,
+      available: state.available,
       indexPath,
       generatedAt: index.generatedAt || null,
-      documentCount: index.documentCount || documents.length,
+      documentCount: state.documentCount,
+      reason: state.reason,
       subjectCounts: index.subjectCounts || {},
       gradeCounts: index.gradeCounts || {},
       knowledgePointCounts: index.knowledgePointCounts || {},
-      documents: documents.slice(0, 80).map((document) => ({
+      documents: state.documents.slice(0, 80).map((document) => ({
         id: document.id,
         title: document.title,
         sourceType: document.sourceType,
@@ -757,11 +765,6 @@ function readContentIndexRaw(indexPath = path.resolve(workspaceRoot, "exports/co
   return JSON.parse(fs.readFileSync(indexPath, "utf8"));
 }
 
-function stableKnowledgeSourceId(document) {
-  const basis = document.relativeMarkdownPath || document.markdownPath || document.sourcePath || document.title || randomUUID();
-  return `ks_${Buffer.from(String(basis)).toString("base64url").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 36)}`;
-}
-
 function normalizeKnowledgeDisplayText(value) {
   return readableText(value, "")
     .replace(/Prompt Engineering/gi, "提示词工程")
@@ -781,6 +784,7 @@ function knowledgeSourceTitle(document = {}) {
 }
 
 function mapKnowledgeSourceRow(row) {
+  const metadata = safeJson(row.metadata, {});
   return {
     id: row.id,
     title: knowledgeSourceTitle(row),
@@ -799,7 +803,11 @@ function mapKnowledgeSourceRow(row) {
     allowedForGeneration: Boolean(row.allowedForGeneration),
     confidence: row.confidence ?? null,
     summary: normalizeKnowledgeDisplayText(row.summary || ""),
-    metadata: safeJson(row.metadata, {}),
+    textbookAssetId: metadata.textbookAssetId || "",
+    textbookTitle: metadata.textbookTitle || "",
+    curriculumSeries: metadata.curriculumSeries || "",
+    curriculumRegion: metadata.curriculumRegion || "",
+    metadata,
     chunkCount: Number(row.chunkCount || 0),
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt
@@ -811,25 +819,41 @@ async function syncContentIndexToKnowledgeLibrary(index, teacherId = null) {
   let sourceCount = 0;
   let chunkCount = 0;
   for (const document of documents) {
-    const id = stableKnowledgeSourceId(document);
-    const metadata = {
+    const id = await resolveKnowledgeSourceId(prisma, document);
+    const indexedMetadata = {
       contentIndexId: document.id,
+      textbookAssetId: document.textbookAssetId,
       subjects: document.subjects || [],
       grades: document.grades || [],
+      curriculumSeries: document.curriculumSeries || null,
+      curriculumRegion: document.curriculumRegion || null,
       knowledgePoints: document.knowledgePoints || [],
       textLength: document.textLength || 0,
       syncedByTeacherId: teacherId,
       syncedAt: new Date().toISOString()
     };
+    const existing = await prisma.knowledgeSource.findUnique({
+      where: { id },
+      select: { subject: true, grade: true, edition: true, volume: true, metadata: true }
+    });
+    const indexedSource = preserveKnowledgeSourceTextbookBinding({
+      subject: (document.subjects || [])[0] || null,
+      grade: (document.grades || [])[0] || null,
+      edition: document.edition || null,
+      volume: document.volume || null,
+      metadata: indexedMetadata
+    }, existing);
+    const metadata = indexedSource.metadata;
     await prisma.$executeRaw`
       INSERT INTO "KnowledgeSource" (
-        "id", "title", "sourceType", "subject", "grade", "sourcePath", "markdownPath",
+        "id", "title", "sourceType", "subject", "grade", "edition", "volume", "sourcePath", "markdownPath",
         "licenseStatus", "reviewStatus", "allowedForGeneration", "confidence", "summary",
         "metadata", "createdAt", "updatedAt"
       )
       VALUES (
         ${id}, ${knowledgeSourceTitle(document)}, ${readableText(document.sourceType, "teacher-upload")},
-        ${(document.subjects || [])[0] || null}, ${(document.grades || [])[0] || null},
+        ${indexedSource.subject || null}, ${indexedSource.grade || null},
+        ${indexedSource.edition || null}, ${indexedSource.volume || null},
         ${document.sourcePath || null}, ${document.relativeMarkdownPath || document.markdownPath || null},
         'REVIEW_REQUIRED', 'PENDING', false, ${document.textLength ? 0.72 : null},
         ${document.summary || null}, ${JSON.stringify(metadata)}::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
@@ -839,6 +863,8 @@ async function syncContentIndexToKnowledgeLibrary(index, teacherId = null) {
         "sourceType" = EXCLUDED."sourceType",
         "subject" = EXCLUDED."subject",
         "grade" = EXCLUDED."grade",
+        "edition" = EXCLUDED."edition",
+        "volume" = EXCLUDED."volume",
         "sourcePath" = EXCLUDED."sourcePath",
         "markdownPath" = EXCLUDED."markdownPath",
         "confidence" = EXCLUDED."confidence",
@@ -1114,13 +1140,20 @@ function mapTask(task) {
   };
 }
 
-function mapAssignment(assignment) {
+function mapAssignment(assignment, options = {}) {
   const metadata = safeJson(assignment.metadata, {});
   const submission = assignment.submissions?.[0] || null;
   const grading = submission?.grading?.result || metadata.grading || null;
   const kind = readableKind(metadata.kind, "练习");
   const title = readableText(assignment.title, kind === "图片批改" ? "图片批改记录" : `${kind}生成记录`);
   const subject = readableText(assignment.subject?.name || metadata.subject, "英语");
+  const generationContext = safeJson(metadata.generationContext, {});
+  const generationTeaching = safeJson(generationContext.teaching, {});
+  const generationTextbook = safeJson(generationTeaching.textbook, {});
+  const generationOutput = safeJson(generationContext.output, {});
+  const pipelineAssets = safeJson(safeJson(metadata.generationPipeline, {}).assets, {});
+  const draftReviewAssetId = readableText(metadata.draftReviewAssetId || pipelineAssets.draftReviewAssetId, "");
+  const draftReviewUrl = readableText(pipelineAssets.draftReviewUrl, "");
   const rawPrintProfile = safeJson(metadata.printProfile, null);
   const printProfile = rawPrintProfile
     ? {
@@ -1161,6 +1194,30 @@ function mapAssignment(assignment) {
     totalScore: metadata.totalScore || (kind === "试卷" ? 100 : 60),
     items: assignment.items?.map((item) => item.prompt) || [],
     draftReviewStatus: metadata.draftReviewStatus || null,
+    draftReviewAsset: options.includeDraftReviewAsset && draftReviewAssetId && draftReviewUrl
+      ? { id: draftReviewAssetId, title: `${title} - 内容审查草稿`, url: draftReviewUrl }
+      : null,
+    draftRequest: options.includeDraftReviewAsset
+      ? {
+          targetScope: metadata.targetScope || (metadata.targetGrade ? "grade" : "student"),
+          studentId: metadata.targetStudentId || undefined,
+          targetGrade: metadata.targetGrade || assignment.grade || undefined,
+          subject,
+          kind,
+          difficulty: readableText(assignment.difficulty || metadata.difficulty, "基础"),
+          requirement: readableText(metadata.specialRequirements, ""),
+          requestedItemCount: Number(generationOutput.requestedItemCount || metadata.audit?.itemCount || 0) || undefined,
+          textbookAssetId: readableText(metadata.textbookAssetId || generationTeaching.textbookAssetId, "") || undefined,
+          textbookTitle: readableText(metadata.textbookTitle || generationTeaching.textbookTitle, "") || undefined,
+          textbookEdition: readableText(metadata.textbookEdition || generationTeaching.textbookEdition || generationTextbook.edition, "") || undefined,
+          textbookSeries: readableText(metadata.textbookSeries || generationTeaching.textbookSeries || generationTextbook.series, "") || undefined,
+          textbookVolume: readableText(metadata.textbookVolume || generationTeaching.textbookVolume || generationTextbook.volume, "") || undefined,
+          textbookRegion: readableText(metadata.textbookRegion || generationTeaching.textbookRegion || generationTextbook.region, "") || undefined,
+          textbookChapterId: readableText(metadata.textbookChapterId || generationTeaching.textbookChapterId, "") || undefined,
+          textbookChapterTitle: readableText(metadata.textbookChapterTitle || generationTeaching.textbookChapterTitle, "") || undefined
+        }
+      : null,
+    layoutValidation: metadata.layoutValidation || null,
     audit: metadata.audit || null,
     grading: grading?.summary
       ? grading
@@ -1173,11 +1230,23 @@ function mapAssignment(assignment) {
 function mapTextbookAsset(asset) {
   const metadata = safeJson(asset.metadata, {});
   const chapters = Array.isArray(metadata.chapters) ? metadata.chapters : [];
+  const baseline = classifyTextbookBaseline({
+    subject: asset.subject,
+    edition: asset.edition,
+    series: metadata.curriculumSeries,
+    title: asset.title,
+    source: asset.source,
+    path: asset.path
+  });
   return {
     id: asset.id,
     subject: readableText(asset.subject, "未识别"),
     grade: readableText(asset.grade, "未识别"),
-    edition: readableText(asset.edition, "未识别"),
+    edition: readableText(baseline.edition || asset.edition, "未识别"),
+    editionDisplay: readableText(metadata.editionDisplay || baseline.displayName, "未识别"),
+    curriculumSeries: readableText(metadata.curriculumSeries || baseline.series, ""),
+    curriculumRegion: readableText(metadata.curriculumRegion || baseline.region, ""),
+    baselineMatched: metadata.baselineMatched === true || baseline.baselineMatched,
     volume: readableText(asset.volume, "未识别"),
     title: readableText(asset.title, "未命名教材"),
     source: asset.source || "",
@@ -1609,6 +1678,7 @@ function answerSpaceMm(item, subject = "", kind = "") {
   if (type === "choice" || type === "judgment" || type === "writing" || type === "listening") return 0;
   if (type === "fill") {
     if (/tianzige|ruled|english-four-line|english-writing/i.test(answerFormat)) return configured > 0 ? Math.max(4, Math.min(configured, 12)) : 5;
+    if (subjectText.includes("英语") && /英译汉|英文译中文/.test(readableText(item?.prompt, ""))) return 8;
     return 0;
   }
   if (type === "reading" && options.length) return 0;
@@ -1779,6 +1849,9 @@ function renderAnswerSpace(item, itemType, spaceMm, subject = "") {
       ? `<div class="ruled-lines compact"><span></span></div>`
       : `<div class="short-response-space" style="min-height:${spaceMm}mm"></div>`;
   }
+  if (itemType === "fill" && subjectText.includes("英语") && spaceMm > 0) {
+    return `<div class="short-answer-line" style="height:${spaceMm}mm"></div>`;
+  }
   return spaceMm > 0 ? `<div class="answer-space" style="min-height:${spaceMm}mm"></div>` : "";
 }
 
@@ -1849,6 +1922,12 @@ function splitSequentialPages(items = [], pageCount = 2, subject = "", kind = ""
   });
   const subjectText = readableText(subject, "");
   const kindText = readableText(kind, "");
+  const pageBalanceFillRatio = assessmentPageBalanceFillRatio({
+    subject: subjectText,
+    kind: kindText,
+    itemCount: weighted.length,
+    pageCount: safePageCount
+  });
   const planningPageCount = safePageCount;
   const allocatableWeighted = weighted;
   const sectionWeightFor = (entry, previousEntry = null) => {
@@ -1896,17 +1975,33 @@ function splitSequentialPages(items = [], pageCount = 2, subject = "", kind = ""
       pages[index].items.unshift(moved);
       pages[index].heightPx += moved.estimatedHeightPx;
     }
-    while (pages[index].heightPx < pageBudgetPx * 0.5 && pages[index - 1].items.length > 5) {
-      const moved = pages[index - 1].items.pop();
+    while (pages[index].heightPx < pageBudgetPx * pageBalanceFillRatio && pages[index - 1].items.length > 5) {
+      const previousPage = pages[index - 1];
+      const currentPage = pages[index];
+      const moved = previousPage.items.at(-1);
       if (!moved) break;
       const firstCurrent = pages[index].items[0]?.item;
-      if (firstCurrent && sectionTitleForItem(moved.item) !== sectionTitleForItem(firstCurrent)) {
-        pages[index - 1].items.push(moved);
-        break;
+      const movedSection = sectionTitleForItem(moved.item);
+      const currentSection = firstCurrent ? sectionTitleForItem(firstCurrent) : movedSection;
+      let moveStart = previousPage.items.length - 1;
+      if (movedSection !== currentSection) {
+        while (moveStart > 0 && sectionTitleForItem(previousPage.items[moveStart - 1].item) === movedSection) {
+          moveStart -= 1;
+        }
       }
-      pages[index - 1].heightPx -= moved.estimatedHeightPx;
-      pages[index].items.unshift(moved);
-      pages[index].heightPx += moved.estimatedHeightPx;
+      const moving = previousPage.items.slice(moveStart);
+      if (!moving.length || previousPage.items.length - moving.length < 5) break;
+      const candidateItems = [...moving, ...currentPage.items];
+      const candidateHeightPx = candidateItems.reduce((sum, entry, itemIndex) => {
+        return sum + entry.estimatedHeightPx + sectionWeightFor(entry, candidateItems[itemIndex - 1]);
+      }, 0);
+      if (candidateHeightPx > pageBudgetPx) break;
+      previousPage.items.splice(moveStart, moving.length);
+      currentPage.items.unshift(...moving);
+      previousPage.heightPx = previousPage.items.reduce((sum, entry, itemIndex) => {
+        return sum + entry.estimatedHeightPx + sectionWeightFor(entry, previousPage.items[itemIndex - 1]);
+      }, 0);
+      currentPage.heightPx = candidateHeightPx;
     }
   }
   return pages;
@@ -1965,7 +2060,7 @@ h1 { margin: 4px 0 2px; font-size: 16pt; text-align: center; font-family: "SimHe
 .options.two-column { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .options.four-column { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .answer-space { margin-top: 3px; background: #fff; }
-.short-answer-line { height: 5mm; margin: 2px 0 0 18px; }
+.short-answer-line { margin: 2px 0 0 18px; border-bottom: 1px solid #b9c6d3; }
 .calculation-space, .work-space, .short-response-space { margin: 3px 0 1px 18px; background: #fff; }
 .calculation-space, .work-space { border: 0; }
 .short-response-space { border: 0; }
@@ -2176,13 +2271,21 @@ function mergeQuestionLayoutMeasurements(manifest, measurement = null, options =
   const byQuestionNo = new Map(measuredQuestions.map((item) => [String(item.questionNo || ""), item]));
   const byQuestionId = new Map(measuredQuestions.map((item) => [String(item.questionId || ""), item]));
   const measured = Boolean(measurement?.ok && measuredQuestions.length);
+  const layoutValidation = options.layoutValidation || null;
+  const coordinateManifestValid = layoutValidation
+    ? layoutValidation.coordinateManifestValid === true
+    : measured;
   return {
     ...manifest,
     pageCount: options.pdfPageCount || options.htmlPageCount || manifest.pageCount,
     htmlPageCount: options.htmlPageCount || null,
     pdfPageCount: options.pdfPageCount || null,
+    coordinateManifestValid,
+    layoutValidation,
     coordinateSource: measured ? "browser-dom" : "estimated",
-    coordinateReason: measured ? null : measurement?.reason || "未执行浏览器坐标测量，已使用估算坐标。",
+    coordinateReason: coordinateManifestValid
+      ? null
+      : layoutValidation?.issues?.join("；") || measurement?.reason || "未执行浏览器坐标测量，已使用估算坐标。",
     measuredAt: measurement?.measuredAt || null,
     questions: (manifest.questions || []).map((question) => {
       const match = byQuestionId.get(String(question.assignmentItemId || "")) ||
@@ -2293,6 +2396,19 @@ function findPrintBrowser() {
   return candidates.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
+function createHeadlessBrowserProfile(prefix = "junhang-headless-") {
+  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+}
+
+function cleanupHeadlessBrowserProfile(profilePath) {
+  if (!profilePath) return;
+  try {
+    fs.rmSync(profilePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  } catch {
+    // A timed-out browser child may release its profile lock shortly after the request returns.
+  }
+}
+
 async function renderPdfFromHtml(htmlPath, pdfPath) {
   const browserPath = findPrintBrowser();
   if (!browserPath) {
@@ -2303,17 +2419,23 @@ async function renderPdfFromHtml(htmlPath, pdfPath) {
   if (visibleText.length < 20) {
     return { ok: false, reason: "排版稿 HTML 内容为空，已阻止生成空白 PDF。" };
   }
-  await execFileAsync(browserPath, [
-    "--headless",
-    "--disable-gpu",
-    "--no-pdf-header-footer",
-    "--print-to-pdf-no-header",
-    `--print-to-pdf=${pdfPath}`,
-    pathToFileURL(htmlPath).href
-  ], { timeout: 30000, windowsHide: true });
-  return fs.existsSync(pdfPath) && fs.statSync(pdfPath).size > 1024
-    ? { ok: true, browserPath }
-    : { ok: false, reason: "PDF 渲染结果为空或文件过小。" };
+  const profilePath = createHeadlessBrowserProfile("junhang-pdf-render-");
+  try {
+    await execFileAsync(browserPath, [
+      "--headless",
+      "--disable-gpu",
+      `--user-data-dir=${profilePath}`,
+      "--no-pdf-header-footer",
+      "--print-to-pdf-no-header",
+      `--print-to-pdf=${pdfPath}`,
+      pathToFileURL(htmlPath).href
+    ], { timeout: 30000, windowsHide: true });
+    return fs.existsSync(pdfPath) && fs.statSync(pdfPath).size > 1024
+      ? { ok: true, browserPath }
+      : { ok: false, reason: "PDF 渲染结果为空或文件过小。" };
+  } finally {
+    cleanupHeadlessBrowserProfile(profilePath);
+  }
 }
 
 function decodeHtmlText(value) {
@@ -2338,6 +2460,15 @@ async function measureQuestionLayoutFromHtml(htmlPath) {
   const round = (value) => Number(value.toFixed(4));
   const run = () => {
     const pages = Array.from(document.querySelectorAll("section.page"));
+    const pageMetrics = pages.map((page, index) => {
+      const pageRect = page.getBoundingClientRect();
+      const content = Array.from(page.querySelectorAll(".head, .meta, .sections, .section-title, .passage-block, .item"));
+      const contentBottom = content.reduce((max, el) => Math.max(max, el.getBoundingClientRect().bottom), pageRect.top);
+      return {
+        page: index + 1,
+        bottomBlankMm: round(clamp((pageRect.bottom - contentBottom) / Math.max(1, pageRect.height)) * 297, 1)
+      };
+    });
     const questions = Array.from(document.querySelectorAll("[data-question-no]")).map((el) => {
       const page = el.closest("section.page");
       const pageIndex = Math.max(0, pages.indexOf(page));
@@ -2362,6 +2493,7 @@ async function measureQuestionLayoutFromHtml(htmlPath) {
     document.getElementById(marker).textContent = JSON.stringify({
       pageCount: pages.length,
       measuredAt: new Date().toISOString(),
+      pageMetrics,
       questions
     });
   };
@@ -2374,10 +2506,12 @@ async function measureQuestionLayoutFromHtml(htmlPath) {
 </script>`;
   const measurePath = path.join(os.tmpdir(), `${path.basename(htmlPath, ".html")}-${Date.now()}-measure.html`);
   fs.writeFileSync(measurePath, sourceHtml.replace("</body>", `${script}</body>`), "utf8");
+  const profilePath = createHeadlessBrowserProfile("junhang-layout-measure-");
   try {
     const output = await execFileAsync(browserPath, [
       "--headless",
       "--disable-gpu",
+      `--user-data-dir=${profilePath}`,
       "--run-all-compositor-stages-before-draw",
       "--virtual-time-budget=1500",
       "--dump-dom",
@@ -2392,6 +2526,7 @@ async function measureQuestionLayoutFromHtml(htmlPath) {
       browserPath,
       pageCount: parsed.pageCount || 0,
       measuredAt: parsed.measuredAt || new Date().toISOString(),
+      pageMetrics: Array.isArray(parsed.pageMetrics) ? parsed.pageMetrics : [],
       questions: Array.isArray(parsed.questions) ? parsed.questions : []
     };
   } catch (error) {
@@ -2401,6 +2536,7 @@ async function measureQuestionLayoutFromHtml(htmlPath) {
     };
   } finally {
     fs.rmSync(measurePath, { force: true });
+    cleanupHeadlessBrowserProfile(profilePath);
   }
 }
 
@@ -2489,8 +2625,19 @@ async function exportAssessmentPaperAsset(req, assignment, options = {}) {
     ok: false,
     reason: error instanceof Error ? error.message : String(error)
   }));
-  const evenPdf = pdfResult.ok ? ensureEvenPdfPages(pdfPath) : { pageCount: null, addedBlankPage: false };
+  const evenPdf = pdfResult.ok ? { pageCount: countPdfPages(pdfPath), addedBlankPage: false } : { pageCount: null, addedBlankPage: false };
   const outputFileName = pdfResult.ok ? pdfFileName : htmlFileName;
+  const layoutValidation = buildAssessmentLayoutValidation({
+    subject: readableText(metadata.printProfile?.subject || metadata.subject || assignment.subject?.name, "英语"),
+    kind: readableKind(metadata.kind, "练习"),
+    plannedPageCount: Number(metadata.printProfile?.pages) || paperHtmlResult.pageCount,
+    htmlPageCount: paperHtmlResult.pageCount,
+    pdfPageCount: evenPdf.pageCount,
+    measuredPageCount: measuredLayout.pageCount,
+    pdfGenerated: pdfResult.ok,
+    measurementOk: measuredLayout.ok,
+    pageMetrics: measuredLayout.pageMetrics
+  });
   const questionLayoutManifest = mergeQuestionLayoutMeasurements(
     buildQuestionLayoutManifest(assignment, {
       role: assetRole,
@@ -2500,9 +2647,13 @@ async function exportAssessmentPaperAsset(req, assignment, options = {}) {
     measuredLayout,
     {
       htmlPageCount: paperHtmlResult.pageCount,
-      pdfPageCount: evenPdf.pageCount
+      pdfPageCount: evenPdf.pageCount,
+      layoutValidation
     }
   );
+  if (options.requireValidLayout && layoutValidation.ok !== true) {
+    return { asset: null, pdfResult, htmlFileName, pdfFileName, outputFileName, htmlResult: paperHtmlResult, evenPdf, layoutValidation, questionLayoutManifest };
+  }
   const asset = await prisma.generatedAsset.create({
     data: {
       kind: `${assetKind}-${pdfResult.ok ? "pdf" : "html"}`,
@@ -2520,6 +2671,7 @@ async function exportAssessmentPaperAsset(req, assignment, options = {}) {
         addedBlankPage: paperHtmlResult.addedBlankPage,
         pdfPageCount: evenPdf.pageCount,
         pdfAddedBlankPage: evenPdf.addedBlankPage,
+        layoutValidation,
         questionLayoutManifest,
         pdfGenerated: pdfResult.ok,
         pdfReason: pdfResult.ok ? null : pdfResult.reason,
@@ -2528,7 +2680,7 @@ async function exportAssessmentPaperAsset(req, assignment, options = {}) {
       }
     }
   });
-  return { asset, pdfResult, htmlFileName, pdfFileName, outputFileName, htmlResult: paperHtmlResult, evenPdf };
+  return { asset, pdfResult, htmlFileName, pdfFileName, outputFileName, htmlResult: paperHtmlResult, evenPdf, layoutValidation };
 }
 
 function normalizeReviewResultForDisplay(result = {}, storedScore = null) {
@@ -3018,7 +3170,9 @@ app.get("/api/bootstrap", requireDatabase, requireSession(config, ["student", "t
       ? visibleStudents.map(mapClassroomStudent)
       : visibleStudents.map((student) => mapStudent(student, req.session.role)),
     tasks: visibleTasks.map(mapTask),
-    assignments: visibleAssignments.map(mapAssignment),
+    assignments: visibleAssignments.map((assignment) => mapAssignment(assignment, {
+      includeDraftReviewAsset: req.session.role === "teacher"
+    })),
     classroomDevices: req.session.role === "classroom"
       ? visibleDevices.map((device) => ({
           id: device.id,
@@ -3160,6 +3314,44 @@ app.patch("/api/tasks/:taskId/complete", requireDatabase, requireSession(config,
 app.post("/api/assessments/draft", requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
   const input = { ...getBody(req), teacherId: sessionTeacherId(req, req.body?.teacherId) };
   if (input.studentId && !(await assertTeacherStudentScope(req, res, input.studentId))) return;
+  const database = await checkDatabaseStatus();
+  const contentContext = database.ok
+    ? await resolveApprovedAssessmentContentContext(prisma, input)
+    : matchApprovedContentContext(input, []);
+  const contentContextValidation = validateAssessmentContentContext(input, contentContext);
+  if (!contentContextValidation.ok) {
+    const textbookAssetRequired = contentContext.reason === "TEXTBOOK_ASSET_REQUIRED"
+      || contentContextValidation.error === "TEXTBOOK_ASSET_REQUIRED";
+    const baselineMismatch = contentContext.reason === "TEXTBOOK_BASELINE_MISMATCH";
+    return res.status(422).json({
+      ok: false,
+      error: textbookAssetRequired
+        ? "TEXTBOOK_ASSET_REQUIRED"
+        : baselineMismatch
+          ? "ASSESSMENT_TEXTBOOK_BASELINE_MISMATCH"
+          : "ASSESSMENT_CONTENT_CONTEXT_REQUIRED",
+      message: textbookAssetRequired
+        ? "教材生成请求必须先选择有效教材。"
+        : baselineMismatch
+          ? "所选教材不符合贵州遵义教材基准，请选择语文统编版、数学人教版或英语人教版 PEP。"
+          : "所选教材或章节没有已复核且允许用于生成的内容，请先完成资料索引和教师复核。",
+      contentContext
+    });
+  }
+  const textbookContext = contentContext.textbookContext;
+  if (textbookContext?.resolved) {
+    input.subject = textbookContext.subject || input.subject;
+    input.grade = textbookContext.grade || input.grade || input.targetGrade;
+    input.textbookTitle = textbookContext.title;
+    input.textbookEdition = textbookContext.edition;
+    input.textbookEditionDisplay = textbookContext.editionDisplay;
+    input.textbookSeries = textbookContext.curriculumSeries;
+    input.textbookVolume = textbookContext.volume;
+    input.textbookRegion = textbookContext.curriculumRegion;
+    input.textbookChapterTitle = textbookContext.chapterTitle || input.textbookChapterTitle;
+    input.knowledgePoints = textbookContext.knowledgePoints || input.knowledgePoints || [];
+  }
+  input.contentContext = contentContext;
   const { options, persistence } = await persistenceOptions(input);
   const result = await draftAssessmentService(config, input, options);
   await auditEvent(req, {
@@ -3172,6 +3364,10 @@ app.post("/api/assessments/draft", requireSession(config, ["teacher"]), asyncRou
       assignmentId: result.persisted?.assignmentId || null,
       textbookAssetId: input.textbookAssetId || null,
       textbookTitle: input.textbookTitle || null,
+      textbookEdition: input.textbookEdition || null,
+      textbookSeries: input.textbookSeries || null,
+      textbookVolume: input.textbookVolume || null,
+      textbookRegion: input.textbookRegion || null,
       textbookChapterId: input.textbookChapterId || null,
       textbookChapterTitle: input.textbookChapterTitle || null,
       audioSource: input.audioSource || null
@@ -3208,6 +3404,7 @@ app.post("/api/assessments/:assignmentId/draft-export", requireDatabase, require
     stage: "draft_pdf_ready",
     gates: {
       draftPdfExported: true,
+      layoutValidationPassed: exported.layoutValidation.ok,
       teacherReviewStatus: "pending_teacher_review",
       finalExportAllowed: false,
       finalExported: false
@@ -3215,7 +3412,8 @@ app.post("/api/assessments/:assignmentId/draft-export", requireDatabase, require
     assets: {
       draftReviewAssetId: exported.asset.id,
       draftReviewUrl: exported.asset.url || null,
-      draftReviewGeneratedAt: new Date().toISOString()
+      draftReviewGeneratedAt: new Date().toISOString(),
+      layoutValidation: exported.layoutValidation
     }
   });
   await prisma.assignment.update({
@@ -3226,6 +3424,7 @@ app.post("/api/assessments/:assignmentId/draft-export", requireDatabase, require
         draftReviewStatus: "pending_teacher_review",
         draftReviewAssetId: exported.asset.id,
         draftReviewUpdatedAt: new Date().toISOString(),
+        layoutValidation: exported.layoutValidation,
         generationPipeline
       }
     }
@@ -3240,7 +3439,13 @@ app.post("/api/assessments/:assignmentId/draft-export", requireDatabase, require
       url: exported.asset.url
     }
   });
-  res.json({ ok: true, asset: exported.asset, reviewStatus: "pending_teacher_review", generationPipeline });
+  res.json({
+    ok: true,
+    asset: exported.asset,
+    reviewStatus: "pending_teacher_review",
+    layoutValidation: exported.layoutValidation,
+    generationPipeline
+  });
 }));
 
 app.post("/api/assessments/:assignmentId/draft-review", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
@@ -3257,6 +3462,14 @@ app.post("/api/assessments/:assignmentId/draft-review", requireDatabase, require
   }
   const metadata = safeJson(assignment.metadata, {});
   if (metadata.targetStudentId && !(await assertTeacherStudentScope(req, res, metadata.targetStudentId))) return;
+  if (decision === "accept" && metadata.layoutValidation?.ok !== true) {
+    return res.status(409).json({
+      ok: false,
+      error: "ASSESSMENT_LAYOUT_INVALID",
+      message: "PDF 排版校验未通过，不能确认草稿。请查看风险说明后重新生成。",
+      layoutValidation: metadata.layoutValidation || null
+    });
+  }
   const reviewStatus = decision === "accept" ? "accepted" : "rejected";
   const generationPipeline = mergeGenerationPipeline(metadata, {
     stage: decision === "accept" ? "draft_accepted" : "draft_rejected",
@@ -3309,6 +3522,14 @@ app.post("/api/assessments/:assignmentId/print-export", requireDatabase, require
   }
   const metadata = safeJson(assignment.metadata, {});
   if (metadata.targetStudentId && !(await assertTeacherStudentScope(req, res, metadata.targetStudentId))) return;
+  if (metadata.layoutValidation?.ok !== true) {
+    return res.status(409).json({
+      ok: false,
+      error: "ASSESSMENT_LAYOUT_INVALID",
+      message: "PDF 排版校验未通过，不能生成正式题目和解析。请重新生成并审查草稿。",
+      layoutValidation: metadata.layoutValidation || null
+    });
+  }
   if (metadata.draftReviewStatus !== "accepted") {
     return res.status(409).json({ ok: false, error: "DRAFT_REVIEW_REQUIRED", message: "请先审查并确认 PDF 草稿，再生成正式题目与解析 PDF。" });
   }
@@ -3326,8 +3547,17 @@ app.post("/api/assessments/:assignmentId/print-export", requireDatabase, require
     titleSuffix: "题目",
     role: "student-paper",
     kind: "assessment-print",
-    reviewStatus: "accepted"
+    reviewStatus: "accepted",
+    requireValidLayout: true
   });
+  if (paperExport.layoutValidation.ok !== true) {
+    return res.status(409).json({
+      ok: false,
+      error: "ASSESSMENT_LAYOUT_INVALID",
+      message: "正式题目 PDF 排版校验未通过，未完成正式导出。请重新生成草稿。",
+      layoutValidation: paperExport.layoutValidation
+    });
+  }
   const analysisPdfResult = await renderPdfFromHtml(analysisHtmlPath, analysisPdfPath).catch((error) => ({
     ok: false,
     reason: error instanceof Error ? error.message : String(error)
@@ -4753,18 +4983,22 @@ app.get("/api/textbooks", requireDatabase, requireSession(config, ["teacher"]), 
     ...(subject ? { subject } : {}),
     ...(grade ? { grade } : {}),
     ...(volume ? { volume } : {}),
-    ...(search ? { title: { contains: search } } : {}),
-    ...(req.query.includeDemo === "true" ? {} : { path: { not: null } })
+    ...(req.query.includeDemo === "true" ? {} : { path: { not: null, endsWith: ".edupdf", mode: "insensitive" } })
   };
+  const limit = Math.min(Number(req.query.limit || 200), 500);
   const assets = await prisma.textbookAsset.findMany({
     where,
     orderBy: [{ grade: "asc" }, { subject: "asc" }, { volume: "asc" }, { title: "asc" }],
-    take: Math.min(Number(req.query.limit || 200), 500)
+    take: search ? 500 : limit
   });
+  const visibleAssets = assets
+    .map(mapTextbookAsset)
+    .filter((asset) => matchesTextbookAssetSearch(asset, search))
+    .slice(0, limit);
   res.json({
     ok: true,
     generatedAt: new Date().toISOString(),
-    assets: assets.map(mapTextbookAsset)
+    assets: visibleAssets
   });
 }));
 
@@ -4866,12 +5100,24 @@ app.post("/api/content/index/rebuild", requireSession(config, ["teacher"]), asyn
   const scriptPath = path.resolve(workspaceRoot, "scripts/build-content-index.mjs");
   const resolvedOutDir = path.resolve(workspaceRoot, outDir);
   const args = [scriptPath, ...inputs, "--out", outDir];
-  const result = await execFileAsync(process.execPath, args, {
-    cwd: workspaceRoot,
-    env: { ...process.env },
-    windowsHide: true,
-    maxBuffer: 1024 * 1024 * 8
-  });
+  let result;
+  try {
+    result = await execFileAsync(process.execPath, args, {
+      cwd: workspaceRoot,
+      env: { ...process.env },
+      windowsHide: true,
+      maxBuffer: 1024 * 1024 * 8
+    });
+  } catch (error) {
+    if (isNoMarkdownDocumentsError(error)) {
+      return res.status(422).json({
+        ok: false,
+        error: "CONTENT_INDEX_NO_MARKDOWN_DOCUMENTS",
+        message: "没有找到可建立索引的 Markdown 教学资料，请先上传并转换普通教学资料。"
+      });
+    }
+    throw error;
+  }
   const parsed = parseMaybeJson(result.stdout, result.stdout);
   const index = readContentIndexSummary(path.resolve(resolvedOutDir, "index.json"));
   await auditEvent(req, {
@@ -4944,6 +5190,8 @@ app.post("/api/knowledge/sources", requireDatabase, requireSession(config, ["tea
   const licenseStatus = readableText(body.licenseStatus, "REVIEW_REQUIRED");
   const metadata = {
     knowledgePoints: Array.isArray(body.knowledgePoints) ? body.knowledgePoints : [],
+    curriculumSeries: optionalText(body.curriculumSeries),
+    curriculumRegion: optionalText(body.curriculumRegion),
     note: body.note || null,
     createdByTeacherId: req.session.teacherId,
     createdFrom: "teacher-manual-source"
@@ -4981,6 +5229,13 @@ app.post("/api/knowledge/sources/sync-content-index", requireDatabase, requireSe
   if (!index) {
     return res.status(404).json({ ok: false, error: "CONTENT_INDEX_NOT_FOUND", message: "请先重建内容索引，再同步到资料库。" });
   }
+  if (!summarizeContentIndexState(index).available) {
+    return res.status(422).json({
+      ok: false,
+      error: "CONTENT_INDEX_NO_MARKDOWN_DOCUMENTS",
+      message: "内容索引没有可同步的 Markdown 教学资料。"
+    });
+  }
   const sync = await syncContentIndexToKnowledgeLibrary(index, req.session.teacherId);
   await auditEvent(req, {
     feature: "knowledge-library",
@@ -5004,6 +5259,35 @@ app.patch("/api/knowledge/sources/:sourceId/review", requireDatabase, requireSes
   if (!rows.length) {
     return res.status(404).json({ ok: false, error: "KNOWLEDGE_SOURCE_NOT_FOUND", message: "未找到资料来源。" });
   }
+  let textbookBinding = null;
+  const textbookAssetId = optionalText(body.textbookAssetId);
+  if (allowedForGeneration && textbookAssetId) {
+    const textbookAsset = await prisma.textbookAsset.findUnique({ where: { id: textbookAssetId } });
+    if (!textbookAsset) {
+      return res.status(404).json({ ok: false, error: "TEXTBOOK_NOT_FOUND", message: "未找到要绑定的教材资产。" });
+    }
+    const binding = buildKnowledgeSourceTextbookBinding(rows[0], textbookAsset);
+    if (!binding.ok) {
+      return res.status(422).json({
+        ok: false,
+        error: binding.error,
+        message: binding.error === "TEXTBOOK_BASELINE_MISMATCH"
+          ? "所选教材不符合贵州遵义教材基准。"
+          : "资料范围与所选教材不一致，请确认科目、年级和教材版本。"
+      });
+    }
+    textbookBinding = binding.scope;
+    await prisma.$executeRaw`
+      UPDATE "KnowledgeSource"
+      SET "subject" = ${textbookBinding.subject},
+          "grade" = ${textbookBinding.grade},
+          "edition" = ${textbookBinding.edition},
+          "volume" = ${textbookBinding.volume},
+          "metadata" = ${JSON.stringify(textbookBinding.metadata)}::jsonb,
+          "updatedAt" = CURRENT_TIMESTAMP
+      WHERE "id" = ${req.params.sourceId}
+    `;
+  }
   await prisma.$executeRaw`
     UPDATE "KnowledgeSource"
     SET "reviewStatus" = ${status},
@@ -5022,7 +5306,8 @@ app.patch("/api/knowledge/sources/:sourceId/review", requireDatabase, requireSes
     metadata: {
       sourceId: req.params.sourceId,
       status,
-      allowedForGeneration
+      allowedForGeneration,
+      textbookAssetId: textbookBinding?.metadata?.textbookAssetId || null
     }
   });
   const updated = await prisma.$queryRaw`

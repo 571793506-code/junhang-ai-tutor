@@ -71,6 +71,16 @@ export declare function draftAssessmentService(
   options?: Record<string, unknown>
 ): Promise<Record<string, unknown>>;
 
+export declare function matchApprovedContentContext(
+  input?: Record<string, unknown>,
+  sources?: Array<Record<string, unknown>>
+): Record<string, unknown>;
+
+export declare function validateAssessmentContentContext(
+  input?: Record<string, unknown>,
+  contentContext?: Record<string, unknown>
+): Record<string, unknown>;
+
 export declare function buildAssessmentBlueprintCheck(
   input?: Record<string, unknown>
 ): Record<string, unknown>;

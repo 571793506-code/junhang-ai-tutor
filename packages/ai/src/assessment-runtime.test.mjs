@@ -205,6 +205,47 @@ test("draftAssessment splits request-level max token budget across project parti
   }
 });
 
+test("draftAssessment explicitly instructs every partition to follow the authoritative textbook baseline", async () => {
+  const payloads = [];
+  const server = http.createServer(async (req, res) => {
+    const payload = await readJsonRequest(req);
+    payloads.push(payload);
+    sendChatContent(res, validPartitionContent(payload));
+  });
+  const address = await listen(server);
+
+  try {
+    await draftAssessment(
+      enabledSolConfig(`http://127.0.0.1:${address.port}`),
+      compactAssessmentInput({
+        subject: "英语",
+        generationContext: {
+          teaching: {
+            textbook: {
+              edition: "人教版",
+              series: "PEP",
+              volume: "下册",
+              region: "贵州遵义"
+            }
+          }
+        }
+      })
+    );
+
+    assert.equal(payloads.length, 2);
+    for (const payload of payloads) {
+      const system = String(payload.messages?.[0]?.content || "");
+      const user = partitionPrompt(payload);
+      assert.match(system, /教材版本和册次/);
+      assert.match(system, /不得混用其他版本/);
+      assert.match(user, /贵州遵义/);
+      assert.match(user, /PEP/);
+    }
+  } finally {
+    await close(server);
+  }
+});
+
 test("draftAssessment caps compact partition output at 8000 tokens per request", async () => {
   const requestPayloads = [];
   const server = http.createServer((req, res) => {

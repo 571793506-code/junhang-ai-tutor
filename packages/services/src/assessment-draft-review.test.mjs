@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { draftAssessmentService } from "./index.js";
+import { buildAssessmentBlueprintCheck, draftAssessmentService } from "./index.js";
 
 const sampleDraftText = JSON.stringify({
   title: "五年级英语小测",
@@ -38,6 +38,103 @@ function fakeAssessmentResult() {
   };
 }
 
+function weatherQuizDraftText({ includeOnlyOneItem = false } = {}) {
+  const passage = [
+    "On Monday morning, Lily checks the weather report before school. The sky is cloudy and the wind is cool, so she takes a light coat.",
+    "At noon, the sun comes out and the playground becomes warm. Lily and her classmates record the temperature and draw weather symbols in their science notebooks.",
+    "After lunch, dark clouds move over the school. Their teacher asks everyone to close the windows before a short rain shower begins.",
+    "By three o'clock, the rain stops. The children compare the morning, noon and afternoon weather and learn that conditions can change during one day.",
+    "Lily writes that checking the forecast helps people choose suitable clothes and plan outdoor activities safely. She also notes that a forecast is useful, but people should still observe the sky around them."
+  ].join(" ");
+  const sections = [
+    {
+      title: "一、词汇与短语",
+      type: "fill",
+      items: [
+        ["根据中文写英文单词：多云的。", "cloudy"],
+        ["根据中文写英文单词：下雨的。", "rainy"],
+        ["根据中文写英文短语：天气预报。", "weather report"],
+        ["根据中文写英文短语：穿上外套。", "put on a coat"]
+      ].map(([prompt, answer]) => ({
+        itemType: "fill",
+        prompt,
+        answer,
+        answerFormat: "english-four-line",
+        analysisSteps: ["识别天气主题词汇。", "核对英文拼写。", `答案为 ${answer}。`],
+        commonMistake: "注意拼写完整。",
+        knowledgePoint: "Unit 3 Weather"
+      }))
+    },
+    {
+      title: "二、句子运用",
+      type: "solution",
+      items: [
+        ["用 cloudy 造一个描述天气的句子。", "It is cloudy today."],
+        ["把句子翻译成英文：今天很冷，请穿上外套。", "It is cold today. Please put on your coat."]
+      ].map(([prompt, answer]) => ({
+        itemType: "solution",
+        prompt,
+        answer,
+        answerFormat: "english-four-line",
+        analysisSteps: ["确定天气表达。", "使用正确的主谓结构。", "检查大小写和标点。"],
+        commonMistake: "不要漏写 be 动词。",
+        knowledgePoint: "Unit 3 Weather"
+      }))
+    },
+    {
+      title: "三、单项选择题",
+      type: "choice",
+      items: [
+        {
+          itemType: "choice",
+          prompt: "It is cold outside. You should ______ your coat.",
+          options: ["A. put on", "B. take off", "C. look at", "D. listen to"],
+          answer: "A",
+          analysisSteps: ["根据 cold 判断需要保暖。", "put on 表示穿上。", "因此选择 A。"],
+          commonMistake: "不要混淆 put on 和 take off。",
+          knowledgePoint: "Unit 3 Weather"
+        },
+        {
+          itemType: "choice",
+          prompt: "- What's the weather like? - ______",
+          options: ["A. It's rainy.", "B. It's Monday.", "C. I'm ten.", "D. At school."],
+          answer: "A",
+          analysisSteps: ["题干询问天气。", "回答使用 It's + 天气形容词。", "因此选择 A。"],
+          commonMistake: "不要回答日期或地点。",
+          knowledgePoint: "Unit 3 Weather"
+        }
+      ]
+    },
+    {
+      title: "四、阅读理解",
+      type: "reading",
+      items: [
+        ["According to the passage, what is the weather like on Monday morning?", "It is cloudy and cool."],
+        ["Why does Lily take a light coat?", "Because the wind is cool."],
+        ["What is the main idea of the passage?", "Weather can change, so observing it helps people plan safely."],
+        ["What can we learn from Lily's weather record?", "We should use forecasts and observe real conditions."]
+      ].map(([prompt, answer], index) => ({
+        itemType: "reading",
+        prompt,
+        answer,
+        passageGroupId: "unit-3-weather-reading",
+        passageTitle: "A Changing Weather Day",
+        passageText: passage,
+        passageQuestionIndex: index + 1,
+        showPassage: index === 0,
+        analysisSteps: ["先阅读天气变化顺序。", "回到原文定位依据。", "用完整句回答。"],
+        commonMistake: "不要脱离短文猜测。",
+        knowledgePoint: "Unit 3 Weather"
+      }))
+    }
+  ];
+  if (includeOnlyOneItem) {
+    sections.splice(1);
+    sections[0].items = sections[0].items.slice(0, 1);
+  }
+  return JSON.stringify({ title: "四年级英语 Unit 3 Weather 小测", sections });
+}
+
 test("draftAssessmentService does not run model review by default", async () => {
   let reviewCallCount = 0;
   const result = await draftAssessmentService(
@@ -69,12 +166,20 @@ test("draftAssessmentService does not run model review by default", async () => 
 test("draftAssessmentService treats partial GPT-5.6 partition output as dynamic repair", async () => {
   const result = await draftAssessmentService(
     {},
-    { subject: "英语", kind: "小测", grade: "五年级", requirement: "Unit 4" },
+    {
+      subject: "英语",
+      kind: "小测",
+      grade: "四年级",
+      requirement: "Unit 3 Weather",
+      requestedItemCount: 12,
+      textbookChapterTitle: "Unit 3 Weather"
+    },
     {
       persist: false,
       assessmentDraftRunner: async () => ({
         ...fakeAssessmentResult(),
         providerId: "gpt56",
+        draftText: weatherQuizDraftText(),
         modelRun: {
           provider: "gpt56",
           model: "gpt-5.6",
@@ -94,12 +199,20 @@ test("draftAssessmentService treats partial GPT-5.6 partition output as dynamic 
 test("draftAssessmentService reports successful Sol escalation separately from dynamic repair", async () => {
   const result = await draftAssessmentService(
     {},
-    { subject: "英语", kind: "小测", grade: "五年级", requirement: "Unit 4" },
+    {
+      subject: "英语",
+      kind: "小测",
+      grade: "四年级",
+      requirement: "Unit 3 Weather",
+      requestedItemCount: 12,
+      textbookChapterTitle: "Unit 3 Weather"
+    },
     {
       persist: false,
       assessmentDraftRunner: async () => ({
         ...fakeAssessmentResult(),
         providerId: "gpt56",
+        draftText: weatherQuizDraftText(),
         modelRun: {
           provider: "gpt56",
           model: "gpt-5.6-sol",
@@ -298,6 +411,130 @@ test("draftAssessmentService assigns standard quiz generation budget", async () 
   assert.equal(runnerInput.generationContext.output.generationProfile, "quiz-standard");
   assert.equal(result.generationPipeline.model.generationProfile, "quiz-standard");
   assert.equal(result.generationPipeline.model.assessmentMaxTokens, 16000);
+});
+
+test("draftAssessmentService forwards the authoritative textbook baseline in generationContext", async () => {
+  let runnerInput = null;
+  await draftAssessmentService(
+    {},
+    {
+      subject: "英语",
+      kind: "小测",
+      grade: "五年级",
+      requirement: "Unit 3 Weather",
+      textbookAssetId: "tb-pep-5b",
+      textbookTitle: "义务教育教科书·英语（三年级起点）五年级下册",
+      textbookEdition: "人教版",
+      textbookSeries: "PEP",
+      textbookVolume: "下册",
+      textbookRegion: "贵州遵义",
+      textbookChapterId: "unit-3",
+      textbookChapterTitle: "Unit 3 Weather"
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async (_config, input) => {
+        runnerInput = input;
+        return fakeAssessmentResult();
+      }
+    }
+  );
+
+  assert.deepEqual(runnerInput.generationContext.teaching.textbook, {
+    assetId: "tb-pep-5b",
+    title: "义务教育教科书·英语（三年级起点）五年级下册",
+    edition: "人教版",
+    series: "PEP",
+    volume: "下册",
+    region: "贵州遵义",
+    chapterId: "unit-3",
+    chapterTitle: "Unit 3 Weather"
+  });
+});
+
+test("assessment blueprint scales an English quiz to the requested item count", () => {
+  const result = buildAssessmentBlueprintCheck({
+    subject: "英语",
+    kind: "小测",
+    grade: "四年级",
+    requestedItemCount: 12,
+    textbookChapterTitle: "Unit 3 Weather"
+  });
+
+  assert.equal(result.blueprint.minItems, 12);
+  assert.equal(result.blueprint.maxItems, 12);
+  assert.equal(result.blueprint.sections.reduce((sum, section) => sum + section.target, 0), 12);
+  assert.equal(result.itemCount, 12);
+});
+
+test("draftAssessmentService keeps complete Weather model content and the requested 12 items", async () => {
+  let runnerInput = null;
+  const result = await draftAssessmentService(
+    {},
+    {
+      subject: "英语",
+      kind: "小测",
+      grade: "四年级",
+      requirement: "生成 Unit 3 Weather 英语小测。",
+      requestedItemCount: 12,
+      textbookChapterTitle: "Unit 3 Weather"
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async (_config, input) => {
+        runnerInput = input;
+        return {
+          ...fakeAssessmentResult(),
+          draftText: weatherQuizDraftText()
+        };
+      }
+    }
+  );
+
+  const content = result.draftItems.map((item) => [
+    item.prompt,
+    item.metadata?.passageTitle,
+    item.metadata?.passageText,
+    item.metadata?.knowledgePoint
+  ].filter(Boolean).join(" ")).join("\n");
+
+  assert.equal(runnerInput.requestedItemCount, 12);
+  assert.equal(runnerInput.generationContext.output.requestedItemCount, 12);
+  assert.equal(runnerInput.generationContext.teaching.textbookChapterTitle, "Unit 3 Weather");
+  assert.equal(result.draftItems.length, 12);
+  assert.match(content, /Weather|weather|cloudy|rainy/);
+  assert.doesNotMatch(content, /Special Days|art show|sports meet|school trip|April|third|fourth|fifth/i);
+  assert.equal(result.usedDynamicFallback, false);
+});
+
+test("draftAssessmentService marks service-side item repair as dynamic fallback", async () => {
+  const result = await draftAssessmentService(
+    {},
+    {
+      subject: "英语",
+      kind: "小测",
+      grade: "四年级",
+      requirement: "生成 Unit 3 Weather 英语小测。",
+      requestedItemCount: 12,
+      textbookChapterTitle: "Unit 3 Weather"
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async () => ({
+        ...fakeAssessmentResult(),
+        draftText: weatherQuizDraftText({ includeOnlyOneItem: true })
+      })
+    }
+  );
+
+  assert.equal(result.draftItems.length, 12);
+  assert.equal(result.usedDynamicFallback, true);
+  assert.equal(result.generationPipeline.repair.usedDynamicFallback, true);
+  assert.equal(result.generationPipeline.audit.status, "needs_teacher_review");
+  assert.ok(result.audit.repairNotes.some((note) => /补足|替换/.test(note)));
+  const weatherPassage = result.draftItems.find((item) => item.itemType === "reading" && item.metadata?.showPassage)?.metadata?.passageText || "";
+  assert.match(weatherPassage, /forecast|temperature|clouds|rain/i);
+  assert.doesNotMatch(weatherPassage, /make the story sound perfect|facts, feelings and actions/i);
 });
 
 test("draftAssessmentService fallback English unit quiz reserves enough reading content for two-page layout", async () => {
@@ -715,7 +952,9 @@ test("draftAssessmentService replaces exam-style English quiz items during local
   const repairNotes = result.generationPipeline.repair.repairNotes.join(" ");
 
   assert.equal(/文章选词填空|完形填空|短文语法填空/.test(repairedText), false);
-  assert.equal(result.generationPipeline.audit.passed, true);
+  assert.equal(result.usedDynamicFallback, true);
+  assert.equal(result.generationPipeline.audit.passed, false);
+  assert.equal(result.generationPipeline.audit.status, "needs_teacher_review");
   assert.equal(/文章选词填空|完形填空|短文语法填空/.test(auditIssues), false);
   assert.match(repairNotes, /英语小测\/练习中的试卷式题组/);
 });

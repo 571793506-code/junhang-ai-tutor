@@ -52,6 +52,10 @@
     "textbook": {
       "assetId": "textbook-id",
       "title": "人教版五年级上册数学",
+      "edition": "人教版",
+      "series": "人教版",
+      "volume": "上册",
+      "region": "贵州遵义",
       "chapterId": "chapter-id",
       "chapterTitle": "小数乘法"
     },
@@ -82,6 +86,8 @@
   }
 }
 ```
+
+贵州遵义教材基准为：语文统编版 / 人教体系、数学人教版、英语人教版 PEP。`generationContext.teaching.textbook` 只能由服务端根据真实 `TextbookAsset` 解析，客户端标题、版本、系列、册次和地区不能覆盖服务端记录。带教材或章节的生成请求如果没有真实教材资产和已审批资料证据，必须在模型调用前失败关闭。
 
 ## 3. 模型提示词模板
 

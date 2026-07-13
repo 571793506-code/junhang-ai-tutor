@@ -40,11 +40,20 @@ const plans = {
 export function buildAssessmentPartitions(input = {}) {
   const subject = plans[input.subject] ? input.subject : "数学";
   const tier = input.kind === "试卷" ? "formal" : "compact";
-  return plans[subject][tier].map((partition, index) => ({
+  const partitions = plans[subject][tier];
+  const requestedItemCount = Number(input.requestedItemCount);
+  const compactCounts = tier === "compact" && Number.isFinite(requestedItemCount) && requestedItemCount > 0
+    ? [
+        Math.round(requestedItemCount * 2 / 3),
+        Math.max(1, Math.round(requestedItemCount) - Math.round(requestedItemCount * 2 / 3))
+      ]
+    : [];
+  return partitions.map((partition, index) => ({
     ...partition,
     orderIndex: index + 1,
     subject,
-    kind: input.kind || "练习"
+    kind: input.kind || "练习",
+    ...(compactCounts[index] ? { targetItemCount: compactCounts[index] } : {})
   }));
 }
 
