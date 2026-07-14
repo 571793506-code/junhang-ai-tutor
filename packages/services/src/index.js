@@ -4111,7 +4111,9 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     modelInput.generationMaxTokens = input.generationMaxTokens;
   }
   const assessmentDraftRunner = options.assessmentDraftRunner || draftAssessment;
-  const result = await assessmentDraftRunner(config, modelInput);
+  if (options.signal?.aborted) throw options.signal.reason || new Error("ASSESSMENT_GENERATION_CANCELLED");
+  const result = await assessmentDraftRunner(config, modelInput, { signal: options.signal });
+  if (options.signal?.aborted) throw options.signal.reason || new Error("ASSESSMENT_GENERATION_CANCELLED");
   const modelRun = await persistRun(result.modelRun, options);
   const printProfile = input.printProfile || buildPrintProfile(modelInput);
   const layoutTemplate = input.layoutTemplate || buildLayoutTemplate(modelInput);

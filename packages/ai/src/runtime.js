@@ -310,7 +310,8 @@ export async function callOpenAiCompatibleChat({
   responseFormat,
   maxTokens,
   timeoutMs,
-  reasoningEffort
+  reasoningEffort,
+  signal
 }) {
   if (!apiKey) throw new Error("Missing API key");
 
@@ -318,8 +319,11 @@ export async function callOpenAiCompatibleChat({
   if (responseFormat) payload.response_format = responseFormat;
   if (maxTokens) payload.max_tokens = maxTokens;
   if (reasoningEffort) payload.reasoning_effort = reasoningEffort;
-  const controller = timeoutMs ? new AbortController() : null;
-  const timeout = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const controller = timeoutMs || signal ? new AbortController() : null;
+  const abortForCaller = () => controller?.abort(signal?.reason);
+  if (signal?.aborted) abortForCaller();
+  else signal?.addEventListener("abort", abortForCaller, { once: true });
+  const timeout = timeoutMs && controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
   let response;
   let text;
@@ -335,10 +339,12 @@ export async function callOpenAiCompatibleChat({
     });
     text = await response.text();
   } catch (error) {
+    if (signal?.aborted) throw signal.reason || new Error("ASSESSMENT_GENERATION_CANCELLED");
     if (error?.name === "AbortError") throw new Error(`MODEL_TIMEOUT after ${timeoutMs}ms`);
     throw error;
   } finally {
     if (timeout) clearTimeout(timeout);
+    signal?.removeEventListener("abort", abortForCaller);
   }
   let body = {};
   if (text) {
@@ -419,6 +425,7 @@ export async function callGpt56Chat(config, messages, options = {}) {
     responseFormat: options.responseFormat,
     maxTokens: options.maxTokens,
     timeoutMs: options.timeoutMs,
+    signal: options.signal,
     reasoningEffort: runtime.gpt56ReasoningEffortEnabled ? options.reasoningEffort : undefined
   });
 }
@@ -823,6 +830,10 @@ export async function draftAssessment(config, input = {}, execution = {}) {
     });
   }
 
+  const throwIfCancelled = () => {
+    if (execution.signal?.aborted) throw execution.signal.reason || new Error("ASSESSMENT_GENERATION_CANCELLED");
+  };
+  throwIfCancelled();
   const defaultPages = input.kind === "试卷" ? 4 : 2;
   const subject = String(input.subject || "");
   const kind = String(input.kind || "练习");
@@ -970,6 +981,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
     timeoutMs = attemptTimeoutMs(execution.timeoutMs || assessmentTimeoutMs),
     trigger = null
   } = {}) => {
+    throwIfCancelled();
     const partitionTokens = partitionTokenBudget(index);
     const partitionMessages = messages.map((message) => message.role !== "user" ? message : {
       ...message,
@@ -981,8 +993,10 @@ export async function draftAssessment(config, input = {}, execution = {}) {
       responseFormat: { type: "json_object" },
       maxTokens: partitionTokens,
       timeoutMs,
-      reasoningEffort
+      reasoningEffort,
+      signal: execution.signal
     }));
+    throwIfCancelled();
     recordAttempt(role, partition, result, {
       model,
       reasoningEffort,
@@ -1002,6 +1016,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
     2,
     (partition, index) => callPartition(partition, index, primaryCallOptions)
   );
+  throwIfCancelled();
   const reserveMs = assessmentTotalTimeoutMs ? Math.max(1000, Math.floor(assessmentTotalTimeoutMs * 0.15)) : 0;
   const retryable = partitionResults.filter((entry) => {
     if (entry.result.status === "SUCCESS") return false;
@@ -1016,6 +1031,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
     const retryByIndex = new Map(retries.map((entry) => [entry.index, entry]));
     partitionResults = partitionResults.map((entry) => retryByIndex.get(entry.index) || entry);
   }
+  throwIfCancelled();
   const parsePartition = (entry) => {
     const text = entry.result.body ? extractChatText(entry.result.body) : "";
     const parsed = parseJsonObjectText(text);
@@ -1081,6 +1097,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
       trigger: entry.trigger
     }).then(parsePartition);
   });
+  throwIfCancelled();
   const escalatedByIndex = new Map(escalatedPartitions.map((entry) => [entry.index, entry]));
   const finalPartitions = parsedTerraPartitions.map((entry) => escalatedByIndex.get(entry.index) || entry);
   let successfulPartitions = finalPartitions.filter((entry) => entry.usable);

@@ -116,6 +116,7 @@ export interface AssessmentExecutionOptions {
   disableSolEscalation?: boolean;
   evidenceSufficient?: boolean;
   now?: () => number;
+  signal?: AbortSignal;
 }
 
 export interface SubmissionExecutionOptions {

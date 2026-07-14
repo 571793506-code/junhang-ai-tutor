@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { matchesTextbookEvidenceScope } from "@junhang/core";
 import {
@@ -8,6 +8,7 @@ import {
   Bot,
   CalendarDays,
   CheckCircle2,
+  CircleX,
   ClipboardList,
   Eye,
   FileText,
@@ -37,15 +38,16 @@ import {
 import type { AssignmentCard, ClassroomBroadcast, ClassroomDevice, CorrectionRecord, DictationTask, LearningLog, LearningTaskCard, ReadingTask, StudentProfile, StudentReportCard, SubjectLabel, TeacherProfile } from "@junhang/core";
 import {
   askStudentQuestion,
+  cancelAssessmentGenerationJob,
+  createAssessmentGenerationJob,
+  type AssessmentGenerationJob,
   type AssessmentLayoutValidation,
   completeLearningTask,
   type ContentIndexSummary,
   type VocabularyCard,
   draftStudentTermReport,
   draftStudentProfile,
-  draftAssessment,
   draftTeacherTask,
-  exportAssessmentDraft,
   exportAssessmentPrint,
   generateStudentProfilePrint,
   generateStudentTermReportPdf,
@@ -55,6 +57,7 @@ import {
   getContentIndex,
   archiveGradingWorkbench,
   listGradingWorkbenches,
+  listAssessmentGenerationJobs,
   generateVocabularyCard,
   createKnowledgeSource,
   listKnowledgeSources,
@@ -162,6 +165,32 @@ function assessmentDraftRefFromAssignment(assignment: AssignmentCard): Assessmen
     layoutValidation: assignment.layoutValidation as AssessmentLayoutValidation | undefined,
     reviewStatus
   };
+}
+
+function assessmentDraftRefFromJob(job: AssessmentGenerationJob): AssessmentDraftRef | null {
+  if (!job.assignmentId || !job.draftAsset) return null;
+  const subject = ["语文", "数学", "英语"].includes(job.subject) ? job.subject as SubjectLabel : "数学";
+  return {
+    assignmentId: job.assignmentId,
+    title: job.title,
+    subject,
+    kind: job.kind,
+    targetLabel: job.targetLabel || "所选对象",
+    request: job.request as AssessmentRequestInput,
+    draftAsset: job.draftAsset,
+    layoutValidation: job.layoutValidation || undefined,
+    reviewStatus: "pending"
+  };
+}
+
+function assessmentGenerationJobStatus(status: AssessmentGenerationJob["status"]) {
+  if (status === "ready_for_review") return { label: "待审查", tone: "pending" as const };
+  if (status === "failed") return { label: "生成失败", tone: "blocked" as const };
+  if (status === "cancelled") return { label: "已取消", tone: "blocked" as const };
+  if (status === "cancelling") return { label: "停止中", tone: "pending" as const };
+  if (status === "exporting_draft") return { label: "生成审查 PDF", tone: "pending" as const };
+  if (status === "generating") return { label: "生成内容", tone: "pending" as const };
+  return { label: "排队中", tone: "pending" as const };
 }
 
 const PROTECTED_TEXTBOOK_EXTENSION = ".edupdf";
@@ -543,6 +572,8 @@ function App() {
   const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null);
   const [termReportDraft, setTermReportDraft] = useState<TermReportDraftState | null>(null);
   const [latestAssessmentDraft, setLatestAssessmentDraft] = useState<AssessmentDraftRef | null>(null);
+  const [assessmentJobs, setAssessmentJobs] = useState<AssessmentGenerationJob[]>([]);
+  const refreshedAssessmentJobIds = useRef(new Set<string>());
   const [question, setQuestion] = useState("等腰三角形一个角是40度，应该怎么思考？");
   const [answer, setAnswer] = useState("");
   const [qaBusy, setQaBusy] = useState(false);
@@ -611,6 +642,34 @@ function App() {
     setReports(data.reports);
     return data;
   }
+
+  useEffect(() => {
+    refreshedAssessmentJobIds.current.clear();
+    if (role !== "teacher" || !auth.teacherId) {
+      setAssessmentJobs([]);
+      return;
+    }
+    let disposed = false;
+    const refresh = async () => {
+      try {
+        const response = await listAssessmentGenerationJobs();
+        if (disposed) return;
+        setAssessmentJobs(response.jobs);
+        const newlyReady = response.jobs.filter((job) => job.status === "ready_for_review" && job.assignmentId && !refreshedAssessmentJobIds.current.has(job.id));
+        if (!newlyReady.length) return;
+        newlyReady.forEach((job) => refreshedAssessmentJobIds.current.add(job.id));
+        await applyBootstrap();
+      } catch {
+        // A transient polling failure must not replace the teacher's current workbench state.
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 2500);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [role, auth.teacherId]);
 
   async function refreshTeacherOps() {
     const [reviewData, workbenchData, auditData, textbookData, contentIndexData, knowledgeData] = await Promise.all([
@@ -707,48 +766,42 @@ function App() {
       requestedItemCount: input?.requestedItemCount,
       textbookAssetId: input?.textbookAssetId,
       textbookTitle: input?.textbookTitle,
+      textbookEdition: input?.textbookEdition,
+      textbookSeries: input?.textbookSeries,
+      textbookVolume: input?.textbookVolume,
+      textbookRegion: input?.textbookRegion,
       textbookChapterId: input?.textbookChapterId,
       textbookChapterTitle: input?.textbookChapterTitle
     };
-    setSync({ busy: true, ok: null, message: `${kind}PDF草稿正在生成，通常需要 1-2 分钟，请保持页面打开。` });
     try {
-      const response = await draftAssessment({
+      const response = await createAssessmentGenerationJob({
         ...request,
         grade: input?.targetGrade || student.grade,
-        createAssignment: true
+        studentName: student.displayName,
+        title: `${student.displayName}${subject}${kind}草稿`
       });
-      const assignmentId = response.result.persisted?.assignmentId;
-      let layoutValidation: AssessmentLayoutValidation | undefined;
-      if (assignmentId) {
-        const draftExport = await exportAssessmentDraft(assignmentId);
-        layoutValidation = draftExport.layoutValidation;
-        setLatestAssessmentDraft({
-          assignmentId,
-          title: `${subject}${kind}排版稿`,
-          subject,
-          kind,
-          targetLabel: targetScope === "grade" ? input?.targetGrade || student.grade : student.displayName,
-          request,
-          draftAsset: draftExport.asset,
-          layoutValidation: draftExport.layoutValidation,
-          reviewStatus: "pending"
-        });
-        setPrintAssets([]);
-      }
-      const layoutReady = layoutValidation?.ok === true;
-      setSync({
-        busy: false,
-        ok: Boolean(response.result.available && assignmentId && layoutReady),
-        message: assignmentId
-          ? layoutReady
-            ? `${kind}PDF草稿已生成，请先打开审查后再确认`
-            : `${kind}PDF草稿已生成，但排版校验未通过，请打开 PDF 查看后重新生成`
-          : `${kind}已生成，但未拿到可审查的记录`
-      });
-      await applyBootstrap();
+      setAssessmentJobs((jobs) => [response.job, ...jobs.filter((job) => job.id !== response.job.id)]);
+      setSync({ busy: false, ok: true, message: `${kind}生成任务已加入队列，可继续创建其他任务。` });
     } catch (error) {
       setSync({ busy: false, ok: false, message: `生成失败：${error instanceof Error ? error.message : String(error)}` });
     }
+  }
+
+  async function cancelAssessmentGeneration(jobId: string) {
+    try {
+      const response = await cancelAssessmentGenerationJob(jobId);
+      setAssessmentJobs((jobs) => jobs.map((job) => job.id === jobId ? response.job : job));
+      setSync({ busy: false, ok: true, message: response.job.status === "cancelled" ? "本次生成已取消。" : "正在停止本次生成。" });
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `取消生成失败：${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
+  function selectAssessmentGenerationJob(job: AssessmentGenerationJob) {
+    const draft = assessmentDraftRefFromJob(job);
+    if (!draft) return;
+    setLatestAssessmentDraft(draft);
+    setPrintAssets([]);
   }
 
   async function exportLatestPrint(assignmentId: string) {
@@ -772,7 +825,7 @@ function App() {
       await reviewAssessmentDraft(assignmentId, "reject");
       setLatestAssessmentDraft({ ...draft, reviewStatus: "rejected" });
       setPrintAssets([]);
-      setSync({ busy: true, ok: null, message: "已否决当前草稿，正在按原要求重新生成 PDF 草稿..." });
+      setSync({ busy: false, ok: null, message: "已否决当前草稿，正在按原要求重新加入生成队列。" });
       await createAssessment(draft.request);
     } catch (error) {
       setSync({ busy: false, ok: false, message: `重新生成草稿失败：${error instanceof Error ? error.message : String(error)}` });
@@ -1171,7 +1224,7 @@ function App() {
       </aside>
       <main className="main">
         <header className="topbar"><div><p className="eyebrow">{roleLabel(role)}</p><h1>{role === "teacher" ? `教师端 · ${currentModule}` : role === "student" ? `学生端 · ${currentModule}` : `课堂平板 · ${currentModule}`}</h1></div><ApiSyncStatus state={syncForRole(sync, role)} /></header>
-        {role === "teacher" ? <TeacherWorkspace activeModule={currentModule} ai={ai} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentDraftSelect={(assignment) => {
+        {role === "teacher" ? <TeacherWorkspace activeModule={currentModule} ai={ai} assessmentJobs={assessmentJobs} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentCancel={cancelAssessmentGeneration} onAssessmentJobSelect={selectAssessmentGenerationJob} onAssessmentDraftSelect={(assignment) => {
           const draft = assessmentDraftRefFromAssignment(assignment);
           if (draft) {
             setLatestAssessmentDraft(draft);
@@ -1239,6 +1292,7 @@ function extractReadingFocusDraft(passage: string, subject: "语文" | "英语",
 function TeacherWorkspace({
   activeModule,
   ai,
+  assessmentJobs,
   assignments,
   audit,
   contentIndex,
@@ -1249,6 +1303,8 @@ function TeacherWorkspace({
   latestAssessmentDraft,
   logs,
   onAssessment,
+  onAssessmentCancel,
+  onAssessmentJobSelect,
   onAssessmentDraftSelect,
   onAssessmentReject,
   onContentIndexRebuild,
@@ -1297,6 +1353,7 @@ function TeacherWorkspace({
 }: {
   activeModule: string;
   ai: AiSnapshot | null;
+  assessmentJobs: AssessmentGenerationJob[];
   assignments: AssignmentCard[];
   audit: AdminAudit | null;
   contentIndex: ContentIndexSummary | null;
@@ -1307,6 +1364,8 @@ function TeacherWorkspace({
   latestAssessmentDraft: AssessmentDraftRef | null;
   logs: LearningLog[];
   onAssessment: (input: AssessmentRequestInput) => void;
+  onAssessmentCancel: (jobId: string) => void;
+  onAssessmentJobSelect: (job: AssessmentGenerationJob) => void;
   onAssessmentDraftSelect: (assignment: AssignmentCard) => void;
   onAssessmentReject: (assignmentId: string) => void;
   onContentIndexRebuild: () => void;
@@ -1455,19 +1514,28 @@ function TeacherWorkspace({
   const generationSelectedStudent = visibleGenerationStudents.find((student) => student.id === generationStudentId) || visibleGenerationStudents[0] || students[0];
   const generationTargetGrade = generationTargetScope === "student" ? generationSelectedStudent?.grade || targetGrade : targetGrade;
   const activeQuizChapterOptions = quizChapterOptionsByGradeAndSubject[generationTargetGrade]?.[assessmentSubject] || quizChapterOptionsByGradeAndSubject["六年级"].数学;
+  const generationTextbookAssets = useMemo(() => textbooks.filter((asset) => (
+    asset.subject === assessmentSubject
+      && asset.grade === generationTargetGrade
+      && asset.baselineMatched !== false
+  )), [assessmentSubject, generationTargetGrade, textbooks]);
   const generationTextbookContext = selectedTextbookContext
     && selectedTextbookContext.asset.subject === assessmentSubject
     && selectedTextbookContext.asset.grade === generationTargetGrade
     && selectedTextbookContext.asset.baselineMatched !== false
     ? selectedTextbookContext
     : null;
-  const hasApprovedTextbookSource = Boolean(generationTextbookContext && knowledgeSources.some((source) =>
-    source.reviewStatus === "APPROVED"
-      && source.allowedForGeneration === true
-      && source.licenseStatus !== "NOT_ALLOWED"
-      && source.chunkCount > 0
-      && matchesTextbookEvidenceScope(generationTextbookContext.asset, source)
-  ));
+  const generationTextbookChapters = generationTextbookContext?.asset.chapters || [];
+  const matchingApprovedTextbookSources = useMemo(() => generationTextbookContext
+    ? knowledgeSources.filter((source) => (
+      source.reviewStatus === "APPROVED"
+        && source.allowedForGeneration === true
+        && source.licenseStatus !== "NOT_ALLOWED"
+        && source.chunkCount > 0
+        && matchesTextbookEvidenceScope(generationTextbookContext.asset, source)
+    ))
+    : [], [generationTextbookContext, knowledgeSources]);
+  const hasApprovedTextbookSource = matchingApprovedTextbookSources.length > 0;
   const quizGenerationBlockReason = generationMode !== "quiz"
     ? ""
     : !generationTextbookContext
@@ -1497,7 +1565,7 @@ function TeacherWorkspace({
     setGenerationStudentId(studentId);
   };
 
-  const selectedQuizChapterLabel = assessmentQuizChapter === activeQuizChapterOptions[0] && generationTextbookContext
+  const selectedQuizChapterLabel = generationTextbookContext?.chapter
     ? `${generationTextbookContext.asset.title}${generationTextbookContext.chapter ? ` / ${generationTextbookContext.chapter.title}` : ""}`
     : assessmentQuizChapter;
   const assessmentSourceRange = generationMode === "quiz"
@@ -1518,11 +1586,18 @@ function TeacherWorkspace({
   const readyTabletDevices = devices.filter((item) => item.status === "已绑定").length;
   const recentGenerationAssignments = assignments
     .filter((item) => ["小测", "练习", "试卷"].includes(item.kind))
-    .slice(0, 4);
+    .slice(0, 6);
+  const recentAssessmentJobs = assessmentJobs.slice(0, 6);
+  const activeAssessmentJobs = assessmentJobs.filter((job) => ["queued", "generating", "exporting_draft", "cancelling"].includes(job.status));
+  const recordedPrintAssets = recentGenerationAssignments.flatMap((assignment) => [
+    assignment.finalExportAssets?.studentPaper,
+    assignment.finalExportAssets?.answerAnalysis
+  ].filter((asset): asset is PrintAssetLink => Boolean(asset)));
+  const visiblePrintAssets = Array.from(new Map([...printAssets, ...recordedPrintAssets].map((asset) => [asset.id, asset])).values());
   const generationStats = {
     pending: assignments.filter((item) => item.draftReviewStatus === "pending_teacher_review").length,
     quiz: assignments.filter((item) => item.kind === "小测").length,
-    exported: printAssets.length,
+    exported: recordedPrintAssets.length,
     rejected: assignments.filter((item) => item.draftReviewStatus === "rejected").length
   };
   const buildAssessmentRequirement = () => [
@@ -1554,9 +1629,9 @@ function TeacherWorkspace({
       textbookChapterTitle: generationTextbookContext?.chapter?.title || (generationMode === "quiz" ? assessmentQuizChapter : undefined)
     });
   };
-  const isAssessmentDraftBusy = sync.busy && sync.message.includes("PDF草稿");
-  const generationFeedbackVisible = sync.message.includes("PDF草稿") || sync.message.startsWith("生成失败");
-  const generationFeedbackStatus = sync.busy ? "pending" : sync.ok === false ? "blocked" : sync.ok ? "ready" : "pending";
+  const generationFeedbackVisible = activeAssessmentJobs.length > 0 || sync.message.includes("生成任务") || sync.message.startsWith("生成失败");
+  const generationFeedbackMessage = activeAssessmentJobs[0]?.message || sync.message;
+  const generationFeedbackStatus = activeAssessmentJobs.length ? "pending" : sync.ok === false ? "blocked" : sync.ok ? "ready" : "pending";
   const copyTermReportMessage = async () => {
     const message = selectedTermReport?.wechatMessage || "您好，老师已将阶段成长报告发送给您，请查收。";
     try {
@@ -1731,6 +1806,22 @@ function TeacherWorkspace({
             {generationMode === "exam" && assessmentSubject === "数学"
               ? <label>附加题<select value={assessmentMathBonusQuestion} onChange={(event) => setAssessmentMathBonusQuestion(event.target.value)}>{mathBonusQuestionOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
               : null}
+            {generationMode === "quiz"
+              ? <label className="wide-field">教材依据<select value={generationTextbookContext?.asset.id || ""} onChange={(event) => {
+                const asset = generationTextbookAssets.find((item) => item.id === event.target.value);
+                if (!asset) {
+                  onSelectTextbookContext(null);
+                  return;
+                }
+                onSelectTextbookContext({ asset, chapter: asset.chapters?.[0] });
+              }}><option value="">请选择匹配的贵州遵义教材基准</option>{generationTextbookAssets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title} · {asset.volume}</option>)}</select></label>
+              : null}
+            {generationMode === "quiz" && generationTextbookContext && generationTextbookChapters.length
+              ? <label className="wide-field">教材章节<select value={generationTextbookContext.chapter?.id || ""} onChange={(event) => {
+                const chapter = generationTextbookChapters.find((item) => item.id === event.target.value);
+                onSelectTextbookContext({ asset: generationTextbookContext.asset, chapter });
+              }}><option value="">整册 / 教师自定义范围</option>{generationTextbookChapters.map((chapter) => <option key={chapter.id} value={chapter.id}>{chapter.unit ? `${chapter.unit} · ` : ""}{chapter.title}</option>)}</select></label>
+              : null}
             <label className="wide-field">知识点 / 考查范围<input value={textbookHint || assessmentKnowledgeRange} onChange={(event) => setAssessmentKnowledgeRange(event.target.value)} /></label>
           </div>
           <div className="generation-section-box">
@@ -1742,38 +1833,48 @@ function TeacherWorkspace({
           </div>
           <label className="field-label">教师补充要求<textarea className="wide-textarea compact-textarea" value={assessmentRequirement} onChange={(event) => setAssessmentRequirement(event.target.value)} /></label>
           <p className="context-note"><ShieldCheck size={15} />排版规则已按当前题型自动优化：学生卷不出现答案，解析卷包含答案、步骤和易错提醒。</p>
+          {generationMode === "quiz" ? <div className="generation-source-card"><strong>教材资料状态<StatusPill label={hasApprovedTextbookSource ? "可生成" : generationTextbookContext ? "待复核" : "待选择"} status={hasApprovedTextbookSource ? "ready" : "pending"} /></strong><span>{generationTextbookContext ? hasApprovedTextbookSource ? `已找到 ${matchingApprovedTextbookSources.length} 份已复核且允许生成的资料。` : "当前教材需要先完成资料索引和教师复核，审核通过后即可生成小测。" : `当前年级和科目下有 ${generationTextbookAssets.length} 本可选教材。`}</span>{!hasApprovedTextbookSource ? <div className="button-row"><button className="secondary-button" onClick={() => onOpenModule("教材资料")} type="button"><BookOpen size={16} />前往教材资料审核</button></div> : null}</div> : null}
           {quizGenerationBlockReason ? <p className="context-note blocked"><ShieldCheck size={15} />{quizGenerationBlockReason}</p> : null}
         </main>
 
         <aside className="generation-review-rail">
           <div className="generation-panel-head"><strong>依据与复核流程</strong><span>右侧固定展示生成依据、草稿状态和导出闸门。</span></div>
           <div className="generation-source-card"><strong>当前依据<StatusPill label="已接入" status="ready" /></strong><span>{activeGenerationMode.sourceLabel}</span></div>
-          <div className="generation-source-card"><strong>教材内容<StatusPill label={textbookHint ? "已选择" : "待选择"} status={textbookHint ? "ready" : "pending"} /></strong><span>{textbookHint || "未选择教材时，服务层会按教师输入范围生成草稿。"}</span></div>
-          <div className="generation-source-card"><strong>资料上下文<StatusPill label={contentIndex?.available ? "可用" : "待重建"} status={contentIndex?.available ? "ready" : "pending"} /></strong><span>只使用教师复核通过的资料摘要，不展示 Markdown chunk。</span></div>
+          <div className="generation-source-card"><strong>教材内容<StatusPill label={generationMode === "quiz" ? generationTextbookContext ? "已匹配" : "待选择" : textbookHint ? "已选择" : "待选择"} status={generationMode === "quiz" ? generationTextbookContext ? "ready" : "pending" : textbookHint ? "ready" : "pending"} /></strong><span>{generationMode === "quiz" ? generationTextbookContext ? `${generationTextbookContext.asset.title}${generationTextbookContext.chapter ? ` / ${generationTextbookContext.chapter.title}` : ""}` : "请选择当前年级和科目匹配的教材。" : textbookHint || "未选择教材时，服务层会按教师输入范围生成草稿。"}</span></div>
+          <div className="generation-source-card"><strong>资料上下文<StatusPill label={generationMode === "quiz" ? hasApprovedTextbookSource ? "可生成" : "待复核" : contentIndex?.available ? "可用" : "待重建"} status={generationMode === "quiz" ? hasApprovedTextbookSource ? "ready" : "pending" : contentIndex?.available ? "ready" : "pending"} /></strong><span>{generationMode === "quiz" ? hasApprovedTextbookSource ? `当前教材已有 ${matchingApprovedTextbookSources.length} 份可用资料。` : "需要先完成资料索引和教师复核，审核通过后才允许生成。" : "只使用教师复核通过的资料摘要，不展示 Markdown chunk。"}</span></div>
           <div className="generation-step-card ready"><strong>1. 生成 PDF 草稿</strong><span>服务层完成结构化生成、修复和本地审查。</span></div>
           <div className="generation-step-card active"><strong>2. 教师打开审查</strong><span>先看题目、题量、页数和排版，不在页面内直接发布题面。</span></div>
           <div className="generation-step-card"><strong>3. 正式导出</strong><span>确认后才生成学生卷与答案解析卷。</span></div>
           <div className="generation-action-dock">
-            <button className="primary-button" disabled={isAssessmentDraftBusy || Boolean(quizGenerationBlockReason)} onClick={submitAssessmentDraft}>{isAssessmentDraftBusy ? <RefreshCw className="spin-icon" size={17} /> : <Printer size={17} />}{isAssessmentDraftBusy ? "正在生成 PDF 草稿" : "生成 PDF 草稿"}</button>
+            <button className="primary-button" disabled={Boolean(quizGenerationBlockReason)} onClick={submitAssessmentDraft}><Printer size={17} />生成 PDF 草稿</button>
             {latestAssessmentDraft?.draftAsset ? <a className="draft-pdf-link" href={latestAssessmentDraft.draftAsset.url} target="_blank" rel="noreferrer"><FileText size={17} />打开审查 PDF</a> : <button className="secondary-button" disabled type="button"><FileText size={17} />打开审查 PDF</button>}
             {latestAssessmentDraft?.layoutValidation?.ok === false || (latestAssessmentDraft && !latestAssessmentDraft.layoutValidation) ? <p className="context-note blocked"><ShieldCheck size={15} />排版校验未通过：{latestAssessmentDraft.layoutValidation?.issues.join("；") || "缺少有效的页数和题目坐标校验，请重新导出草稿。"}</p> : null}
             <button className="primary-button" disabled={!latestAssessmentDraft || latestAssessmentDraft.layoutValidation?.ok !== true} onClick={() => latestAssessmentDraft && onExportPrint(latestAssessmentDraft.assignmentId)}><CheckCircle2 size={17} />确认正式导出</button>
             <button className="secondary-button danger-button" disabled={!latestAssessmentDraft} onClick={() => latestAssessmentDraft && onAssessmentReject(latestAssessmentDraft.assignmentId)}><RefreshCw size={17} />否决并重新生成</button>
           </div>
-          {generationFeedbackVisible ? <div className={`generation-inline-status ${generationFeedbackStatus}`}><StatusDot status={generationFeedbackStatus} /><span>{sync.message}</span></div> : null}
+          {generationFeedbackVisible ? <div className={`generation-inline-status ${generationFeedbackStatus}`}><StatusDot status={generationFeedbackStatus} /><span>{generationFeedbackMessage}</span></div> : null}
           {latestAssessmentDraft ? <div className="generation-current-draft"><strong>{latestAssessmentDraft.targetLabel} · {latestAssessmentDraft.subject} · {latestAssessmentDraft.kind}</strong><StatusPill label={latestAssessmentDraft.reviewStatus === "accepted" ? "已确认" : latestAssessmentDraft.reviewStatus === "rejected" ? "已否决" : "待审查"} status={latestAssessmentDraft.reviewStatus === "accepted" ? "ready" : latestAssessmentDraft.reviewStatus === "rejected" ? "blocked" : "pending"} /><span>请先打开 PDF 草稿审查题目、题量和排版。</span></div> : null}
         </aside>
       </div>
       <section className="generation-record-board">
         <div className="generation-panel-head"><strong>草稿与导出记录</strong><span>待审查优先，已确认和正式导出分开管理。</span></div>
         <div className="generation-record-grid">
+          {recentAssessmentJobs.map((job) => {
+            const jobStatus = assessmentGenerationJobStatus(job.status);
+            const draft = assessmentDraftRefFromJob(job);
+            const canCancel = ["queued", "generating", "exporting_draft", "cancelling"].includes(job.status);
+            return <div className={`generation-job-record-card ${job.status}`} key={job.id}>
+              <button aria-pressed={Boolean(draft && latestAssessmentDraft?.assignmentId === job.assignmentId)} className={`generation-record-card ${draft && latestAssessmentDraft?.assignmentId === job.assignmentId ? "active" : ""}`} disabled={!draft} onClick={() => draft && onAssessmentJobSelect(job)} type="button"><strong>{job.kind}<StatusPill label={jobStatus.label} status={jobStatus.tone} /></strong><b>{job.title}</b><span>{job.subject} · {job.targetLabel || "所选对象"}</span><span>{job.message}</span></button>
+              {canCancel ? <button className="secondary-button danger-button generation-job-cancel" disabled={job.status === "cancelling"} onClick={() => onAssessmentCancel(job.id)} type="button"><CircleX size={16} />取消本次生成</button> : null}
+            </div>;
+          })}
           {recentGenerationAssignments.length ? recentGenerationAssignments.map((assignment) => {
             const reviewLabel = assignment.draftReviewStatus === "accepted" ? "已确认" : assignment.draftReviewStatus === "rejected" ? "已否决" : assignment.draftReviewStatus === "pending_teacher_review" ? "待审查" : "未导出草稿";
             const status = assignment.draftReviewStatus === "accepted" ? "ready" : assignment.draftReviewStatus === "rejected" ? "blocked" : "pending";
             return <button aria-pressed={latestAssessmentDraft?.assignmentId === assignment.id} className={`generation-record-card ${latestAssessmentDraft?.assignmentId === assignment.id ? "active" : ""}`} disabled={!assignment.draftReviewAsset} key={assignment.id} onClick={() => onAssessmentDraftSelect(assignment)} type="button"><strong>{assignment.kind}<StatusPill label={reviewLabel} status={status} /></strong><b>{assignment.title}</b><span>{assignment.subject} · {assignment.audit?.itemCount ? `${assignment.audit.itemCount}题` : assignment.status}</span></button>;
-          }) : <p className="review-empty">暂无生成进度记录。</p>}
+          }) : recentAssessmentJobs.length ? null : <p className="review-empty">暂无生成进度记录。</p>}
         </div>
-        {printAssets.length ? <div className="print-asset-list">{printAssets.map((asset) => <a key={asset.id} href={asset.url} target="_blank" rel="noreferrer"><FileText size={16} />{asset.title}</a>)}</div> : null}
+        {visiblePrintAssets.length ? <div className="print-asset-list">{visiblePrintAssets.map((asset) => <a key={asset.id} href={asset.url} target="_blank" rel="noreferrer"><FileText size={16} />{asset.title}</a>)}</div> : null}
       </section>
     </section>
     <section className={moduleClass("批改复核", "panel span-6")}><PanelTitle badge="AI生成" icon={Upload} title="拍照上传批改" /><div className="template-controls"><label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName}</option>)}</select></label><label>类型<select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option>作业</option><option>小测</option><option>试卷</option><option>听写</option></select></label><label>科目<select value={uploadSubject} onChange={(event) => setUploadSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label></div><label className="field-label">记录标题<input value={uploadTitle} placeholder="例如：三角形单元试卷批改、英语Unit 1听写批改" onChange={(event) => setUploadTitle(event.target.value)} /></label><label className="field-label">拍照或选择图片<input multiple type="file" accept="image/*" capture="environment" onChange={(event) => setUploadFiles(Array.from(event.target.files || []))} /></label><p className="muted-line">批改记录绑定所选学生，教师复核确认后才进入学生档案、错题和学习分析。当前已选择 {uploadFiles.length} 张，上传数量不设上限。</p><div className="review-upload-action"><button className="primary-button" disabled={!selectedStudent || !uploadFiles.length || isReviewUploading("grading")} onClick={() => selectedStudent && submitReviewUpload("grading", { studentId: selectedStudent.id, subject: uploadSubject, kind: uploadKind, title: uploadTitle.trim() || `${selectedStudent.displayName}${uploadKind}批改`, images: uploadFiles })}><Upload size={17} />上传并批改</button>{renderReviewUploadStatus("grading")}</div></section>

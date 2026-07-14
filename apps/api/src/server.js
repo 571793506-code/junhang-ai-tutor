@@ -44,6 +44,7 @@ import {
 import { checkDatabaseStatus, persistenceOptions, requireDatabase } from "./db-status.js";
 import { resolveApprovedAssessmentContentContext } from "./approved-content-context.js";
 import { assessmentPageBalanceFillRatio, buildAssessmentLayoutValidation } from "./assessment-layout-validation.js";
+import { createAssessmentGenerationJobs } from "./assessment-generation-jobs.js";
 import { isNoMarkdownDocumentsError, summarizeContentIndexState } from "./content-index-state.js";
 import { createEncodingGuardMiddleware } from "./encoding-guard-middleware.js";
 import { loadRuntimeConfig, publicConfigSummary } from "./env.js";
@@ -80,6 +81,7 @@ const port = Number(config.API_PORT || 8787);
 const host = String(config.API_HOST || "127.0.0.1");
 const execFileAsync = promisify(execFile);
 const workspaceRoot = findWorkspaceRoot();
+const assessmentGenerationJobs = createAssessmentGenerationJobs({ concurrency: 5 });
 
 app.use(
   cors({
@@ -1156,6 +1158,10 @@ function mapAssignment(assignment, options = {}) {
   const pipelineAssets = safeJson(safeJson(metadata.generationPipeline, {}).assets, {});
   const draftReviewAssetId = readableText(metadata.draftReviewAssetId || pipelineAssets.draftReviewAssetId, "");
   const draftReviewUrl = readableText(pipelineAssets.draftReviewUrl, "");
+  const studentPaperAssetId = readableText(metadata.latestPrintAssetId || pipelineAssets.studentPaperAssetId, "");
+  const studentPaperUrl = readableText(pipelineAssets.studentPaperUrl, "");
+  const answerAnalysisAssetId = readableText(metadata.latestAnalysisAssetId || pipelineAssets.answerAnalysisAssetId, "");
+  const answerAnalysisUrl = readableText(pipelineAssets.answerAnalysisUrl, "");
   const rawPrintProfile = safeJson(metadata.printProfile, null);
   const printProfile = rawPrintProfile
     ? {
@@ -1198,6 +1204,12 @@ function mapAssignment(assignment, options = {}) {
     draftReviewStatus: metadata.draftReviewStatus || null,
     draftReviewAsset: options.includeDraftReviewAsset && draftReviewAssetId && draftReviewUrl
       ? { id: draftReviewAssetId, title: `${title} - 内容审查草稿`, url: draftReviewUrl }
+      : null,
+    finalExportAssets: options.includeDraftReviewAsset && (studentPaperUrl || answerAnalysisUrl)
+      ? {
+          studentPaper: studentPaperAssetId && studentPaperUrl ? { id: studentPaperAssetId, title: `${title} - 题目`, url: studentPaperUrl } : null,
+          answerAnalysis: answerAnalysisAssetId && answerAnalysisUrl ? { id: answerAnalysisAssetId, title: `${title} - 解析`, url: answerAnalysisUrl } : null
+        }
       : null,
     draftRequest: options.includeDraftReviewAsset
       ? {
@@ -2609,6 +2621,11 @@ function normalizeGeneratedHtml(html) {
   return normalizeDisplayText(html);
 }
 
+function throwIfAssessmentGenerationCancelled(signal) {
+  if (!signal?.aborted) return;
+  throw signal.reason || Object.assign(new Error("ASSESSMENT_GENERATION_CANCELLED"), { code: "ASSESSMENT_GENERATION_CANCELLED" });
+}
+
 async function exportAssessmentPaperAsset(req, assignment, options = {}) {
   const metadata = safeJson(assignment.metadata, {});
   const suffix = options.suffix || "print";
@@ -2656,6 +2673,8 @@ async function exportAssessmentPaperAsset(req, assignment, options = {}) {
   if (options.requireValidLayout && layoutValidation.ok !== true) {
     return { asset: null, pdfResult, htmlFileName, pdfFileName, outputFileName, htmlResult: paperHtmlResult, evenPdf, layoutValidation, questionLayoutManifest };
   }
+  // PDF rendering is not interruptible, but a cancelled job must not create a review asset after it finishes.
+  throwIfAssessmentGenerationCancelled(options.signal);
   const asset = await prisma.generatedAsset.create({
     data: {
       kind: `${assetKind}-${pdfResult.ok ? "pdf" : "html"}`,
@@ -2682,7 +2701,61 @@ async function exportAssessmentPaperAsset(req, assignment, options = {}) {
       }
     }
   });
+  if (options.signal?.aborted) {
+    await prisma.generatedAsset.delete({ where: { id: asset.id } }).catch(() => {});
+    throwIfAssessmentGenerationCancelled(options.signal);
+  }
   return { asset, pdfResult, htmlFileName, pdfFileName, outputFileName, htmlResult: paperHtmlResult, evenPdf, layoutValidation };
+}
+
+async function exportAssessmentDraftForReview(req, assignment, options = {}) {
+  const metadata = safeJson(assignment.metadata, {});
+  const exported = await exportAssessmentPaperAsset(req, assignment, {
+    suffix: `draft-review-${Date.now()}`,
+    titleSuffix: "内容审查草稿",
+    role: "assessment-draft-review",
+    kind: "assessment-draft-review",
+    reviewStatus: "pending_teacher_review",
+    signal: options.signal,
+    htmlOptions: {
+      badgeText: "AI生成 · 教师内容审查草稿",
+      footText: "仅供教师审查，确认后再生成正式题目与解析 PDF",
+      titleSuffix: " - 内容审查草稿"
+    },
+    note: "Draft review PDF generated for teacher approval before final export."
+  });
+  throwIfAssessmentGenerationCancelled(options.signal);
+  const generationPipeline = mergeGenerationPipeline(metadata, {
+    stage: "draft_pdf_ready",
+    gates: {
+      draftPdfExported: true,
+      layoutValidationPassed: exported.layoutValidation.ok,
+      teacherReviewStatus: "pending_teacher_review",
+      finalExportAllowed: false,
+      finalExported: false
+    },
+    assets: {
+      draftReviewAssetId: exported.asset.id,
+      draftReviewUrl: exported.asset.url || null,
+      draftReviewGeneratedAt: new Date().toISOString(),
+      layoutValidation: exported.layoutValidation
+    }
+  });
+  throwIfAssessmentGenerationCancelled(options.signal);
+  await prisma.assignment.update({
+    where: { id: assignment.id },
+    data: {
+      metadata: {
+        ...metadata,
+        draftReviewStatus: "pending_teacher_review",
+        draftReviewAssetId: exported.asset.id,
+        draftReviewUpdatedAt: new Date().toISOString(),
+        layoutValidation: exported.layoutValidation,
+        generationPipeline
+      }
+    }
+  });
+  return { ...exported, generationPipeline };
 }
 
 function normalizeReviewResultForDisplay(result = {}, storedScore = null) {
@@ -3319,32 +3392,38 @@ app.patch("/api/tasks/:taskId/complete", requireDatabase, requireSession(config,
   res.json({ ok: true, task: mapTask(completedTask) });
 }));
 
-app.post("/api/assessments/draft", requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
-  const input = { ...getBody(req), teacherId: sessionTeacherId(req, req.body?.teacherId) };
-  if (input.studentId && !(await assertTeacherStudentScope(req, res, input.studentId))) return;
+function assessmentDraftInputFromRequest(req) {
+  return { ...getBody(req), teacherId: sessionTeacherId(req, req.body?.teacherId) };
+}
+
+function assessmentContentContextFailure(contentContext, contentContextValidation) {
+  const textbookAssetRequired = contentContext.reason === "TEXTBOOK_ASSET_REQUIRED"
+    || contentContextValidation.error === "TEXTBOOK_ASSET_REQUIRED";
+  const baselineMismatch = contentContext.reason === "TEXTBOOK_BASELINE_MISMATCH";
+  return {
+    error: textbookAssetRequired
+      ? "TEXTBOOK_ASSET_REQUIRED"
+      : baselineMismatch
+        ? "ASSESSMENT_TEXTBOOK_BASELINE_MISMATCH"
+        : "ASSESSMENT_CONTENT_CONTEXT_REQUIRED",
+    message: textbookAssetRequired
+      ? "教材生成请求必须先选择有效教材。"
+      : baselineMismatch
+        ? "所选教材不符合贵州遵义教材基准，请选择语文统编版、数学人教版或英语人教版 PEP。"
+        : "所选教材或章节没有已复核且允许用于生成的内容，请先完成资料索引和教师复核。",
+    contentContext
+  };
+}
+
+async function prepareAssessmentDraftInput(req) {
+  const input = assessmentDraftInputFromRequest(req);
   const database = await checkDatabaseStatus();
   const contentContext = database.ok
     ? await resolveApprovedAssessmentContentContext(prisma, input)
     : matchApprovedContentContext(input, []);
   const contentContextValidation = validateAssessmentContentContext(input, contentContext);
   if (!contentContextValidation.ok) {
-    const textbookAssetRequired = contentContext.reason === "TEXTBOOK_ASSET_REQUIRED"
-      || contentContextValidation.error === "TEXTBOOK_ASSET_REQUIRED";
-    const baselineMismatch = contentContext.reason === "TEXTBOOK_BASELINE_MISMATCH";
-    return res.status(422).json({
-      ok: false,
-      error: textbookAssetRequired
-        ? "TEXTBOOK_ASSET_REQUIRED"
-        : baselineMismatch
-          ? "ASSESSMENT_TEXTBOOK_BASELINE_MISMATCH"
-          : "ASSESSMENT_CONTENT_CONTEXT_REQUIRED",
-      message: textbookAssetRequired
-        ? "教材生成请求必须先选择有效教材。"
-        : baselineMismatch
-          ? "所选教材不符合贵州遵义教材基准，请选择语文统编版、数学人教版或英语人教版 PEP。"
-          : "所选教材或章节没有已复核且允许用于生成的内容，请先完成资料索引和教师复核。",
-      contentContext
-    });
+    return { ok: false, failure: assessmentContentContextFailure(contentContext, contentContextValidation) };
   }
   const textbookContext = contentContext.textbookContext;
   if (textbookContext?.resolved) {
@@ -3360,6 +3439,32 @@ app.post("/api/assessments/draft", requireSession(config, ["teacher"]), asyncRou
     input.knowledgePoints = textbookContext.knowledgePoints || input.knowledgePoints || [];
   }
   input.contentContext = contentContext;
+  return { ok: true, input };
+}
+
+function assessmentGenerationJobRequest(input = {}) {
+  const request = {};
+  for (const key of [
+    "targetScope", "studentId", "targetGrade", "subject", "kind", "difficulty", "requirement", "requestedItemCount",
+    "textbookAssetId", "textbookTitle", "textbookEdition", "textbookSeries", "textbookVolume", "textbookRegion",
+    "textbookChapterId", "textbookChapterTitle"
+  ]) {
+    if (input[key] != null && input[key] !== "") request[key] = input[key];
+  }
+  return request;
+}
+
+async function discardAssessmentGenerationJob(assignmentId, draftAssetId) {
+  if (draftAssetId) await prisma.generatedAsset.delete({ where: { id: draftAssetId } }).catch(() => {});
+  if (assignmentId) await prisma.assignment.delete({ where: { id: assignmentId } }).catch(() => {});
+}
+
+app.post("/api/assessments/draft", requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  const scopedInput = assessmentDraftInputFromRequest(req);
+  if (scopedInput.studentId && !(await assertTeacherStudentScope(req, res, scopedInput.studentId))) return;
+  const prepared = await prepareAssessmentDraftInput(req);
+  if (!prepared.ok) return res.status(422).json({ ok: false, ...prepared.failure });
+  const input = prepared.input;
   const { options, persistence } = await persistenceOptions(input);
   const result = await draftAssessmentService(config, input, options);
   await auditEvent(req, {
@@ -3384,6 +3489,90 @@ app.post("/api/assessments/draft", requireSession(config, ["teacher"]), asyncRou
   res.json({ ok: true, persistence, result });
 }));
 
+app.post("/api/assessments/generation-jobs", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  const scopedInput = assessmentDraftInputFromRequest(req);
+  if (scopedInput.studentId && !(await assertTeacherStudentScope(req, res, scopedInput.studentId))) return;
+  const prepared = await prepareAssessmentDraftInput(req);
+  if (!prepared.ok) return res.status(422).json({ ok: false, ...prepared.failure });
+  const input = { ...prepared.input, createAssignment: true, persist: true };
+  const teacherId = sessionTeacherId(req);
+  const targetLabel = input.targetScope === "grade"
+    ? input.targetGrade || input.grade || "所选年级"
+    : input.studentName || "所选学生";
+  const job = assessmentGenerationJobs.enqueue({
+    teacherId,
+    kind: readableKind(input.kind, "练习"),
+    subject: readableText(input.subject, "未标科目"),
+    title: readableText(input.title, `${input.subject || "教学"}${input.kind || "练习"}草稿`),
+    targetLabel,
+    request: assessmentGenerationJobRequest(input),
+    run: async ({ signal, setStage }) => {
+      let assignmentId = null;
+      let draftAssetId = null;
+      const discard = () => discardAssessmentGenerationJob(assignmentId, draftAssetId);
+      try {
+        setStage("generating", "正在生成结构化内容草稿。");
+        const { options } = await persistenceOptions(input);
+        throwIfAssessmentGenerationCancelled(signal);
+        const result = await draftAssessmentService(config, input, { ...options, signal });
+        assignmentId = result.persisted?.assignmentId || null;
+        if (!assignmentId) throw new Error("ASSESSMENT_DRAFT_PERSISTENCE_REQUIRED");
+        throwIfAssessmentGenerationCancelled(signal);
+
+        setStage("exporting_draft", "内容已生成，正在生成审查 PDF。");
+        const assignment = await prisma.assignment.findUnique({
+          where: { id: assignmentId },
+          include: { subject: true, items: { orderBy: { orderIndex: "asc" } } }
+        });
+        if (!assignment) throw new Error("ASSIGNMENT_NOT_FOUND");
+        const exported = await exportAssessmentDraftForReview(req, assignment, { signal });
+        draftAssetId = exported.asset.id;
+        throwIfAssessmentGenerationCancelled(signal);
+        await auditEvent(req, {
+          studentId: input.studentId || null,
+          feature: "assessment",
+          action: "draft-assessment",
+          metadata: {
+            subject: input.subject || null,
+            kind: input.kind || null,
+            assignmentId,
+            textbookAssetId: input.textbookAssetId || null,
+            textbookTitle: input.textbookTitle || null,
+            textbookEdition: input.textbookEdition || null,
+            textbookSeries: input.textbookSeries || null,
+            textbookVolume: input.textbookVolume || null,
+            textbookRegion: input.textbookRegion || null,
+            textbookChapterId: input.textbookChapterId || null,
+            textbookChapterTitle: input.textbookChapterTitle || null,
+            audioSource: input.audioSource || null
+          }
+        });
+        return {
+          assignmentId,
+          draftAsset: exported.asset,
+          layoutValidation: exported.layoutValidation,
+          message: "草稿已生成，等待教师审查。",
+          discard
+        };
+      } catch (error) {
+        if (signal.aborted) await discard();
+        throw error;
+      }
+    }
+  });
+  res.status(202).json({ ok: true, job });
+}));
+
+app.get("/api/assessments/generation-jobs", requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  res.json({ ok: true, jobs: assessmentGenerationJobs.list(sessionTeacherId(req)) });
+}));
+
+app.post("/api/assessments/generation-jobs/:jobId/cancel", requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  const job = assessmentGenerationJobs.cancel(sessionTeacherId(req), req.params.jobId);
+  if (!job) return res.status(404).json({ ok: false, error: "ASSESSMENT_GENERATION_JOB_NOT_FOUND", message: "未找到本教师的生成任务。" });
+  res.json({ ok: true, job });
+}));
+
 app.post("/api/assessments/:assignmentId/draft-export", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
   const assignment = await prisma.assignment.findUnique({
     where: { id: req.params.assignmentId },
@@ -3395,48 +3584,8 @@ app.post("/api/assessments/:assignmentId/draft-export", requireDatabase, require
   const metadata = safeJson(assignment.metadata, {});
   if (metadata.targetStudentId && !(await assertTeacherStudentScope(req, res, metadata.targetStudentId))) return;
 
-  const exported = await exportAssessmentPaperAsset(req, assignment, {
-    suffix: `draft-review-${Date.now()}`,
-    titleSuffix: "内容审查草稿",
-    role: "assessment-draft-review",
-    kind: "assessment-draft-review",
-    reviewStatus: "pending_teacher_review",
-    htmlOptions: {
-      badgeText: "AI生成 · 教师内容审查草稿",
-      footText: "仅供教师审查，确认后再生成正式题目与解析 PDF",
-      titleSuffix: " - 内容审查草稿"
-    },
-    note: "Draft review PDF generated for teacher approval before final export."
-  });
-  const generationPipeline = mergeGenerationPipeline(metadata, {
-    stage: "draft_pdf_ready",
-    gates: {
-      draftPdfExported: true,
-      layoutValidationPassed: exported.layoutValidation.ok,
-      teacherReviewStatus: "pending_teacher_review",
-      finalExportAllowed: false,
-      finalExported: false
-    },
-    assets: {
-      draftReviewAssetId: exported.asset.id,
-      draftReviewUrl: exported.asset.url || null,
-      draftReviewGeneratedAt: new Date().toISOString(),
-      layoutValidation: exported.layoutValidation
-    }
-  });
-  await prisma.assignment.update({
-    where: { id: assignment.id },
-    data: {
-      metadata: {
-        ...metadata,
-        draftReviewStatus: "pending_teacher_review",
-        draftReviewAssetId: exported.asset.id,
-        draftReviewUpdatedAt: new Date().toISOString(),
-        layoutValidation: exported.layoutValidation,
-        generationPipeline
-      }
-    }
-  });
+  const exported = await exportAssessmentDraftForReview(req, assignment);
+  const generationPipeline = exported.generationPipeline;
   await auditEvent(req, {
     studentId: metadata.targetStudentId || null,
     feature: "assessment",

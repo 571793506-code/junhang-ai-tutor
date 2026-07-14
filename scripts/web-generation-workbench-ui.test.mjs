@@ -32,12 +32,33 @@ test("generation workbench blocks textbook quizzes until matching baseline evide
   assert.match(source, /generationTextbookContext/);
   assert.match(source, /quizGenerationBlockReason/);
   assert.match(source, /贵州遵义教材基准/);
-  assert.match(source, /disabled=\{isAssessmentDraftBusy \|\| Boolean\(quizGenerationBlockReason\)\}/);
+  assert.match(source, /disabled=\{Boolean\(quizGenerationBlockReason\)\}/);
   assert.match(source, /textbookAssetId:\s*generationTextbookContext\?\.asset\.id/);
   assert.match(source, /asset\.editionDisplay \|\| asset\.edition/);
   assert.match(source, /matchesTextbookEvidenceScope\(\s*generationTextbookContext\.asset,\s*source\s*\)/);
   assert.match(source, /source\.licenseStatus\s*!==\s*"NOT_ALLOWED"/);
   assert.match(source, /source\.chunkCount\s*>\s*0/);
+});
+
+test("generation workbench lets teachers select matching textbook evidence before creating a quiz", () => {
+  assert.match(source, /const generationTextbookAssets = useMemo/);
+  assert.match(source, /const matchingApprovedTextbookSources =/);
+  assert.match(source, /教材依据/);
+  assert.match(source, /onSelectTextbookContext\(\{ asset/);
+  assert.match(source, /matchingApprovedTextbookSources\.length/);
+  assert.match(source, /onOpenModule\("教材资料"\)/);
+  assert.match(source, /需要先完成资料索引和教师复核/);
+});
+
+test("generation workbench submits independent jobs, supports cancellation, and keeps job records selectable", () => {
+  assert.match(apiSource, /export async function createAssessmentGenerationJob/);
+  assert.match(apiSource, /export async function listAssessmentGenerationJobs/);
+  assert.match(apiSource, /export async function cancelAssessmentGenerationJob/);
+  assert.match(source, /assessmentJobs/);
+  assert.match(source, /onAssessmentCancel/);
+  assert.match(source, /取消本次生成/);
+  assert.match(source, /generation-job-record-card/);
+  assert.doesNotMatch(source, /const isAssessmentDraftBusy = sync\.busy/);
 });
 
 test("knowledge source list requests the resolver-aligned 200 source limit", () => {

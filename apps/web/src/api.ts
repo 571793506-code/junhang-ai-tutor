@@ -177,6 +177,25 @@ export type AssessmentLayoutValidation = {
   issues: string[];
 };
 
+export type AssessmentGenerationJob = {
+  id: string;
+  kind: string;
+  subject: string;
+  title: string;
+  targetLabel: string;
+  request: Record<string, unknown>;
+  status: "queued" | "generating" | "exporting_draft" | "cancelling" | "ready_for_review" | "failed" | "cancelled";
+  message: string;
+  assignmentId: string | null;
+  draftAsset: { id: string; title: string; url: string } | null;
+  layoutValidation: AssessmentLayoutValidation | null;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+};
+
 export async function generateVocabularyCard(input: {
   word: string;
   studentId?: string;
@@ -372,6 +391,31 @@ export async function draftAssessment(input: Record<string, unknown>) {
       persisted?: { modelRunId?: string | null; assignmentId?: string | null };
     };
   }>(response);
+}
+
+export async function createAssessmentGenerationJob(input: Record<string, unknown>) {
+  const response = await fetch(`${API_BASE_URL}/api/assessments/generation-jobs`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(input)
+  });
+  return readJson<{ ok: boolean; job: AssessmentGenerationJob }>(response);
+}
+
+export async function listAssessmentGenerationJobs() {
+  const response = await fetch(`${API_BASE_URL}/api/assessments/generation-jobs`, {
+    headers: authHeaders()
+  });
+  return readJson<{ ok: boolean; jobs: AssessmentGenerationJob[] }>(response);
+}
+
+export async function cancelAssessmentGenerationJob(jobId: string) {
+  const response = await fetch(`${API_BASE_URL}/api/assessments/generation-jobs/${jobId}/cancel`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({})
+  });
+  return readJson<{ ok: boolean; job: AssessmentGenerationJob }>(response);
 }
 
 export async function exportAssessmentDraft(assignmentId: string) {

@@ -156,6 +156,18 @@ export interface AssignmentCard {
     title: string;
     url: string;
   } | null;
+  finalExportAssets?: {
+    studentPaper: {
+      id: string;
+      title: string;
+      url: string;
+    } | null;
+    answerAnalysis: {
+      id: string;
+      title: string;
+      url: string;
+    } | null;
+  } | null;
   draftRequest?: {
     targetScope?: "student" | "grade";
     studentId?: string;

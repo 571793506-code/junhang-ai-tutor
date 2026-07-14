@@ -2441,6 +2441,25 @@ button:disabled {
   gap: 10px;
 }
 
+.generation-job-record-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.generation-job-record-card .generation-record-card {
+  width: 100%;
+}
+
+.generation-job-cancel {
+  justify-content: center;
+  min-height: 34px;
+}
+
+.generation-job-record-card.cancelled .generation-record-card {
+  opacity: 0.72;
+}
+
 .generation-record-card {
   min-height: 128px;
   color: inherit;
@@ -6089,7 +6108,11 @@ button:disabled {
 
   .role-switch button {
     min-height: 36px;
-    padding: 0 8px;
+    min-width: 0;
+    padding: 0 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .topbar,
@@ -6140,7 +6163,7 @@ button:disabled {
 
   .nav-list {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     width: 100%;
     max-width: 100%;
@@ -6151,7 +6174,8 @@ button:disabled {
     width: 100%;
     min-width: 0;
     min-height: 48px;
-    padding: 0 10px;
+    padding: 0 8px;
+    overflow: hidden;
   }
 
   .topbar h1 {
