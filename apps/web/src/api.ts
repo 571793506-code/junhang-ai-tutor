@@ -710,6 +710,7 @@ export type GradingWorkbench = {
     status: "correct" | "wrong" | "partial" | "uncertain";
     score?: number | null;
     maxScore?: number | null;
+    prompt?: string;
     studentAnswer?: string;
     correctAnswer?: string;
     studentProcess?: string[];

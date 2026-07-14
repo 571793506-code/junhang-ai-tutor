@@ -1258,12 +1258,13 @@ function mergeDeterministicGradingResult(result = {}, deterministicResults = [],
         return {
           questionNo,
           status: "uncertain",
+          prompt: question.printedText || question.printedPrompt || reference.prompt || "",
           studentAnswer: question.studentAnswer || "",
           correctAnswer: reference.correctAnswer || question.correctAnswer || "",
           explanation: "模型未返回该题的批改结果，需要教师复核。",
           knowledgePoint: reference.knowledgePoint || input.subject || "",
           maxScore: reference.score,
-          confidence: 0,
+          confidence: optionalNumber(question.confidence) ?? 0,
           bbox: question.bbox
         };
       })
@@ -1364,6 +1365,9 @@ function normalizeQuestionResult(item, index, input = {}, total = 1) {
   const status = normalizeQuestionStatus(source.status || source.result || source.correctness);
   const questionNo = String(source.questionNo ?? source.no ?? source.orderIndex ?? source.index ?? index + 1);
   const manifest = manifestQuestionFor(input, questionNo);
+  const ocrQuestion = (Array.isArray(input.ocrQuestions) ? input.ocrQuestions : []).find((question, ocrIndex) =>
+    String(question?.questionNo || question?.no || question?.index || ocrIndex + 1) === questionNo
+  ) || {};
   const process = toStringArray(source.studentProcess || source.process || source.steps || source.reasoning);
   const explanation = String(source.explanation || source.analysis || source.correctProcess || source.reason || "").trim();
   const errorStep = String(source.errorStep || source.wrongStep || source.errorReason || source.cause || "").trim();
@@ -1378,7 +1382,8 @@ function normalizeQuestionResult(item, index, input = {}, total = 1) {
     id: source.id || `question-${questionNo}`,
     questionNo,
     status,
-    studentAnswer: String(source.studentAnswer || source.answer || source.studentWork || "").trim(),
+    prompt: String(source.prompt || source.printedText || source.printedPrompt || source.question || manifest?.prompt || "").trim(),
+    studentAnswer: String(source.studentAnswer || source.answer || source.studentWork || ocrQuestion.studentAnswer || ocrQuestion.studentAnswerText || ocrQuestion.answer || "").trim(),
     correctAnswer: String(source.correctAnswer ?? source.expectedAnswer ?? source.standardAnswer ?? manifest?.answer ?? "").trim(),
     studentProcess: process,
     errorStep,

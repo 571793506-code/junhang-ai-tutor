@@ -278,7 +278,8 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 - `GET /api/grading/workbench/:submissionId`
   - 教师端打开单个批改工作台详情。
-  - 关键字段：`pages[].imageUrl`, `pages[].markers`, `pages[].qualityStatus`, `pages[].qualityScore`, `pages[].qualityIssues`, `questions[].bbox`, `questions[].studentAnswer`, `questions[].correctAnswer`, `questions[].errorStep`, `questions[].confidence`。
+  - 关键字段：`pages[].imageUrl`, `pages[].markers`, `pages[].qualityStatus`, `pages[].qualityScore`, `pages[].qualityIssues`, `questions[].bbox`, `questions[].prompt`, `questions[].studentAnswer`, `questions[].correctAnswer`, `questions[].errorStep`, `questions[].confidence`。
+  - 参考答案、主批改或风险审查暂不可用时，接口仍必须保留 OCR 的题号、题干、学生作答、坐标和置信度，供教师逐题补充正确答案、判定、得分和错因；该状态不生成最终分，也不能跳过逐题确认归档。
   - 低置信或待复核题不进入学生端和家长端。
 
 - `PATCH /api/grading/workbench/:submissionId/questions/:questionId`

@@ -399,6 +399,145 @@ test("mixed grading keeps unresolved questions uncertain when remote grading fai
   assert.equal(reviewCalls, 1);
 });
 
+test("external worksheet keeps OCR question drafts when reference and grading models fail", async () => {
+  const result = await gradeSubmissionService(
+    {},
+    {
+      subject: "数学",
+      kind: "作业",
+      printedText: "1. 6*7=? 2. 9*8=?",
+      studentAnswerText: "1. 42 2. 72",
+      ocrQuestions: [
+        {
+          questionNo: "1",
+          printedPrompt: "6*7=?",
+          studentAnswer: "42",
+          observedWork: "口算得出42",
+          confidence: 0.96,
+          bbox: { page: 1, x: 0.1, y: 0.2, w: 0.3, h: 0.1 }
+        },
+        {
+          questionNo: "2",
+          printedPrompt: "9*8=?",
+          studentAnswer: "72",
+          observedWork: "口算得出72",
+          confidence: 0.94,
+          bbox: { page: 1, x: 0.1, y: 0.35, w: 0.3, h: 0.1 }
+        }
+      ]
+    },
+    {
+      persist: false,
+      referenceAnswerRunner: async () => ({
+        available: false,
+        providerId: "gpt56",
+        referenceText: "",
+        error: "502 openai_error"
+      }),
+      gradingRunner: async () => ({
+        available: false,
+        providerId: "gpt56",
+        gradingText: "",
+        error: "502 openai_error"
+      }),
+      gradingReviewers: {
+        premium: async () => ({
+          available: false,
+          reviewText: "",
+          error: "502 openai_error"
+        })
+      }
+    }
+  );
+
+  assert.deepEqual(
+    result.structured.questionResults.map((item) => ({
+      questionNo: item.questionNo,
+      prompt: item.prompt,
+      studentAnswer: item.studentAnswer,
+      confidence: item.confidence,
+      bbox: item.bbox
+    })),
+    [
+      {
+        questionNo: "1",
+        prompt: "6*7=?",
+        studentAnswer: "42",
+        confidence: 0.96,
+        bbox: { page: 1, x: 0.1, y: 0.2, w: 0.3, h: 0.1 }
+      },
+      {
+        questionNo: "2",
+        prompt: "9*8=?",
+        studentAnswer: "72",
+        confidence: 0.94,
+        bbox: { page: 1, x: 0.1, y: 0.35, w: 0.3, h: 0.1 }
+      }
+    ]
+  );
+  assert.equal(result.structured.score, null);
+  assert.equal(result.structured.questionResults.every((item) => item.status === "uncertain"), true);
+});
+
+test("remote grading results retain OCR evidence when the model omits it", async () => {
+  const result = await gradeSubmissionService(
+    {},
+    {
+      subject: "语文",
+      totalScore: 5,
+      referenceAnswers: [{
+        questionNo: "1",
+        prompt: "概括这段话的主要意思。",
+        correctAnswer: "意思合理即可",
+        score: 5,
+        confidence: 1
+      }],
+      ocrQuestions: [{
+        questionNo: "1",
+        printedText: "概括这段话的主要意思。",
+        studentAnswer: "春天来了，花草都醒了。",
+        confidence: 0.93,
+        bbox: { page: 1, x: 0.1, y: 0.2, w: 0.4, h: 0.12 }
+      }]
+    },
+    {
+      persist: false,
+      gradingRunner: async () => ({
+        available: true,
+        providerId: "gpt56",
+        gradingText: JSON.stringify({
+          questionResults: [{ questionNo: "1", status: "partial", score: 3, maxScore: 5, confidence: 0.8 }]
+        })
+      }),
+      gradingReviewers: {
+        premium: async () => ({
+          available: true,
+          reviewText: JSON.stringify({ status: "pass", riskLevel: "low", scoreReliable: true, archiveAllowed: true, issues: [], suggestions: [] })
+        })
+      }
+    }
+  );
+
+  assert.deepEqual(result.structured.questionResults[0], {
+    id: "question-1",
+    questionNo: "1",
+    status: "partial",
+    prompt: "概括这段话的主要意思。",
+    studentAnswer: "春天来了，花草都醒了。",
+    correctAnswer: "意思合理即可",
+    studentProcess: [],
+    errorStep: "",
+    explanation: "",
+    knowledgePoint: "语文",
+    suggestedPractice: "",
+    maxScore: 5,
+    score: 3,
+    confidence: 0.8,
+    bbox: { page: 1, x: 0.1, y: 0.2, w: 0.4, h: 0.12 },
+    modelEscalated: undefined
+  });
+});
+
 test("subjective grading keeps questions omitted by the remote model uncertain", async () => {
   let reviewCalls = 0;
   const result = await gradeSubmissionService(

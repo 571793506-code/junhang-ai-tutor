@@ -48,6 +48,8 @@ import { isNoMarkdownDocumentsError, summarizeContentIndexState } from "./conten
 import { createEncodingGuardMiddleware } from "./encoding-guard-middleware.js";
 import { loadRuntimeConfig, publicConfigSummary } from "./env.js";
 import { gradingQuestionReviewState, requireAllQuestionsReviewedForArchive } from "./grading-review-gates.js";
+import { filterNewReviewedMistakes } from "./grading-mistake-archive.js";
+import { hydrateQuestionDraftsFromOcr } from "./grading-workbench-question-drafts.js";
 import { resolveKnowledgeSourceId } from "./knowledge-source-id.js";
 import { buildKnowledgeSourceTextbookBinding, preserveKnowledgeSourceTextbookBinding } from "./knowledge-source-textbook-scope.js";
 import {
@@ -2807,6 +2809,7 @@ function normalizeQuestionWorkbenchItem(question = {}, index = 0, markers = []) 
     status: question.status || "uncertain",
     score: optionalNumber(question.score),
     maxScore: optionalNumber(question.maxScore || question.fullScore),
+    prompt: question.prompt || question.printedPrompt || question.printedText || "",
     studentAnswer: question.studentAnswer || "",
     correctAnswer: question.correctAnswer || "",
     studentProcess: Array.isArray(question.studentProcess) ? question.studentProcess : [],
@@ -2933,7 +2936,10 @@ function mapGradingWorkbench(submission) {
         ocrStatus: review.ocr?.status || "PENDING",
         markers: markers.filter((marker) => Number(marker.page || 1) === 1)
       }];
-  const questions = (Array.isArray(grading.questionResults) ? grading.questionResults : [])
+  const questions = hydrateQuestionDraftsFromOcr(
+    Array.isArray(grading.questionResults) ? grading.questionResults : [],
+    review.ocr?.questions || []
+  )
     .map((question, index) => normalizeQuestionWorkbenchItem(question, index, markers));
   const questionReviewState = gradingQuestionReviewState(questions);
   return {
@@ -2979,7 +2985,8 @@ function reviewedMistakesFromResult(result = {}, submission) {
           correctAnswer: item.correctAnswer || null,
           cause: item.errorStep || item.explanation || "教师复核确认后归档。",
           point: item.knowledgePoint || subject,
-          severity: item.status === "partial" ? "partial" : "normal"
+          severity: item.status === "partial" ? "partial" : "normal",
+          metadata: { questionNos: [String(item.questionNo || "").trim()].filter(Boolean) }
         }))
     : [];
   return (explicitMistakes.length ? explicitMistakes : questionMistakes)
@@ -2995,6 +3002,7 @@ function reviewedMistakesFromResult(result = {}, submission) {
         ...(mistake.metadata || {}),
         source: "submission-review",
         submissionId: submission.id,
+        sourceSubmissionId: submission.id,
         assignmentId: submission.assignmentId,
         reviewStatus: "teacher_reviewed",
         severity: mistake.severity || "normal"
@@ -4267,7 +4275,14 @@ async function archiveSubmissionReview(req, res, submission, body = {}, action =
   }
   const reviewedScore = reviewedScoreInput ?? reviewedScoreFromQuestions ?? optionalNumber(currentResult.score) ?? optionalNumber(currentResult.provisionalScore) ?? submission.grading?.score ?? null;
   const shouldArchiveMistakes = !currentResult.archivePublishedAt;
-  const reviewedMistakes = shouldArchiveMistakes ? reviewedMistakesFromResult(currentResult, submission) : [];
+  const reviewedMistakeCandidates = shouldArchiveMistakes ? reviewedMistakesFromResult(currentResult, submission) : [];
+  const existingMistakes = reviewedMistakeCandidates.length
+    ? await prisma.mistakeRecord.findMany({
+        where: { studentId: submission.studentId },
+        select: { metadata: true }
+      })
+    : [];
+  const reviewedMistakes = filterNewReviewedMistakes(existingMistakes, reviewedMistakeCandidates, submission.id);
   if (reviewedMistakes.length) {
     await prisma.mistakeRecord.createMany({ data: reviewedMistakes });
   }

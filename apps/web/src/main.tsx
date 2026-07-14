@@ -2529,6 +2529,7 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
   const [questionStatus, setQuestionStatus] = useState<"correct" | "wrong" | "partial" | "uncertain">("uncertain");
   const [questionScore, setQuestionScore] = useState("");
   const [questionMaxScore, setQuestionMaxScore] = useState("");
+  const [questionCorrectAnswer, setQuestionCorrectAnswer] = useState("");
   const [questionKnowledgePoint, setQuestionKnowledgePoint] = useState("");
   const [questionErrorStep, setQuestionErrorStep] = useState("");
   const [questionSuggestedPractice, setQuestionSuggestedPractice] = useState("");
@@ -2548,11 +2549,12 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
     setQuestionStatus(activeQuestionForForm?.status || "uncertain");
     setQuestionScore(activeQuestionForForm?.score != null ? String(activeQuestionForForm.score) : "");
     setQuestionMaxScore(activeQuestionForForm?.maxScore != null ? String(activeQuestionForForm.maxScore) : "");
+    setQuestionCorrectAnswer(activeQuestionForForm?.correctAnswer || "");
     setQuestionKnowledgePoint(activeQuestionForForm?.knowledgePoint || "");
     setQuestionErrorStep(activeQuestionForForm?.errorStep || activeQuestionForForm?.explanation || "");
     setQuestionSuggestedPractice(activeQuestionForForm?.suggestedPractice || "");
     setQuestionNote(activeQuestionForForm?.teacherNote || "");
-  }, [activeQuestionForForm?.id, activeQuestionForForm?.score, activeQuestionForForm?.maxScore, activeQuestionForForm?.status, activeQuestionForForm?.knowledgePoint, activeQuestionForForm?.errorStep, activeQuestionForForm?.explanation, activeQuestionForForm?.suggestedPractice, activeQuestionForForm?.teacherNote]);
+  }, [activeQuestionForForm?.id, activeQuestionForForm?.score, activeQuestionForForm?.maxScore, activeQuestionForForm?.status, activeQuestionForForm?.correctAnswer, activeQuestionForForm?.knowledgePoint, activeQuestionForForm?.errorStep, activeQuestionForForm?.explanation, activeQuestionForForm?.suggestedPractice, activeQuestionForForm?.teacherNote]);
   if (!workbenches.length) {
     const batches = groupReviewSubmissions(reviewSubmissions).slice(0, 6);
     const pendingSubmissions = reviewSubmissions.filter((item) => item.needsReview || item.status !== "已复核").length;
@@ -2659,7 +2661,7 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
   const allQuestionsReviewedForArchive = allQuestionsReviewed(activeQuestions);
   const reviewedScoreTotal = reviewedQuestionScore(activeQuestions);
   const maxScoreTotal = questionMaxScoreTotal(activeQuestions);
-  const questionConfirmDisabled = !active || !question || !questionScoreWithinMax || !questionMistakeEvidenceReady;
+  const questionConfirmDisabled = !active || !question || questionStatus === "uncertain" || !questionScoreWithinMax || !questionMistakeEvidenceReady;
   const archiveDisabled = !active || !allQuestionsReviewedForArchive;
   const archiveScoreLabel = reviewedScoreTotal != null
     ? `${reviewedScoreTotal}${maxScoreTotal != null ? `/${maxScoreTotal}` : ""} 分`
@@ -2687,6 +2689,7 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
       status: questionStatus,
       score: questionScoreNumber,
       maxScore: questionMaxScoreNumber,
+      correctAnswer: questionCorrectAnswer.trim(),
       knowledgePoint: questionKnowledgePoint.trim(),
       errorStep: questionErrorStep.trim(),
       suggestedPractice: questionSuggestedPractice.trim(),
@@ -2761,11 +2764,12 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
           <StatusPill label={reviewedQuestionReady(question) ? "已确认" : statusText(question.status)} status={reviewedQuestionReady(question) ? "ready" : question.status === "wrong" ? "blocked" : "pending"} />
         </div>
         <p className="grading-confidence">{question.confidence != null ? `识别置信度 ${Math.round(question.confidence * 100)}%` : "识别置信度待补，建议教师确认。"}</p>
+        <DetailLine label="题干" value={question.prompt || "题干未完整识别，请结合原图确认。"} />
         <DetailLine label="学生作答" value={question.studentAnswer || "未识别到明确作答"} />
         <DetailLine label="参考答案" value={question.correctAnswer || "待教师确认参考答案"} />
         <DetailLine label="过程/解析" value={(question.studentProcess || []).join("；") || question.explanation || "暂无过程解析"} />
         <DetailLine label="错因定位" value={question.errorStep || (question.status === "correct" ? "未发现明显错误" : "等待教师复核")} />
-        <DetailLine label="归档建议" value={question.suggestedPractice || active?.summary || "复核后进入错题和薄弱点分析"} />
+        <DetailLine label="归档建议" value={question.suggestedPractice || active?.quality?.reason || "逐题复核后进入错题和薄弱点分析"} />
       </div> : null}
       <div className="question-review-editor">
         <div className="question-review-status">
@@ -2778,6 +2782,7 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
           <label className="field-label">本题得分<input min="0" step="0.5" type="number" value={questionScore} onChange={(event) => setQuestionScore(event.target.value)} placeholder="本题得分" /></label>
           <label className="field-label">本题满分<input min="0.5" step="0.5" type="number" value={questionMaxScore} onChange={(event) => setQuestionMaxScore(event.target.value)} placeholder="满分" /></label>
         </div>
+        <label className="field-label">正确答案<input value={questionCorrectAnswer} onChange={(event) => setQuestionCorrectAnswer(event.target.value)} placeholder="AI未给出时由教师补充，可结合原图和题干填写。" /></label>
         <label className="field-label">知识点<input value={questionKnowledgePoint} onChange={(event) => setQuestionKnowledgePoint(event.target.value)} placeholder="如：分数加减、方程求解" /></label>
         <label className="field-label">错因定位<textarea value={questionErrorStep} onChange={(event) => setQuestionErrorStep(event.target.value)} placeholder="错/半对题必填：写明具体错在审题、步骤、计算还是表达。" /></label>
         <label className="field-label">后续练习<textarea value={questionSuggestedPractice} onChange={(event) => setQuestionSuggestedPractice(event.target.value)} placeholder="可选：填写后续安排的同类题或巩固建议。" /></label>
