@@ -32,12 +32,15 @@ import {
   updateStudentAccessStatus
 } from "@junhang/db";
 import {
+  addStudentVocabularyEntriesService,
   answerStudentQuestionService,
+  deleteStudentVocabularyEntryService,
   dictationSpeechService,
   draftAssessmentService,
   draftTeacherTaskService,
   generateVocabularyCardService,
   gradeSubmissionService,
+  listStudentVocabularyEntriesService,
   matchApprovedContentContext,
   validateAssessmentContentContext
 } from "@junhang/services";
@@ -962,6 +965,37 @@ function readableText(value, fallback = "") {
   const text = normalizeDisplayText(value).trim();
   if (!text || /\?{2,}/.test(text)) return fallback;
   return text;
+}
+
+function cleanVocabularyEntryForStudent(entry = {}) {
+  const card = entry.card && typeof entry.card === "object" ? entry.card : {};
+  const related = Array.isArray(card.related)
+    ? card.related
+      .map((item) => ({
+        word: readableText(item?.word),
+        part: readableText(item?.part),
+        partCn: readableText(item?.partCn),
+        meaning: readableText(item?.meaning)
+      }))
+      .filter((item) => item.word)
+    : [];
+  const examples = Array.isArray(card.examples)
+    ? card.examples.map((item) => readableText(item)).filter(Boolean)
+    : [];
+  return {
+    id: String(entry.id || ""),
+    word: readableText(entry.word || card.word, "word"),
+    card: {
+      word: readableText(card.word || entry.word, "word"),
+      phonetic: readableText(card.phonetic),
+      part: readableText(card.part),
+      partCn: readableText(card.partCn),
+      meaning: readableText(card.meaning),
+      related,
+      examples,
+      pitfall: readableText(card.pitfall)
+    }
+  };
 }
 
 function parseStructuredDisplayText(value) {
@@ -3330,6 +3364,42 @@ app.post("/api/ai/vocabulary", requireSession(config, ["student", "teacher", "cl
       persisted: result.persisted || {}
     }
   });
+}));
+
+app.post("/api/student/vocabulary", requireDatabase, requireSession(config, ["student"]), asyncRoute(async (req, res) => {
+  const body = getBody(req);
+  const { options } = await persistenceOptions({ studentId: req.session.studentId });
+  const result = await addStudentVocabularyEntriesService(config, {
+    studentId: req.session.studentId,
+    words: body.words
+  }, options);
+  res.json({
+    ok: true,
+    result: {
+      entries: result.entries.map(cleanVocabularyEntryForStudent),
+      failures: result.failures
+    }
+  });
+}));
+
+app.get("/api/student/vocabulary", requireDatabase, requireSession(config, ["student"]), asyncRoute(async (req, res) => {
+  const entries = await listStudentVocabularyEntriesService({ studentId: req.session.studentId });
+  res.json({ ok: true, result: { entries: entries.map(cleanVocabularyEntryForStudent) } });
+}));
+
+app.delete("/api/student/vocabulary/:entryId", requireDatabase, requireSession(config, ["student"]), asyncRoute(async (req, res) => {
+  const deleted = await deleteStudentVocabularyEntryService({
+    studentId: req.session.studentId,
+    entryId: req.params.entryId
+  });
+  if (!deleted) {
+    return res.status(404).json({
+      ok: false,
+      error: "VOCABULARY_ENTRY_NOT_FOUND",
+      message: "词卡不存在或已删除。"
+    });
+  }
+  res.json({ ok: true, result: { entryId: req.params.entryId } });
 }));
 
 app.post("/api/teacher/tasks", requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
