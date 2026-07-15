@@ -59,6 +59,27 @@ export declare function generateVocabularyCardService(
   options?: Record<string, unknown>
 ): Promise<Record<string, unknown>>;
 
+export declare function normalizeVocabularyWords(values?: unknown): {
+  words: string[];
+  rejected: string[];
+};
+
+export declare function addStudentVocabularyEntriesService(
+  config: Record<string, string | undefined>,
+  input?: Record<string, unknown>,
+  options?: Record<string, unknown>
+): Promise<Record<string, unknown>>;
+
+export declare function listStudentVocabularyEntriesService(
+  input?: Record<string, unknown>,
+  options?: Record<string, unknown>
+): Promise<Record<string, unknown>>;
+
+export declare function deleteStudentVocabularyEntryService(
+  input?: Record<string, unknown>,
+  options?: Record<string, unknown>
+): Promise<boolean>;
+
 export declare function draftTeacherTaskService(
   config: Record<string, string | undefined>,
   input?: Record<string, unknown>,

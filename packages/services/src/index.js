@@ -17,11 +17,14 @@ import { matchesTextbookEvidenceScope } from "@junhang/core";
 import {
   createAssignmentDraft,
   createLearningTask,
+  deleteStudentVocabularyEntry,
+  listStudentVocabularyEntries,
   recordModelRun,
   recordQaSession,
   recordSubmissionGrading,
   recordVocabularyRecord,
-  recordVoiceInteraction
+  recordVoiceInteraction,
+  upsertVocabularyEntry
 } from "@junhang/db";
 import { buildQaLearningRecord, sanitizeQaAnswer } from "./qa-learning-record.js";
 
@@ -3973,10 +3976,11 @@ export async function answerStudentQuestionService(config, input = {}, options =
 }
 
 export async function generateVocabularyCardService(config, input = {}, options = {}) {
-  const result = await generateVocabularyCard(config, input);
+  const generateCard = options.generateCard || generateVocabularyCard;
+  const result = await generateCard(config, input);
   const modelRun = await persistRun(result.modelRun, options);
   const vocabularyRecord =
-    options.persist === false || !input.studentId
+    options.persist === false || options.recordVocabulary === false || !input.studentId
       ? null
       : await recordVocabularyRecord(
           {
@@ -3997,6 +4001,60 @@ export async function generateVocabularyCardService(config, input = {}, options 
       vocabularyRecordId: vocabularyRecord?.id || null
     }
   };
+}
+
+export function normalizeVocabularyWords(values) {
+  const seen = new Set();
+  const words = [];
+  const rejected = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    const word = String(value || "").trim().toLowerCase();
+    if (!/^[a-z]+(?:['-][a-z]+)*$/.test(word)) {
+      if (word) rejected.push(word);
+      continue;
+    }
+    if (!seen.has(word) && words.length < 10) {
+      seen.add(word);
+      words.push(word);
+    }
+  }
+  return { words, rejected };
+}
+
+export async function addStudentVocabularyEntriesService(config, input = {}, options = {}) {
+  const { words, rejected } = normalizeVocabularyWords(input.words);
+  const entries = [];
+  const failures = rejected.map((word) => ({ word, message: "请输入英文单词。" }));
+  for (const word of words) {
+    try {
+      const generated = await generateVocabularyCardService(config, {
+        word,
+        studentId: input.studentId,
+        grade: input.grade || null,
+        studentName: input.studentName || null
+      }, { ...options, recordVocabulary: false });
+      if (!generated.available || !generated.card) {
+        failures.push({ word, message: "词卡暂时无法生成，请稍后重试。" });
+        continue;
+      }
+      entries.push(await upsertVocabularyEntry({
+        studentId: input.studentId,
+        word,
+        card: generated.card
+      }, options));
+    } catch {
+      failures.push({ word, message: "词卡暂时无法生成，请稍后重试。" });
+    }
+  }
+  return { entries, failures };
+}
+
+export async function listStudentVocabularyEntriesService(input = {}, options = {}) {
+  return listStudentVocabularyEntries(input.studentId, options);
+}
+
+export async function deleteStudentVocabularyEntryService(input = {}, options = {}) {
+  return deleteStudentVocabularyEntry(input.studentId, input.entryId, options);
 }
 
 export async function draftTeacherTaskService(config, input = {}, options = {}) {
