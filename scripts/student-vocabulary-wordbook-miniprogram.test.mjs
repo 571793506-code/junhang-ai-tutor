@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-const page = fs.readFileSync(new URL("./index.js", import.meta.url), "utf8");
-const markup = fs.readFileSync(new URL("./index.wxml", import.meta.url), "utf8");
-const api = fs.readFileSync(new URL("../../../utils/api.js", import.meta.url), "utf8");
+const page = fs.readFileSync(new URL("../apps/miniprogram/pages/student/vocabulary/index.js", import.meta.url), "utf8");
+const markup = fs.readFileSync(new URL("../apps/miniprogram/pages/student/vocabulary/index.wxml", import.meta.url), "utf8");
+const api = fs.readFileSync(new URL("../apps/miniprogram/utils/api.js", import.meta.url), "utf8");
 
 test("student vocabulary page is API-backed and supports add, list, and delete", () => {
   assert.doesNotMatch(page, /\bdictionary\b|\bfallback\b/);

@@ -28,7 +28,7 @@
 | `apps/miniprogram/pages/student/vocabulary/index.js` | Load entries and perform add/delete actions through the wrappers. |
 | `apps/miniprogram/pages/student/vocabulary/index.wxml` | Render batch input, state feedback, word cards, and delete controls. |
 | `apps/miniprogram/pages/student/vocabulary/index.wxss` | Style the new list and loading/error states. |
-| `apps/miniprogram/pages/student/vocabulary/index.test.mjs` | Prevent a return to static vocabulary data or missing CRUD bindings. |
+| `scripts/student-vocabulary-wordbook-miniprogram.test.mjs` | Prevent a return to static vocabulary data or missing CRUD bindings without copying test code into the WeChat runtime mirror. |
 
 ## Task 1: Add the Persistent Wordbook Repository
 
@@ -450,7 +450,7 @@ git commit -m "feat: add student vocabulary wordbook api"
 - Modify: `apps/miniprogram/pages/student/vocabulary/index.js`
 - Modify: `apps/miniprogram/pages/student/vocabulary/index.wxml`
 - Modify: `apps/miniprogram/pages/student/vocabulary/index.wxss`
-- Create: `apps/miniprogram/pages/student/vocabulary/index.test.mjs`
+- Create: `scripts/student-vocabulary-wordbook-miniprogram.test.mjs`
 
 - [ ] **Step 1: Write failing Mini Program wiring tests**
 
@@ -478,7 +478,7 @@ test("student vocabulary page is API-backed and supports add, list, and delete",
 
 - [ ] **Step 2: Run the Mini Program test and verify it fails because static lookup remains**
 
-Run: `node --test apps/miniprogram/pages/student/vocabulary/index.test.mjs`
+Run: `node --test scripts/student-vocabulary-wordbook-miniprogram.test.mjs`
 
 Expected: failure matching `dictionary` or a missing API wrapper.
 
@@ -606,7 +606,7 @@ Remove all `dictionary`, fallback, and default-card markup. In WXSS add only the
 Run:
 
 ```bat
-node --test apps/miniprogram/pages/student/vocabulary/index.test.mjs
+node --test scripts/student-vocabulary-wordbook-miniprogram.test.mjs
 cmd /c npm.cmd run check:miniprogram-js
 cmd /c npm.cmd run check:encoding
 ```
@@ -616,7 +616,7 @@ Expected: all commands pass.
 - [ ] **Step 5: Commit the Mini Program implementation**
 
 ```bat
-git add -- apps/miniprogram/utils/api.js apps/miniprogram/pages/student/vocabulary/index.js apps/miniprogram/pages/student/vocabulary/index.wxml apps/miniprogram/pages/student/vocabulary/index.wxss apps/miniprogram/pages/student/vocabulary/index.test.mjs
+git add -- apps/miniprogram/utils/api.js apps/miniprogram/pages/student/vocabulary/index.js apps/miniprogram/pages/student/vocabulary/index.wxml apps/miniprogram/pages/student/vocabulary/index.wxss scripts/student-vocabulary-wordbook-miniprogram.test.mjs
 git commit -m "feat: add student vocabulary wordbook"
 ```
 
@@ -629,7 +629,7 @@ git commit -m "feat: add student vocabulary wordbook"
 - [ ] **Step 1: Run all direct regression checks**
 
 ```bat
-node --test packages/db/src/vocabulary-entry.test.mjs packages/services/src/vocabulary-wordbook.test.mjs apps/api/src/vocabulary-wordbook-routes.test.mjs apps/miniprogram/pages/student/vocabulary/index.test.mjs
+node --test packages/db/src/vocabulary-entry.test.mjs packages/services/src/vocabulary-wordbook.test.mjs apps/api/src/vocabulary-wordbook-routes.test.mjs scripts/student-vocabulary-wordbook-miniprogram.test.mjs
 cmd /c npm.cmd run db:validate
 cmd /c npm.cmd run check:api
 cmd /c npm.cmd run check:miniprogram-js
