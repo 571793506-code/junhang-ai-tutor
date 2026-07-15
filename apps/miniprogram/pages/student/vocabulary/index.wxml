@@ -1,27 +1,45 @@
 <view class="page student-page">
   <view class="hero">
     <text class="eyebrow">英语词汇助手</text>
-    <text class="title">查单词、看词性、练变化</text>
-    <text class="subtitle">词性旁会显示中文说明，易错点里会提示对应变化。</text>
+    <text class="title">积累自己的词汇本</text>
+    <text class="subtitle">输入单词后生成词卡，词性、例句和易错点会一起保存。</text>
   </view>
 
   <view class="card">
-    <text class="section-title">查询单词</text>
-    <input class="input" placeholder="例如 carry" value="{{term}}" bindinput="setTerm" />
-    <button class="button warm" bindtap="lookup">查询</button>
+    <text class="section-title">添加词汇</text>
+    <textarea class="textarea" placeholder="每行一个单词，或用逗号分隔" value="{{terms}}" bindinput="setTerms" />
+    <button class="button warm" loading="{{submitting}}" bindtap="addVocabulary">生成词卡</button>
   </view>
 
-  <view class="card">
+  <view wx:if="{{message}}" class="card">
+    <text class="muted">{{message}}</text>
+  </view>
+
+  <view wx:if="{{failures.length}}" class="card">
+    <text wx:for="{{failures}}" wx:key="word" class="muted">{{item.word}}：{{item.message}}</text>
+  </view>
+
+  <view wx:if="{{loading}}" class="card">
+    <text class="muted">正在加载词汇本...</text>
+  </view>
+
+  <view wx:elif="{{!entries.length}}" class="card">
+    <text class="muted">还没有词卡，输入单词后开始积累吧。</text>
+  </view>
+
+  <view wx:for="{{entries}}" wx:key="id" class="card vocab-card">
     <view class="row between">
-      <text class="section-title">{{result.term}}</text>
-      <text class="pill">{{result.partOfSpeech}}（{{result.partOfSpeechCn}}）</text>
+      <text class="section-title">{{item.card.word}}</text>
+      <button class="text-button" data-id="{{item.id}}" bindtap="removeVocabulary">删除</button>
     </view>
-    <text class="muted">{{result.meaning}}</text>
-    <view class="list">
-      <view wx:for="{{result.changes}}" wx:key="label" class="list-item">
-        <text class="item-title">{{item.label}}</text>
-        <text class="item-meta">{{item.value}}</text>
-      </view>
+    <text class="pill">{{item.card.part}}（{{item.card.partCn}}）</text>
+    <text class="muted block-text">{{item.card.meaning}}</text>
+    <view wx:if="{{item.card.related.length}}" class="list">
+      <text wx:for="{{item.card.related}}" wx:key="word" class="muted block-text">相关词：{{item.word}} {{item.meaning}}</text>
     </view>
+    <view wx:if="{{item.card.examples.length}}" class="list">
+      <text wx:for="{{item.card.examples}}" wx:key="*this" class="muted block-text">例句：{{item}}</text>
+    </view>
+    <text wx:if="{{item.card.pitfall}}" class="muted block-text">易错点：{{item.card.pitfall}}</text>
   </view>
 </view>

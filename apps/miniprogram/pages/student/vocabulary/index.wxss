@@ -1,3 +1,23 @@
 .list {
   margin-top: 18rpx;
 }
+
+.vocab-card {
+  gap: 14rpx;
+}
+
+.block-text {
+  display: block;
+  margin-top: 12rpx;
+}
+
+.text-button {
+  margin: 0;
+  min-width: 88rpx;
+  padding: 0 12rpx;
+  border: 0;
+  background: transparent;
+  color: #b42318;
+  font-size: 26rpx;
+  line-height: 52rpx;
+}

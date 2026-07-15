@@ -108,6 +108,15 @@ module.exports = {
   generateVocabulary(input) {
     return request("/api/ai/vocabulary", { method: "POST", data: input });
   },
+  listStudentVocabulary() {
+    return request("/api/student/vocabulary");
+  },
+  createStudentVocabulary(input) {
+    return request("/api/student/vocabulary", { method: "POST", data: input });
+  },
+  deleteStudentVocabulary(entryId) {
+    return request(`/api/student/vocabulary/${entryId}`, { method: "DELETE" });
+  },
   bootstrap() {
     return request("/api/bootstrap");
   },

@@ -1,60 +1,81 @@
-const dictionary = {
-  carry: {
-    term: "carry",
-    partOfSpeech: "v.",
-    partOfSpeechCn: "动词",
-    meaning: "搬、拿、携带。常见易错点是第三人称单数和过去式。",
-    changes: [
-      { label: "第三人称单数", value: "carries：y 变 i 再加 es" },
-      { label: "过去式 / 过去分词", value: "carried：y 变 i 再加 ed" },
-      { label: "现在分词", value: "carrying：直接加 ing" }
-    ]
-  },
-  bright: {
-    term: "bright",
-    partOfSpeech: "adj.",
-    partOfSpeechCn: "形容词",
-    meaning: "明亮的、聪明的。注意比较级和最高级。",
-    changes: [
-      { label: "比较级", value: "brighter" },
-      { label: "最高级", value: "brightest" }
-    ]
-  },
-  go: {
-    term: "go",
-    partOfSpeech: "v.",
-    partOfSpeechCn: "动词",
-    meaning: "去、走。是不规则动词。",
-    changes: [
-      { label: "过去式", value: "went" },
-      { label: "过去分词", value: "gone" },
-      { label: "第三人称单数", value: "goes" }
-    ]
-  }
-};
+const api = require("../../../utils/api");
+const guard = require("../../../utils/guard");
 
-function fallback(term) {
-  return {
-    term: term || "word",
-    partOfSpeech: "n.",
-    partOfSpeechCn: "名词",
-    meaning: "这个词还没有加入本地词库，后续会接入 AI 词汇解释。",
-    changes: [
-      { label: "复数", value: "通常加 s，特殊变化需要单独记忆" }
-    ]
-  };
+function submittedWords(terms) {
+  return String(terms || "")
+    .split(/[，,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 Page({
   data: {
-    result: dictionary.carry,
-    term: "carry"
+    deletingId: "",
+    entries: [],
+    failures: [],
+    loading: false,
+    message: "",
+    submitting: false,
+    terms: ""
   },
-  setTerm(event) {
-    this.setData({ term: event.detail.value });
+  async onShow() {
+    const student = await guard.requireRole("student", this);
+    if (student) await this.loadEntries();
   },
-  lookup() {
-    const key = this.data.term.trim().toLowerCase();
-    this.setData({ result: dictionary[key] || fallback(this.data.term.trim()) });
+  setTerms(event) {
+    this.setData({ terms: event.detail.value });
+  },
+  async loadEntries() {
+    this.setData({ loading: true });
+    try {
+      const response = await api.listStudentVocabulary();
+      this.setData({ entries: response.result?.entries || [] });
+    } catch (error) {
+      this.setData({ message: error.message || "词汇本暂时无法加载。" });
+    } finally {
+      this.setData({ loading: false });
+    }
+  },
+  async addVocabulary() {
+    const words = submittedWords(this.data.terms);
+    if (!words.length || this.data.submitting) {
+      if (!words.length) wx.showToast({ title: "请先输入英文单词", icon: "none" });
+      return;
+    }
+    this.setData({ submitting: true, failures: [], message: "" });
+    try {
+      const response = await api.createStudentVocabulary({ words });
+      const failures = response.result?.failures || [];
+      this.setData({
+        terms: "",
+        failures,
+        message: failures.length ? "部分单词没有生成词卡。" : ""
+      });
+      await this.loadEntries();
+    } catch (error) {
+      this.setData({ message: error.message || "词卡暂时无法生成。" });
+    } finally {
+      this.setData({ submitting: false });
+    }
+  },
+  removeVocabulary(event) {
+    const entryId = event.currentTarget.dataset.id;
+    if (!entryId || this.data.deletingId) return;
+    wx.showModal({
+      title: "删除词卡",
+      content: "删除后将从你的词汇本中移除这张词卡。",
+      success: async ({ confirm }) => {
+        if (!confirm) return;
+        this.setData({ deletingId: entryId, message: "" });
+        try {
+          await api.deleteStudentVocabulary(entryId);
+          await this.loadEntries();
+        } catch (error) {
+          this.setData({ message: error.message || "词卡删除失败，请稍后重试。" });
+        } finally {
+          this.setData({ deletingId: "" });
+        }
+      }
+    });
   }
 });
