@@ -22,6 +22,7 @@
     "codex:open": "scripts\\open-codex-with-api.cmd",
     "codex:launcher:install": "node scripts/install-codex-api-launcher.mjs",
     "check:api": "node scripts/run-with-env.mjs npm run check --workspace apps/api",
+    "check:student-vocabulary-wordbook": "node --test packages/db/src/vocabulary-entry.test.mjs packages/services/src/vocabulary-wordbook.test.mjs apps/api/src/vocabulary-wordbook-routes.test.mjs scripts/student-vocabulary-wordbook-miniprogram.test.mjs",
     "verify": "node scripts/run-with-env.mjs npm run check:encoding && node scripts/run-with-env.mjs npm run check:miniprogram-js && node scripts/run-with-env.mjs npm run lint --if-present && node scripts/run-with-env.mjs npm run typecheck --if-present && node scripts/run-with-env.mjs npm run test --if-present",
     "audit:reference": "node scripts/audit-reference.mjs",
     "content:markdown": "node scripts/convert-to-markdown.mjs",

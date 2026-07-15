@@ -45,6 +45,7 @@ import {
   validateAssessmentContentContext
 } from "@junhang/services";
 import { checkDatabaseStatus, persistenceOptions, requireDatabase } from "./db-status.js";
+import { cleanVocabularyEntryForStudent } from "./student-vocabulary-wordbook.js";
 import { resolveApprovedAssessmentContentContext } from "./approved-content-context.js";
 import { assessmentPageBalanceFillRatio, buildAssessmentLayoutValidation } from "./assessment-layout-validation.js";
 import { createAssessmentGenerationJobs } from "./assessment-generation-jobs.js";
@@ -965,37 +966,6 @@ function readableText(value, fallback = "") {
   const text = normalizeDisplayText(value).trim();
   if (!text || /\?{2,}/.test(text)) return fallback;
   return text;
-}
-
-function cleanVocabularyEntryForStudent(entry = {}) {
-  const card = entry.card && typeof entry.card === "object" ? entry.card : {};
-  const related = Array.isArray(card.related)
-    ? card.related
-      .map((item) => ({
-        word: readableText(item?.word),
-        part: readableText(item?.part),
-        partCn: readableText(item?.partCn),
-        meaning: readableText(item?.meaning)
-      }))
-      .filter((item) => item.word)
-    : [];
-  const examples = Array.isArray(card.examples)
-    ? card.examples.map((item) => readableText(item)).filter(Boolean)
-    : [];
-  return {
-    id: String(entry.id || ""),
-    word: readableText(entry.word || card.word, "word"),
-    card: {
-      word: readableText(card.word || entry.word, "word"),
-      phonetic: readableText(card.phonetic),
-      part: readableText(card.part),
-      partCn: readableText(card.partCn),
-      meaning: readableText(card.meaning),
-      related,
-      examples,
-      pitfall: readableText(card.pitfall)
-    }
-  };
 }
 
 function parseStructuredDisplayText(value) {
@@ -3368,9 +3338,22 @@ app.post("/api/ai/vocabulary", requireSession(config, ["student", "teacher", "cl
 
 app.post("/api/student/vocabulary", requireDatabase, requireSession(config, ["student"]), asyncRoute(async (req, res) => {
   const body = getBody(req);
+  const student = await prisma.student.findUnique({
+    where: { id: req.session.studentId },
+    select: { displayName: true, grade: true }
+  });
+  if (!student) {
+    return res.status(404).json({
+      ok: false,
+      error: "STUDENT_NOT_FOUND",
+      message: "学生信息不存在，请重新登录。"
+    });
+  }
   const { options } = await persistenceOptions({ studentId: req.session.studentId });
   const result = await addStudentVocabularyEntriesService(config, {
     studentId: req.session.studentId,
+    studentName: student.displayName,
+    grade: student.grade,
     words: body.words
   }, options);
   res.json({

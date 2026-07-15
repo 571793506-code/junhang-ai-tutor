@@ -62,6 +62,7 @@ export declare function generateVocabularyCardService(
 export declare function normalizeVocabularyWords(values?: unknown): {
   words: string[];
   rejected: string[];
+  overflow: string[];
 };
 
 export declare function addStudentVocabularyEntriesService(
