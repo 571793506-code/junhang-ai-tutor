@@ -269,6 +269,73 @@ test("buildProfileEvidencePack includes reviewed evidence and blocks provisional
   assert.equal(pack.sourceQuality.hasBlockedEvidence, true);
 });
 
+test("teacher-confirmed daily observations enter the profile draft as subject evidence without changing scores", () => {
+  const fixture = studentFixture();
+  fixture.behaviorEvents = [
+    {
+      id: "teacher_observation_1",
+      actorType: "TEACHER",
+      feature: "student-profile",
+      action: "teacher-daily-observation",
+      occurredAt: new Date("2026-07-05T10:30:00.000Z"),
+      metadata: {
+        schemaVersion: "teacher-observation-v1",
+        source: "teacher-conversation",
+        reviewStatus: "teacher_confirmed",
+        visibility: "teacher_only_pending_profile_review",
+        subjectObservations: [
+          {
+            subject: "数学",
+            observation: "分配律的深层应用仍需继续理解。",
+            nextFocus: "用同类题复盘分配与合并过程。"
+          },
+          {
+            subject: "英语",
+            observation: "字母书写任务尚未完成。",
+            nextFocus: "分段完成规范书写练习。"
+          }
+        ]
+      }
+    },
+    {
+      id: "ordinary_audit_1",
+      actorType: "TEACHER",
+      feature: "student-profile",
+      action: "draft-profile",
+      occurredAt: new Date("2026-07-05T10:35:00.000Z"),
+      metadata: { source: "audit" }
+    },
+    {
+      id: "student_audit_1",
+      actorType: "STUDENT",
+      feature: "ai-qa",
+      action: "answer-question",
+      occurredAt: new Date("2026-07-05T10:40:00.000Z"),
+      metadata: { actorRole: "student", result: "学生会话审计结果" }
+    }
+  ];
+
+  const withoutObservation = studentFixture();
+  const snapshot = buildStudentGrowthSnapshot(fixture, { periodType: "weekly", now });
+  const baseline = buildStudentGrowthSnapshot(withoutObservation, { periodType: "weekly", now });
+  const mathObservation = snapshot.profileEvidencePack.teacherObservationEvidence.find((item) => item.subject === "数学");
+  const mathFocus = snapshot.publishedView.focusSubjects.find((item) => item.subject === "数学");
+
+  assert.equal(snapshot.profileEvidencePack.teacherObservationEvidence.length, 2);
+  assert.deepEqual(snapshot.profileEvidencePack.behaviorEvidence, []);
+  assert.equal(mathObservation.id, "teacher_observation_1:0");
+  assert.equal(mathObservation.summary, "分配律的深层应用仍需继续理解。");
+  assert.equal(mathObservation.nextFocus, "用同类题复盘分配与合并过程。");
+  assert.equal(snapshot.sourceCounts.teacherObservations, 1);
+  assert.match(mathFocus.abilityObservation, /分配律/);
+  assert.match(mathFocus.nextClassAction, /分配与合并/);
+  assert.ok(snapshot.publishedView.timelinePreview.some((item) => item.id === "teacher_observation_1:0"));
+  assert.ok(snapshot.teacherReview.evidenceItems.some((item) => item.id === "teacher_observation_1:0"));
+  assert.ok(snapshot.printView.sections.evidenceCoverage.some((item) => item.title === "每日教师观察"));
+  assert.equal(snapshot.weeklyScore, baseline.weeklyScore);
+  assert.deepEqual(snapshot.mastery, baseline.mastery);
+});
+
 test("weekly profile period uses deterministic Asia Shanghai boundaries for every evidence type", () => {
   const fixture = periodBoundaryFixture([
     { id: "previous", at: "2026-07-05T15:59:59.999Z" },

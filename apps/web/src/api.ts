@@ -402,6 +402,23 @@ export async function createAssessmentGenerationJob(input: Record<string, unknow
   return readJson<{ ok: boolean; job: AssessmentGenerationJob }>(response);
 }
 
+export type AssessmentGenerationRecovery = {
+  status: "ready" | "review_required";
+  message: string;
+  steps: Array<{ id: string; status: "completed" | "failed" | "skipped"; message: string }>;
+  failure: { error: string; message: string } | null;
+  temporaryDraftAllowed: boolean;
+};
+
+export async function recoverAssessmentGenerationContext(input: Record<string, unknown>) {
+  const response = await fetch(`${API_BASE_URL}/api/assessments/generation-recovery`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(input)
+  });
+  return readJson<{ ok: boolean; recovery: AssessmentGenerationRecovery }>(response);
+}
+
 export async function listAssessmentGenerationJobs() {
   const response = await fetch(`${API_BASE_URL}/api/assessments/generation-jobs`, {
     headers: authHeaders()

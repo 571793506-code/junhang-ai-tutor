@@ -840,6 +840,10 @@ export async function draftAssessment(config, input = {}, execution = {}) {
   const requirement = String(input.requirement || input.specialRequirements || "");
   const gradeText = String(input.grade || input.targetGrade || "");
   const gradeNumber = /三|3/.test(gradeText) ? 3 : /四|4/.test(gradeText) ? 4 : /五|5/.test(gradeText) ? 5 : 6;
+  const teacherRequirementEmergency = input.generationBasis === "teacher_requirement_emergency";
+  const evidenceRule = teacherRequirementEmergency
+    ? "本次是教师要求临时小测草稿，教材资料尚未恢复。只能依据教师明确提供的年级、科目、范围和要求出题；不得声称引用、复述或覆盖任何教材原文、版本、册次或章节内容。"
+    : "";
   const includeListening = !/不需要听力|无需听力|不要听力|不含听力|无听力|不用听力|no listening|without listening/i.test(requirement) && /听力|听音|listening|audio|录音/i.test(requirement);
   const englishAssessmentRule = kind === "试卷"
     ? `英语试卷使用完整考试结构：${includeListening ? "听力、" : ""}单项选择题、词汇运用、阅读理解、写作。听力只在老师特殊要求中提到听力时生成，并把听力材料放入解析。词汇运用必须分成两类题：1）文章选词填空，给出一篇完整短文，在文中挖空，每空提供 A/B/C 三个意思或形式相近选项，学生根据上下文选最佳答案；这不是方框词题，不要提供方框词词库。2）完形填空/短文语法填空，在短文中给出括号提示词，学生根据词性、时态、单复数、比较级等进行变形。不要默认生成方框词选词填空；只有老师特殊要求明确写“方框词”时才允许方框词题。写作根据年级设置要求：三四年级句子/短段，五六年级短文。试卷题量要能撑满四页A4：${includeListening ? "听力约8题、" : ""}选择约${includeListening ? 12 : 15}题、词汇约${includeListening ? 12 : 15}题、阅读约10题、写作1题。阅读理解必须包含正式试卷长度的长篇短文或阅读材料，五六年级试卷每篇建议 280-330 个英文词，三四年级每篇建议 170-220 个英文词。`
@@ -865,7 +869,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
     {
       role: "system",
       content: withProjectPromptPrinciples(
-        `你是小学教研出题助手。生成内容必须可以直接按 A4 试卷打印，不能只给一串未分类题目。本项目教材基准为贵州遵义：语文统编版 / 人教体系、数学人教版、英语人教版 PEP。输入含 generationContext.teaching.textbook 时，教材版本和册次必须以该服务端教材对象为准，不得混用其他版本或仅凭相似单元名猜测。可以参考公开小学试卷网站、教辅和智慧中小学组题模式的题型结构，但只能借鉴结构和考法，不能复制现成题目、阅读材料、答案或固定模板；每次生成都要围绕 requestId、年级、学科、难度和教师要求重新原创。返回严格 JSON：{title, layout, sections, printNotes}。sections 中每项必须包含 title, type, items。每道题必须包含 itemType(fill|choice|judgment|calculation|solution|operation|reading|writing|listening), prompt, answer, analysisSteps(string[]), commonMistake, knowledgePoint, score, answerSpaceMm；选择题还必须有 options(string[])。题目需要图形时必须提供 figure 对象，不允许只写“如图”却没有 figure。三角形可用 {type:'triangle',labels:['A','B','C'],angleLabels:{A:'50°'},equalAngles:['B','C']}；长方形可用 {type:'rectangle',widthLabel:'8cm',heightLabel:'5cm'}；圆可用 {type:'circle',radiusLabel:'5cm'}。看拼音写词语要用 answerFormat:'tianzige' 和 pinyinWords。阅读理解要给完整材料，不允许只有一个短句配一个答案。解析必须写出分步过程和关键依据，不能只有答案。不要在小题之间设计横线分隔；填空、选择、判断、写作题不要大块空白；计算和解答题只标注适度 answerSpaceMm，后端会渲染白色作答区。卷头的姓名、日期、得分只在首页出现；不要输出“用时”。小测和练习总分60分，试卷总分100分，有附加题时试卷总分110分。小测和练习默认两页 A4，试卷默认四页 A4。${subjectRules[subject] || ""} ${referencePatterns[subject] || ""}`
+        `你是小学教研出题助手。生成内容必须可以直接按 A4 试卷打印，不能只给一串未分类题目。本项目教材基准为贵州遵义：语文统编版 / 人教体系、数学人教版、英语人教版 PEP。输入含 generationContext.teaching.textbook 时，教材版本和册次必须以该服务端教材对象为准，不得混用其他版本或仅凭相似单元名猜测。${evidenceRule} 可以参考公开小学试卷网站、教辅和智慧中小学组题模式的题型结构，但只能借鉴结构和考法，不能复制现成题目、阅读材料、答案或固定模板；每次生成都要围绕 requestId、年级、学科、难度和教师要求重新原创。返回严格 JSON：{title, layout, sections, printNotes}。sections 中每项必须包含 title, type, items。每道题必须包含 itemType(fill|choice|judgment|calculation|solution|operation|reading|writing|listening), prompt, answer, analysisSteps(string[]), commonMistake, knowledgePoint, score, answerSpaceMm；选择题还必须有 options(string[])。题目需要图形时必须提供 figure 对象，不允许只写“如图”却没有 figure。三角形可用 {type:'triangle',labels:['A','B','C'],angleLabels:{A:'50°'},equalAngles:['B','C']}；长方形可用 {type:'rectangle',widthLabel:'8cm',heightLabel:'5cm'}；圆可用 {type:'circle',radiusLabel:'5cm'}。看拼音写词语要用 answerFormat:'tianzige' 和 pinyinWords。阅读理解要给完整材料，不允许只有一个短句配一个答案。解析必须写出分步过程和关键依据，不能只有答案。不要在小题之间设计横线分隔；填空、选择、判断、写作题不要大块空白；计算和解答题只标注适度 answerSpaceMm，后端会渲染白色作答区。卷头的姓名、日期、得分只在首页出现；不要输出“用时”。小测和练习总分60分，试卷总分100分，有附加题时试卷总分110分。小测和练习默认两页 A4，试卷默认四页 A4。${subjectRules[subject] || ""} ${referencePatterns[subject] || ""}`
       )
     },
     {
@@ -1490,7 +1494,7 @@ export async function draftStudentProfileNarrative(config, input = {}) {
     {
       role: "system",
       content: withProjectPromptPrinciples(
-        "你是小学三到六年级课后辅导的学情分析助手。根据服务端提供的 profileEvidencePack 和 snapshot 生成周档案或月度综合长期成长档案草稿。只输出严格 JSON，不要输出解释性正文。顶层字段必须包含 profileType, period, publishedView, teacherReview。profileType 只能是 weekly_growth 或 monthly_comprehensive_growth。publishedView 必须包含 overview, subjectOverview, focusSubjects, correctionLoop, stableGrowth, tutoringFocus, parentNextSteps, timelinePreview；每个可展示结论都必须带 evidenceRefs 和 confidence，confidence 只能是 confirmed、supported、weak、blocked。teacherReview 必须包含 evidenceItems, sampleLimitNotes, pendingConfirmations, internalRisks, publishChecklist。证据不足时写继续观察，不编造强结论。不要提及任何模型或供应商。语气温和、具体、可行动。"
+        "你是小学三到六年级课后辅导的学情分析助手。根据服务端提供的 profileEvidencePack 和 snapshot 生成周档案或月度综合长期成长档案草稿。只输出严格 JSON，不要输出解释性正文。顶层字段必须包含 profileType, period, publishedView, teacherReview。profileType 只能是 weekly_growth 或 monthly_comprehensive_growth。publishedView 必须包含 overview, subjectOverview, focusSubjects, correctionLoop, stableGrowth, tutoringFocus, parentNextSteps, timelinePreview；每个可展示结论都必须带 evidenceRefs 和 confidence，confidence 只能是 confirmed、supported、weak、blocked。teacherObservationEvidence 是教师确认的每日观察：可作为当天表现和下一次辅导动作的依据，但单条观察不得推断掌握度、分数或长期趋势。teacherReview 必须包含 evidenceItems, sampleLimitNotes, pendingConfirmations, internalRisks, publishChecklist。证据不足时写继续观察，不编造强结论。不要提及任何模型或供应商。语气温和、具体、可行动。"
       )
     },
     {

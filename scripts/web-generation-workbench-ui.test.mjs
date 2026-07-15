@@ -50,6 +50,14 @@ test("generation workbench lets teachers select matching textbook evidence befor
   assert.match(source, /需要先完成资料索引和教师复核/);
 });
 
+test("generation workbench offers separate evidence repair and teacher-requirement emergency paths", () => {
+  assert.match(apiSource, /export async function recoverAssessmentGenerationContext/);
+  assert.match(source, /onAssessmentRecovery/);
+  assert.match(source, /修复教材依据/);
+  assert.match(source, /按教师要求生成临时草稿/);
+  assert.match(source, /generationBasis:\s*"teacher_requirement_emergency"/);
+});
+
 test("generation workbench submits independent jobs, supports cancellation, and keeps job records selectable", () => {
   assert.match(apiSource, /export async function createAssessmentGenerationJob/);
   assert.match(apiSource, /export async function listAssessmentGenerationJobs/);

@@ -35,6 +35,19 @@ test("production assessment queue runs up to five independent teacher jobs", () 
   assert.match(source, /createAssessmentGenerationJobs\(\{ concurrency:\s*5 \}\)/);
 });
 
+test("textbook recovery repairs evidence without auto-approving it", () => {
+  const recoveryRoute = routeSource('post("/api/assessments/generation-recovery"');
+  const recoveryStart = source.indexOf("async function recoverAssessmentGenerationContext");
+  const recoveryEnd = source.indexOf("\nasync function discardAssessmentGenerationJob", recoveryStart);
+  const recoverySource = source.slice(recoveryStart, recoveryEnd);
+
+  assert.match(recoveryRoute, /recoverAssessmentGenerationContext/);
+  assert.match(recoverySource, /status: prepared\.ok \? "ready" : "review_required"/);
+  assert.match(recoverySource, /temporaryDraftAllowed: !prepared\.ok/);
+  assert.match(recoverySource, /syncContentIndexToKnowledgeLibrary/);
+  assert.doesNotMatch(recoverySource, /allowedForGeneration:\s*true/);
+});
+
 test("cancelled assessment jobs do not persist draft review assets after local rendering", () => {
   const exportStart = source.indexOf("async function exportAssessmentPaperAsset");
   const exportEnd = source.indexOf("\n}\n\nfunction normalizeReviewResultForDisplay", exportStart) + 2;

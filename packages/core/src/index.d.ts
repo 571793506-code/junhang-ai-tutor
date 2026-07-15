@@ -185,6 +185,8 @@ export interface AssignmentCard {
     textbookRegion?: string;
     textbookChapterId?: string;
     textbookChapterTitle?: string;
+    generationBasis?: "textbook_reviewed" | "teacher_requirement" | "teacher_requirement_emergency";
+    recoveryReason?: string;
   } | null;
   layoutValidation?: {
     version?: string;

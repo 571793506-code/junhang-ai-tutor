@@ -87,7 +87,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 返回教师可见结构：`period`, `publishedView`, `teacherReview`, `profileEvidencePack`, `sourceCounts`, `timeline`, `narrative`。
   - 周/月档案统一使用综合成长档案模板，不提供单科独立模板入口。
   - 返回 `printView` 打印模板结构，用于教师端审查后打印、保存或后续生成 PDF。`printView.templateType=comprehensive_growth_archive`，`printView.renderingPolicy.pdfTextSource=html_template`，`printView.renderingPolicy.imagePreviewUsage=visual_reference_only`。
-  - `profileEvidencePack` 由任务、已复核批改、错题、阶段报告、课堂行为、AI 问答和语音互动组成。问答只接受服务端计算合格且精确匹配 `qa-learning-signal-v1` 的记录；教师测试、匿名或身份未确认课堂、不可用、不安全、结构异常、日期无效和 legacy 问答排除在公开证据外，并仅以最小原因摘要进入教师侧 `blockedEvidence`。
+  - `profileEvidencePack` 由任务、已复核批改、错题、阶段报告、课堂互动、AI 问答、语音互动和 `teacherObservationEvidence` 组成。通用 `BehaviorEvent` 仅作为审计与原始日志，不直接进入档案；课堂互动以受控的 `VoiceInteraction` 链路进入。`teacherObservationEvidence` 只接收 `teacher-observation-v1` 的教师确认每日观察，保留分科表现与下次辅导动作；它进入教师侧草稿、重点科目、时间线及周/月打印证据覆盖，但单条观察不得提高掌握度或分数，也不自动发布给学生或家长。问答只接受服务端计算合格且精确匹配 `qa-learning-signal-v1` 的记录；教师测试、匿名或身份未确认课堂、不可用、不安全、结构异常、日期无效和 legacy 问答排除在公开证据外，并仅以最小原因摘要进入教师侧 `blockedEvidence`。
   - 单条来源问答不能提高掌握度、分数或形成强结论；同知识点重复信号可形成 `supported` 但仍是辅助证据。教师确认的非问答证据优先，冲突进入教师复核备注。
 
 - `POST /api/students/:studentId/profile/publish`
@@ -196,6 +196,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
     "mistakeEvidence": [],
     "qaEvidence": [],
     "classroomEvidence": [],
+    "teacherObservationEvidence": [],
     "blockedEvidence": [],
     "sourceQuality": {}
   }

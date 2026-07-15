@@ -40,6 +40,7 @@ import {
   askStudentQuestion,
   cancelAssessmentGenerationJob,
   createAssessmentGenerationJob,
+  recoverAssessmentGenerationContext,
   type AssessmentGenerationJob,
   type AssessmentLayoutValidation,
   completeLearningTask,
@@ -108,7 +109,7 @@ type ProfileDraft = { studentId: string; studentName: string; snapshot: Record<s
 type ProfilePeriodType = "weekly" | "monthly";
 type TermReportDraftState = { report: StudentReportCard; teacherText: string };
 type GenerationMode = "quiz" | "practice" | "exam";
-type AssessmentRequestInput = { targetScope?: "student" | "grade"; studentId?: string; targetGrade?: string; subject?: SubjectLabel; kind?: string; difficulty?: string; requirement?: string; requestedItemCount?: number; textbookAssetId?: string; textbookTitle?: string; textbookEdition?: string; textbookSeries?: string; textbookVolume?: string; textbookRegion?: string; textbookChapterId?: string; textbookChapterTitle?: string };
+type AssessmentRequestInput = { targetScope?: "student" | "grade"; studentId?: string; targetGrade?: string; subject?: SubjectLabel; kind?: string; difficulty?: string; requirement?: string; requestedItemCount?: number; textbookAssetId?: string; textbookTitle?: string; textbookEdition?: string; textbookSeries?: string; textbookVolume?: string; textbookRegion?: string; textbookChapterId?: string; textbookChapterTitle?: string; generationBasis?: "textbook_reviewed" | "teacher_requirement" | "teacher_requirement_emergency"; recoveryReason?: string };
 type AssessmentDraftRef = { assignmentId: string; title: string; subject: SubjectLabel; kind: string; targetLabel: string; request: AssessmentRequestInput; draftAsset?: PrintAssetLink; layoutValidation?: AssessmentLayoutValidation; reviewStatus: "pending" | "accepted" | "rejected" };
 type StudentRegistrationInput = { displayName: string; grade: string; className: string; school: string; textbookVersion: string; guardianName: string; guardianPhone: string; notes: string; enrollmentStatus: string };
 type ReviewUploadSource = "taskEvidence" | "grading";
@@ -748,7 +749,7 @@ function App() {
     }
   }
 
-  async function createAssessment(input?: AssessmentRequestInput) {
+  function buildAssessmentRequest(input?: AssessmentRequestInput) {
     const student = students.find((item) => item.id === input?.studentId) || currentStudent;
     const targetScope = input?.targetScope || "student";
     const kind = input?.kind || "小测";
@@ -771,19 +772,43 @@ function App() {
       textbookVolume: input?.textbookVolume,
       textbookRegion: input?.textbookRegion,
       textbookChapterId: input?.textbookChapterId,
-      textbookChapterTitle: input?.textbookChapterTitle
+      textbookChapterTitle: input?.textbookChapterTitle,
+      generationBasis: input?.generationBasis,
+      recoveryReason: input?.recoveryReason
     };
+    return { request, student };
+  }
+
+  async function createAssessment(input?: AssessmentRequestInput) {
+    const { request, student } = buildAssessmentRequest(input);
+    const titleSuffix = request.generationBasis === "teacher_requirement_emergency" ? "临时草稿" : "草稿";
     try {
       const response = await createAssessmentGenerationJob({
         ...request,
-        grade: input?.targetGrade || student.grade,
+        grade: request.targetGrade || student.grade,
         studentName: student.displayName,
-        title: `${student.displayName}${subject}${kind}草稿`
+        title: `${student.displayName}${request.subject}${request.kind}${titleSuffix}`
       });
       setAssessmentJobs((jobs) => [response.job, ...jobs.filter((job) => job.id !== response.job.id)]);
-      setSync({ busy: false, ok: true, message: `${kind}生成任务已加入队列，可继续创建其他任务。` });
+      setSync({ busy: false, ok: true, message: `${request.kind}${request.generationBasis === "teacher_requirement_emergency" ? "临时" : ""}生成任务已加入队列，可继续创建其他任务。` });
     } catch (error) {
       setSync({ busy: false, ok: false, message: `生成失败：${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
+  async function recoverAssessmentGeneration(input?: AssessmentRequestInput) {
+    const { request, student } = buildAssessmentRequest(input);
+    setSync({ busy: true, ok: null, message: "正在修复教材索引和资料依据..." });
+    try {
+      const response = await recoverAssessmentGenerationContext({
+        ...request,
+        grade: request.targetGrade || student.grade,
+        studentName: student.displayName
+      });
+      await refreshTeacherOps();
+      setSync({ busy: false, ok: response.recovery.status === "ready", message: response.recovery.message });
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `教材依据修复失败：${error instanceof Error ? error.message : String(error)}` });
     }
   }
 
@@ -1224,7 +1249,7 @@ function App() {
       </aside>
       <main className="main">
         <header className="topbar"><div><p className="eyebrow">{roleLabel(role)}</p><h1>{role === "teacher" ? `教师端 · ${currentModule}` : role === "student" ? `学生端 · ${currentModule}` : `课堂平板 · ${currentModule}`}</h1></div><ApiSyncStatus state={syncForRole(sync, role)} /></header>
-        {role === "teacher" ? <TeacherWorkspace activeModule={currentModule} ai={ai} assessmentJobs={assessmentJobs} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentCancel={cancelAssessmentGeneration} onAssessmentJobSelect={selectAssessmentGenerationJob} onAssessmentDraftSelect={(assignment) => {
+        {role === "teacher" ? <TeacherWorkspace activeModule={currentModule} ai={ai} assessmentJobs={assessmentJobs} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentCancel={cancelAssessmentGeneration} onAssessmentJobSelect={selectAssessmentGenerationJob} onAssessmentRecovery={recoverAssessmentGeneration} onAssessmentDraftSelect={(assignment) => {
           const draft = assessmentDraftRefFromAssignment(assignment);
           if (draft) {
             setLatestAssessmentDraft(draft);
@@ -1305,6 +1330,7 @@ function TeacherWorkspace({
   onAssessment,
   onAssessmentCancel,
   onAssessmentJobSelect,
+  onAssessmentRecovery,
   onAssessmentDraftSelect,
   onAssessmentReject,
   onContentIndexRebuild,
@@ -1366,6 +1392,7 @@ function TeacherWorkspace({
   onAssessment: (input: AssessmentRequestInput) => void;
   onAssessmentCancel: (jobId: string) => void;
   onAssessmentJobSelect: (job: AssessmentGenerationJob) => void;
+  onAssessmentRecovery: (input: AssessmentRequestInput) => Promise<void>;
   onAssessmentDraftSelect: (assignment: AssignmentCard) => void;
   onAssessmentReject: (assignmentId: string) => void;
   onContentIndexRebuild: () => void;
@@ -1414,6 +1441,7 @@ function TeacherWorkspace({
 }) {
   const [selectedStudentId, setSelectedStudentId] = useState(students[0]?.id || "");
   const [generationStudentId, setGenerationStudentId] = useState(students[0]?.id || "");
+  const [isAssessmentRecoveryBusy, setIsAssessmentRecoveryBusy] = useState(false);
   const [taskSubject, setTaskSubject] = useState<SubjectLabel>("英语");
   const [taskMinutes, setTaskMinutes] = useState(12);
   const [taskRequirement, setTaskRequirement] = useState("复习今日错题，完成英语词汇订正和 2 个例句。");
@@ -1612,22 +1640,44 @@ function TeacherWorkspace({
     "排版要求：学生卷不得出现答案；解析卷必须包含答案、步骤和易错提醒；数学保留过程书写区，英语写词/造句/中译英使用四线格，语文阅读和作文扩大作答区域。",
     `教师补充：${assessmentRequirement}`
   ].filter(Boolean).join("\n");
-  const submitAssessmentDraft = () => {
+  const assessmentSubmissionInput = (emergency = false): AssessmentRequestInput => {
     const requestedItemCount = generationMode === "exam" ? undefined : Number.parseInt(assessmentQuestionCount, 10);
-    onAssessment({
+    const requirement = buildAssessmentRequirement();
+    return {
       targetScope: generationTargetScope,
       studentId: generationTargetScope === "student" ? generationSelectedStudent?.id : undefined,
       targetGrade: generationTargetGrade,
       subject: assessmentSubject,
       kind: assessmentKind,
       difficulty: assessmentDifficulty,
-      requirement: buildAssessmentRequirement(),
+      requirement: emergency
+        ? `${requirement}\n生成依据：教师要求临时小测。教材资料待恢复，不得声称引用教材原文。`
+        : requirement,
       requestedItemCount: Number.isFinite(requestedItemCount) ? requestedItemCount : undefined,
-      textbookAssetId: generationTextbookContext?.asset.id,
-      textbookTitle: generationTextbookContext?.asset.title,
-      textbookChapterId: generationTextbookContext?.chapter?.id,
-      textbookChapterTitle: generationTextbookContext?.chapter?.title || (generationMode === "quiz" ? assessmentQuizChapter : undefined)
-    });
+      ...(emergency ? {
+        generationBasis: "teacher_requirement_emergency" as const,
+        recoveryReason: quizGenerationBlockReason || "TEACHER_CONFIRMED_SCOPE"
+      } : {
+        textbookAssetId: generationTextbookContext?.asset.id,
+        textbookTitle: generationTextbookContext?.asset.title,
+        textbookChapterId: generationTextbookContext?.chapter?.id,
+        textbookChapterTitle: generationTextbookContext?.chapter?.title || (generationMode === "quiz" ? assessmentQuizChapter : undefined)
+      })
+    };
+  };
+  const submitAssessmentDraft = () => {
+    onAssessment(assessmentSubmissionInput());
+  };
+  const submitTeacherRequirementEmergencyDraft = () => {
+    onAssessment(assessmentSubmissionInput(true));
+  };
+  const recoverAssessmentEvidence = async () => {
+    setIsAssessmentRecoveryBusy(true);
+    try {
+      await onAssessmentRecovery(assessmentSubmissionInput());
+    } finally {
+      setIsAssessmentRecoveryBusy(false);
+    }
   };
   const generationFeedbackVisible = activeAssessmentJobs.length > 0 || sync.message.includes("生成任务") || sync.message.startsWith("生成失败");
   const generationFeedbackMessage = activeAssessmentJobs[0]?.message || sync.message;
@@ -1833,7 +1883,7 @@ function TeacherWorkspace({
           </div>
           <label className="field-label">教师补充要求<textarea className="wide-textarea compact-textarea" value={assessmentRequirement} onChange={(event) => setAssessmentRequirement(event.target.value)} /></label>
           <p className="context-note"><ShieldCheck size={15} />排版规则已按当前题型自动优化：学生卷不出现答案，解析卷包含答案、步骤和易错提醒。</p>
-          {generationMode === "quiz" ? <div className="generation-source-card"><strong>教材资料状态<StatusPill label={hasApprovedTextbookSource ? "可生成" : generationTextbookContext ? "待复核" : "待选择"} status={hasApprovedTextbookSource ? "ready" : "pending"} /></strong><span>{generationTextbookContext ? hasApprovedTextbookSource ? `已找到 ${matchingApprovedTextbookSources.length} 份已复核且允许生成的资料。` : "当前教材需要先完成资料索引和教师复核，审核通过后即可生成小测。" : `当前年级和科目下有 ${generationTextbookAssets.length} 本可选教材。`}</span>{!hasApprovedTextbookSource ? <div className="button-row"><button className="secondary-button" onClick={() => onOpenModule("教材资料")} type="button"><BookOpen size={16} />前往教材资料审核</button></div> : null}</div> : null}
+          {generationMode === "quiz" ? <div className="generation-source-card"><strong>教材资料状态<StatusPill label={hasApprovedTextbookSource ? "可生成" : generationTextbookContext ? "待复核" : "待选择"} status={hasApprovedTextbookSource ? "ready" : "pending"} /></strong><span>{generationTextbookContext ? hasApprovedTextbookSource ? `已找到 ${matchingApprovedTextbookSources.length} 份已复核且允许生成的资料。` : "当前教材需要先完成资料索引和教师复核，审核通过后即可生成小测。" : `当前年级和科目下有 ${generationTextbookAssets.length} 本可选教材。`}</span>{!hasApprovedTextbookSource ? <div className="button-row"><button className="secondary-button" disabled={isAssessmentRecoveryBusy} onClick={() => void recoverAssessmentEvidence()} type="button"><RefreshCw size={16} />{isAssessmentRecoveryBusy ? "正在修复教材依据" : "修复教材依据"}</button><button className="primary-button" onClick={submitTeacherRequirementEmergencyDraft} type="button"><ShieldCheck size={16} />按教师要求生成临时草稿</button><button className="secondary-button" onClick={() => onOpenModule("教材资料")} type="button"><BookOpen size={16} />前往教材资料审核</button></div> : null}</div> : null}
           {quizGenerationBlockReason ? <p className="context-note blocked"><ShieldCheck size={15} />{quizGenerationBlockReason}</p> : null}
         </main>
 
@@ -1864,14 +1914,14 @@ function TeacherWorkspace({
             const draft = assessmentDraftRefFromJob(job);
             const canCancel = ["queued", "generating", "exporting_draft", "cancelling"].includes(job.status);
             return <div className={`generation-job-record-card ${job.status}`} key={job.id}>
-              <button aria-pressed={Boolean(draft && latestAssessmentDraft?.assignmentId === job.assignmentId)} className={`generation-record-card ${draft && latestAssessmentDraft?.assignmentId === job.assignmentId ? "active" : ""}`} disabled={!draft} onClick={() => draft && onAssessmentJobSelect(job)} type="button"><strong>{job.kind}<StatusPill label={jobStatus.label} status={jobStatus.tone} /></strong><b>{job.title}</b><span>{job.subject} · {job.targetLabel || "所选对象"}</span><span>{job.message}</span></button>
+              <button aria-pressed={Boolean(draft && latestAssessmentDraft?.assignmentId === job.assignmentId)} className={`generation-record-card ${draft && latestAssessmentDraft?.assignmentId === job.assignmentId ? "active" : ""}`} disabled={!draft} onClick={() => draft && onAssessmentJobSelect(job)} type="button"><strong>{job.kind}<StatusPill label={jobStatus.label} status={jobStatus.tone} /></strong><b>{job.title}</b><span>{job.subject} · {job.targetLabel || "所选对象"}{job.request.generationBasis === "teacher_requirement_emergency" ? " · 教师要求临时草稿" : ""}</span><span>{job.message}</span></button>
               {canCancel ? <button className="secondary-button danger-button generation-job-cancel" disabled={job.status === "cancelling"} onClick={() => onAssessmentCancel(job.id)} type="button"><CircleX size={16} />取消本次生成</button> : null}
             </div>;
           })}
           {recentGenerationAssignments.length ? recentGenerationAssignments.map((assignment) => {
             const reviewLabel = assignment.draftReviewStatus === "accepted" ? "已确认" : assignment.draftReviewStatus === "rejected" ? "已否决" : assignment.draftReviewStatus === "pending_teacher_review" ? "待审查" : "未导出草稿";
             const status = assignment.draftReviewStatus === "accepted" ? "ready" : assignment.draftReviewStatus === "rejected" ? "blocked" : "pending";
-            return <button aria-pressed={latestAssessmentDraft?.assignmentId === assignment.id} className={`generation-record-card ${latestAssessmentDraft?.assignmentId === assignment.id ? "active" : ""}`} disabled={!assignment.draftReviewAsset} key={assignment.id} onClick={() => onAssessmentDraftSelect(assignment)} type="button"><strong>{assignment.kind}<StatusPill label={reviewLabel} status={status} /></strong><b>{assignment.title}</b><span>{assignment.subject} · {assignment.audit?.itemCount ? `${assignment.audit.itemCount}题` : assignment.status}</span></button>;
+            return <button aria-pressed={latestAssessmentDraft?.assignmentId === assignment.id} className={`generation-record-card ${latestAssessmentDraft?.assignmentId === assignment.id ? "active" : ""}`} disabled={!assignment.draftReviewAsset} key={assignment.id} onClick={() => onAssessmentDraftSelect(assignment)} type="button"><strong>{assignment.kind}<StatusPill label={reviewLabel} status={status} /></strong><b>{assignment.title}</b><span>{assignment.subject} · {assignment.audit?.itemCount ? `${assignment.audit.itemCount}题` : assignment.status}{assignment.draftRequest?.generationBasis === "teacher_requirement_emergency" ? " · 教师要求临时草稿" : ""}</span></button>;
           }) : recentAssessmentJobs.length ? null : <p className="review-empty">暂无生成进度记录。</p>}
         </div>
         {visiblePrintAssets.length ? <div className="print-asset-list">{visiblePrintAssets.map((asset) => <a key={asset.id} href={asset.url} target="_blank" rel="noreferrer"><FileText size={16} />{asset.title}</a>)}</div> : null}

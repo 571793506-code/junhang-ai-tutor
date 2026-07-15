@@ -4043,12 +4043,15 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     ? input.contentContext
     : matchApprovedContentContext(input, []);
   const generationBudget = resolveAssessmentGenerationBudget(input, config);
+  const generationBasis = input.generationBasis || (input.textbookAssetId ? "textbook_reviewed" : "teacher_requirement");
   const generationContext = {
     ...(input.generationContext && typeof input.generationContext === "object" ? input.generationContext : {}),
     request: {
       requirement: input.requirement || input.specialRequirements || "",
       kind: input.kind || null,
-      difficulty: input.difficulty || null
+      difficulty: input.difficulty || null,
+      generationBasis,
+      recoveryReason: input.recoveryReason || null
     },
     target: {
       subject: input.subject || null,
@@ -4076,7 +4079,11 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
       textbookChapterId: input.textbookChapterId || null,
       textbookChapterTitle: input.textbookChapterTitle || null,
       knowledgePoints: input.knowledgePoints || [],
-      contentContext
+      contentContext,
+      evidence: {
+        basis: generationBasis,
+        recoveryReason: input.recoveryReason || null
+      }
     },
     output: {
       paper: "A4",
@@ -4091,7 +4098,8 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     rules: {
       repairRequired: true,
       hideProviderFromStudentAndParent: true,
-      noDefaultBonusQuestions: true
+      noDefaultBonusQuestions: true,
+      teacherRequirementEmergency: generationBasis === "teacher_requirement_emergency"
     }
   };
   const modelInput = {
@@ -4228,6 +4236,8 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
               textbookRegion: input.textbookRegion || null,
               textbookChapterId: input.textbookChapterId || null,
               textbookChapterTitle: input.textbookChapterTitle || null,
+              generationBasis,
+              recoveryReason: input.recoveryReason || null,
               generationContext,
               contentContext,
               providerId: result.providerId,

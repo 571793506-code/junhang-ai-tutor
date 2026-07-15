@@ -45,6 +45,7 @@ import { checkDatabaseStatus, persistenceOptions, requireDatabase } from "./db-s
 import { resolveApprovedAssessmentContentContext } from "./approved-content-context.js";
 import { assessmentPageBalanceFillRatio, buildAssessmentLayoutValidation } from "./assessment-layout-validation.js";
 import { createAssessmentGenerationJobs } from "./assessment-generation-jobs.js";
+import { prepareTeacherRequirementEmergency, TEACHER_REQUIREMENT_EMERGENCY } from "./assessment-generation-emergency.js";
 import { isNoMarkdownDocumentsError, summarizeContentIndexState } from "./content-index-state.js";
 import { createEncodingGuardMiddleware } from "./encoding-guard-middleware.js";
 import { loadRuntimeConfig, publicConfigSummary } from "./env.js";
@@ -1228,7 +1229,9 @@ function mapAssignment(assignment, options = {}) {
           textbookVolume: readableText(metadata.textbookVolume || generationTeaching.textbookVolume || generationTextbook.volume, "") || undefined,
           textbookRegion: readableText(metadata.textbookRegion || generationTeaching.textbookRegion || generationTextbook.region, "") || undefined,
           textbookChapterId: readableText(metadata.textbookChapterId || generationTeaching.textbookChapterId, "") || undefined,
-          textbookChapterTitle: readableText(metadata.textbookChapterTitle || generationTeaching.textbookChapterTitle, "") || undefined
+          textbookChapterTitle: readableText(metadata.textbookChapterTitle || generationTeaching.textbookChapterTitle, "") || undefined,
+          generationBasis: readableText(metadata.generationBasis || generationContext.request?.generationBasis, "") || undefined,
+          recoveryReason: readableText(metadata.recoveryReason || generationContext.request?.recoveryReason, "") || undefined
         }
       : null,
     layoutValidation: metadata.layoutValidation || null,
@@ -3417,6 +3420,8 @@ function assessmentContentContextFailure(contentContext, contentContextValidatio
 
 async function prepareAssessmentDraftInput(req) {
   const input = assessmentDraftInputFromRequest(req);
+  const emergency = prepareTeacherRequirementEmergency(input);
+  if (emergency) return emergency;
   const database = await checkDatabaseStatus();
   const contentContext = database.ok
     ? await resolveApprovedAssessmentContentContext(prisma, input)
@@ -3439,6 +3444,7 @@ async function prepareAssessmentDraftInput(req) {
     input.knowledgePoints = textbookContext.knowledgePoints || input.knowledgePoints || [];
   }
   input.contentContext = contentContext;
+  input.generationBasis = input.textbookAssetId ? "textbook_reviewed" : "teacher_requirement";
   return { ok: true, input };
 }
 
@@ -3447,17 +3453,111 @@ function assessmentGenerationJobRequest(input = {}) {
   for (const key of [
     "targetScope", "studentId", "targetGrade", "subject", "kind", "difficulty", "requirement", "requestedItemCount",
     "textbookAssetId", "textbookTitle", "textbookEdition", "textbookSeries", "textbookVolume", "textbookRegion",
-    "textbookChapterId", "textbookChapterTitle"
+    "textbookChapterId", "textbookChapterTitle", "generationBasis", "recoveryReason"
   ]) {
     if (input[key] != null && input[key] !== "") request[key] = input[key];
   }
   return request;
 }
 
+async function recoverAssessmentGenerationContext(req) {
+  const steps = [];
+  const textbookScriptPath = path.resolve(workspaceRoot, "scripts/scan-textbook-assets.mjs");
+  const textbookImportScriptPath = path.resolve(workspaceRoot, "scripts/import-textbook-assets.mjs");
+  try {
+    await execFileAsync(process.execPath, [textbookScriptPath, "--write"], {
+      cwd: workspaceRoot,
+      env: { ...process.env, TEXTBOOK_ROOT: config.TEXTBOOK_ROOT || process.env.TEXTBOOK_ROOT || "" },
+      windowsHide: true,
+      maxBuffer: 1024 * 1024 * 8
+    });
+    await execFileAsync(process.execPath, [textbookImportScriptPath], {
+      cwd: workspaceRoot,
+      env: { ...process.env },
+      windowsHide: true,
+      maxBuffer: 1024 * 1024 * 8
+    });
+    steps.push({ id: "textbook-rescan", status: "completed", message: "教材索引已重扫。" });
+  } catch (error) {
+    steps.push({ id: "textbook-rescan", status: "failed", message: `教材重扫失败：${error instanceof Error ? error.message : String(error)}` });
+  }
+
+  const contentIndexDir = "exports/content-index";
+  const contentIndexPath = path.resolve(workspaceRoot, contentIndexDir, "index.json");
+  let index = null;
+  try {
+    const contentScriptPath = path.resolve(workspaceRoot, "scripts/build-content-index.mjs");
+    await execFileAsync(process.execPath, [contentScriptPath, "exports/markdown-ingestion", "--out", contentIndexDir], {
+      cwd: workspaceRoot,
+      env: { ...process.env },
+      windowsHide: true,
+      maxBuffer: 1024 * 1024 * 8
+    });
+    index = readContentIndexRaw(contentIndexPath);
+    steps.push({ id: "content-index", status: "completed", message: "教学资料索引已重建。" });
+  } catch (error) {
+    steps.push({ id: "content-index", status: "failed", message: `资料索引重建失败：${error instanceof Error ? error.message : String(error)}` });
+  }
+
+  if (index && summarizeContentIndexState(index).available) {
+    try {
+      const sync = await syncContentIndexToKnowledgeLibrary(index, req.session.teacherId);
+      steps.push({ id: "knowledge-sync", status: "completed", message: `资料库已同步：${sync.sourceCount} 个来源。` });
+    } catch (error) {
+      steps.push({ id: "knowledge-sync", status: "failed", message: `资料库同步失败：${error instanceof Error ? error.message : String(error)}` });
+    }
+  } else {
+    steps.push({ id: "knowledge-sync", status: "skipped", message: "没有可同步的普通教学资料，未自动创建或批准资料来源。" });
+  }
+
+  const recoveryInput = assessmentDraftInputFromRequest(req);
+  const prepared = recoveryInput.textbookAssetId
+    ? await prepareAssessmentDraftInput(req)
+    : {
+        ok: false,
+        failure: {
+          error: "TEXTBOOK_ASSET_REQUIRED",
+          message: "教材索引已完成重扫，请在生成页重新选择教材和章节后再次检查。"
+        }
+      };
+  const failure = prepared.ok ? null : prepared.failure;
+  return {
+    status: prepared.ok ? "ready" : "review_required",
+    message: prepared.ok
+      ? "教材依据已恢复，可按教材生成小测。"
+      : "教材资料已完成可修复步骤，但仍需教师审核资料，或改用教师要求临时小测草稿。",
+    steps,
+    failure: failure ? { error: failure.error, message: failure.message } : null,
+    temporaryDraftAllowed: !prepared.ok
+  };
+}
+
 async function discardAssessmentGenerationJob(assignmentId, draftAssetId) {
   if (draftAssetId) await prisma.generatedAsset.delete({ where: { id: draftAssetId } }).catch(() => {});
   if (assignmentId) await prisma.assignment.delete({ where: { id: assignmentId } }).catch(() => {});
 }
+
+app.post("/api/assessments/generation-recovery", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  const scopedInput = assessmentDraftInputFromRequest(req);
+  if (scopedInput.studentId && !(await assertTeacherStudentScope(req, res, scopedInput.studentId))) return;
+  if (scopedInput.generationBasis === TEACHER_REQUIREMENT_EMERGENCY) {
+    return res.status(400).json({ ok: false, error: "EMERGENCY_DRAFT_RECOVERY_NOT_APPLICABLE", message: "教师要求临时小测不需要教材修复，请直接创建草稿。" });
+  }
+  const recovery = await recoverAssessmentGenerationContext(req);
+  await auditEvent(req, {
+    studentId: scopedInput.studentId || null,
+    feature: "assessment",
+    action: "recover-generation-context",
+    metadata: {
+      kind: scopedInput.kind || null,
+      subject: scopedInput.subject || null,
+      status: recovery.status,
+      stepStates: recovery.steps.map((step) => ({ id: step.id, status: step.status })),
+      failure: recovery.failure?.error || null
+    }
+  });
+  res.json({ ok: true, recovery });
+}));
 
 app.post("/api/assessments/draft", requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
   const scopedInput = assessmentDraftInputFromRequest(req);
@@ -3483,6 +3583,8 @@ app.post("/api/assessments/draft", requireSession(config, ["teacher"]), asyncRou
       textbookRegion: input.textbookRegion || null,
       textbookChapterId: input.textbookChapterId || null,
       textbookChapterTitle: input.textbookChapterTitle || null,
+      generationBasis: input.generationBasis || null,
+      recoveryReason: input.recoveryReason || null,
       audioSource: input.audioSource || null
     }
   });
@@ -3544,6 +3646,8 @@ app.post("/api/assessments/generation-jobs", requireDatabase, requireSession(con
             textbookRegion: input.textbookRegion || null,
             textbookChapterId: input.textbookChapterId || null,
             textbookChapterTitle: input.textbookChapterTitle || null,
+            generationBasis: input.generationBasis || null,
+            recoveryReason: input.recoveryReason || null,
             audioSource: input.audioSource || null
           }
         });

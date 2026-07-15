@@ -71,6 +71,7 @@ export function buildProfileEvidencePack(student, options = {}) {
     confidence: "confirmed"
   }));
   const { qaEvidence, classroomEvidence } = buildInteractionEvidence(qaSessions, voiceInteractions, { blockedEvidence });
+  const teacherObservationEvidence = buildTeacherObservationEvidence(behaviorEvents);
 
   return {
     period,
@@ -86,6 +87,7 @@ export function buildProfileEvidencePack(student, options = {}) {
     mistakeEvidence,
     qaEvidence,
     classroomEvidence,
+    teacherObservationEvidence,
     reportEvidence: reports.map((report) => ({
       id: report.id,
       type: "report",
@@ -94,14 +96,7 @@ export function buildProfileEvidencePack(student, options = {}) {
       summary: report.content || "",
       confidence: "confirmed"
     })),
-    behaviorEvidence: behaviorEvents.map((event) => ({
-      id: event.id,
-      type: "behavior",
-      title: event.action || event.feature || "学习行为",
-      at: isoDate(event.occurredAt),
-      summary: event.result || "",
-      confidence: "supported"
-    })),
+    behaviorEvidence: [],
     blockedEvidence,
     sourceQuality: {
       taskCount: taskEvidence.length,
@@ -109,9 +104,10 @@ export function buildProfileEvidencePack(student, options = {}) {
       mistakeCount: mistakeEvidence.length,
       qaCount: qaSessionCount({ qaEvidence }),
       classroomCount: classroomEvidence.length,
+      teacherObservationCount: teacherObservationSourceCount(teacherObservationEvidence),
       hasBlockedEvidence: blockedEvidence.length > 0,
-      hasSparseEvidence: taskEvidence.length + gradingEvidence.length + mistakeEvidence.length + qaSessionCount({ qaEvidence }) + classroomEvidence.length < 3,
-      missingSubjects: SUBJECTS.filter((subject) => !hasSubjectEvidence(subject, { taskEvidence, gradingEvidence, mistakeEvidence, qaEvidence, classroomEvidence }))
+      hasSparseEvidence: taskEvidence.length + gradingEvidence.length + mistakeEvidence.length + qaSessionCount({ qaEvidence }) + classroomEvidence.length + teacherObservationSourceCount(teacherObservationEvidence) < 3,
+      missingSubjects: SUBJECTS.filter((subject) => !hasSubjectEvidence(subject, { taskEvidence, gradingEvidence, mistakeEvidence, qaEvidence, classroomEvidence, teacherObservationEvidence }))
     }
   };
 }
@@ -128,7 +124,8 @@ export function buildStudentGrowthSnapshot(student, options = {}) {
     reports: pack.reportEvidence.length,
     behaviorEvents: pack.behaviorEvidence.length,
     qaSessions: qaSessionCount(pack),
-    voiceInteractions: pack.classroomEvidence.length
+    voiceInteractions: pack.classroomEvidence.length,
+    teacherObservations: teacherObservationSourceCount(pack.teacherObservationEvidence)
   };
 
   return {
@@ -295,7 +292,7 @@ li { margin: 2px 0; }
 function buildPublishedView(pack) {
   const periodName = pack.period.type === "weekly" ? "本周" : "本月";
   const focusSubjects = buildFocusSubjects(pack);
-  const evidenceTotal = pack.taskEvidence.length + pack.gradingEvidence.length + pack.mistakeEvidence.length + qaSessionCount(pack) + pack.classroomEvidence.length;
+  const evidenceTotal = pack.taskEvidence.length + pack.gradingEvidence.length + pack.mistakeEvidence.length + qaSessionCount(pack) + pack.classroomEvidence.length + teacherObservationSourceCount(pack.teacherObservationEvidence);
   const sparse = evidenceTotal < 3;
   return {
     periodType: pack.period.type,
@@ -363,8 +360,8 @@ function buildPrintView(pack, publishedView) {
     }
   };
 
+  sections.evidenceCoverage = buildEvidenceCoverageForPrint(pack);
   if (!weekly) {
-    sections.evidenceCoverage = buildEvidenceCoverageForPrint(pack);
     sections.subjectAbilityMap = buildSubjectAbilityMapForPrint(pack, publishedView);
     sections.commonCauseAnalysis = buildCommonCauseAnalysisForPrint(publishedView);
     sections.learningProcess = buildLearningProcessForPrint(pack, publishedView);
@@ -394,7 +391,8 @@ function buildTeacherReview(pack) {
       ...pack.gradingEvidence,
       ...pack.mistakeEvidence,
       ...pack.qaEvidence,
-      ...pack.classroomEvidence
+      ...pack.classroomEvidence,
+      ...pack.teacherObservationEvidence
     ],
     sampleLimitNotes: buildSampleLimitNotes(pack),
     conflictNotes,
@@ -438,6 +436,11 @@ function buildEvidenceCoverageForPrint(pack) {
       title: "错题与订正",
       text: `${pack.mistakeEvidence.length} 条错题记录用于定位错因和后续复练方向。`,
       evidence: "错题记录"
+    },
+    {
+      title: "每日教师观察",
+      text: `${teacherObservationSourceCount(pack.teacherObservationEvidence)} 条教师确认的每日观察用于补充当天的学习过程和后续辅导重点。`,
+      evidence: "教师确认观察记录"
     },
     {
       title: "问答与课堂互动",
@@ -494,6 +497,13 @@ function buildLearningProcessForPrint(pack, publishedView) {
       title: "批改反馈吸收",
       text: pack.gradingEvidence.length ? `已有 ${pack.gradingEvidence.length} 条教师确认批改记录，下一步看孩子能否说出修改依据。` : "批改反馈记录较少，后续先积累教师确认记录。",
       evidence: "教师确认批改记录"
+    },
+    {
+      title: "每日教师观察",
+      text: teacherObservationSourceCount(pack.teacherObservationEvidence)
+        ? `已有 ${teacherObservationSourceCount(pack.teacherObservationEvidence)} 条教师确认的每日观察，用于跟进当天表现和下次课动作。`
+        : "每日教师观察记录仍需继续积累。",
+      evidence: "教师确认观察记录"
     },
     {
       title: "错题复盘过程",
@@ -750,7 +760,7 @@ function filterByPeriod(items, period, getDate) {
 
 function buildFocusSubjects(pack) {
   const nonQaCounts = new Map();
-  [...pack.gradingEvidence, ...pack.mistakeEvidence, ...pack.taskEvidence, ...pack.classroomEvidence].forEach((item) => {
+  [...pack.gradingEvidence, ...pack.mistakeEvidence, ...pack.taskEvidence, ...pack.classroomEvidence, ...pack.teacherObservationEvidence].forEach((item) => {
     nonQaCounts.set(item.subject, (nonQaCounts.get(item.subject) || 0) + 1);
   });
   const qaSourcesBySubject = new Map();
@@ -777,6 +787,7 @@ function buildFocusSubjects(pack) {
     const nonQaRefs = nonQaSubjectRefs(pack, subject);
     const mistake = pack.mistakeEvidence.find((item) => item.subject === subject);
     const grading = pack.gradingEvidence.find((item) => item.subject === subject);
+    const observation = pack.teacherObservationEvidence.find((item) => item.subject === subject);
     if (!nonQaRefs.length) {
       return {
         subject,
@@ -790,12 +801,12 @@ function buildFocusSubjects(pack) {
     }
     return {
       subject,
-      whyFocus: mistake?.title || grading?.knowledgePoints?.[0] || `${subject}学习记录需要继续跟进`,
-      evidenceSummary: grading?.summary || mistake?.cause || "结合本周期学习记录继续观察。",
-      abilityObservation: mistake?.cause || grading?.summary || "先看完成过程和订正质量。",
-      nextClassAction: mistake?.nextPractice || "下次课先复盘本周期记录中的关键问题。",
+      whyFocus: observation?.title || mistake?.title || grading?.knowledgePoints?.[0] || `${subject}学习记录需要继续跟进`,
+      evidenceSummary: observation?.summary || grading?.summary || mistake?.cause || "结合本周期学习记录继续观察。",
+      abilityObservation: observation?.summary || mistake?.cause || grading?.summary || "先看完成过程和订正质量。",
+      nextClassAction: observation?.nextFocus || mistake?.nextPractice || "下次课先复盘本周期记录中的关键问题。",
       evidenceRefs: refs,
-      confidence: nonQaRefs.length >= 2 ? "supported" : "weak"
+      confidence: observation ? "confirmed" : nonQaRefs.length >= 2 ? "supported" : "weak"
     };
   });
 }
@@ -850,7 +861,8 @@ function buildTimelinePreview(pack) {
     ...pack.taskEvidence,
     ...pack.gradingEvidence,
     ...pack.mistakeEvidence,
-    ...pack.classroomEvidence
+    ...pack.classroomEvidence,
+    ...pack.teacherObservationEvidence
   ].map((item) => ({
       id: item.id,
       type: item.type,
@@ -914,7 +926,7 @@ function buildSampleLimitNotes(pack) {
 
 function buildMastery(pack) {
   return Object.fromEntries(SUBJECTS.map((subject) => {
-    const refs = nonQaSubjectRefs(pack, subject);
+    const refs = masterySubjectRefs(pack, subject);
     return [subject, Math.min(95, 62 + refs.length * 8)];
   }));
 }
@@ -930,7 +942,8 @@ function collectRefs(pack) {
     ...pack.gradingEvidence.map((item) => item.id),
     ...pack.mistakeEvidence.map((item) => item.id),
     ...uniqueQaSourceRefs(pack.qaEvidence),
-    ...pack.classroomEvidence.map((item) => item.id)
+    ...pack.classroomEvidence.map((item) => item.id),
+    ...pack.teacherObservationEvidence.map((item) => item.id)
   ];
 }
 
@@ -940,17 +953,25 @@ function subjectRefs(pack, subject) {
     ...pack.gradingEvidence.filter((item) => item.subject === subject).map((item) => item.id),
     ...pack.mistakeEvidence.filter((item) => item.subject === subject).map((item) => item.id),
     ...uniqueQaSourceRefs(pack.qaEvidence.filter((item) => item.subject === subject)),
-    ...pack.classroomEvidence.filter((item) => item.subject === subject).map((item) => item.id)
+    ...pack.classroomEvidence.filter((item) => item.subject === subject).map((item) => item.id),
+    ...pack.teacherObservationEvidence.filter((item) => item.subject === subject).map((item) => item.id)
   ];
 }
 
 function nonQaSubjectRefs(pack, subject) {
+  return [...pack.taskEvidence, ...pack.gradingEvidence, ...pack.mistakeEvidence, ...pack.classroomEvidence, ...pack.teacherObservationEvidence]
+    .filter((item) => item.subject === subject)
+    .map((item) => item.id);
+}
+
+function masterySubjectRefs(pack, subject) {
   return [...pack.taskEvidence, ...pack.gradingEvidence, ...pack.mistakeEvidence, ...pack.classroomEvidence]
     .filter((item) => item.subject === subject)
     .map((item) => item.id);
 }
 
 function subjectEvidenceConfidence(pack, subject) {
+  if (pack.teacherObservationEvidence.some((item) => item.subject === subject)) return "confirmed";
   if (nonQaSubjectRefs(pack, subject).length) return "supported";
   return pack.qaEvidence.some((item) => item.subject === subject && item.sessionCount >= 2) ? "supported" : "weak";
 }
@@ -966,6 +987,48 @@ function uniqueQaSourceRefs(qaEvidence) {
 
 function hasSubjectEvidence(subject, groups) {
   return Object.values(groups).some((items) => items.some((item) => item.subject === subject));
+}
+
+function buildTeacherObservationEvidence(events) {
+  return events.flatMap((event) => {
+    const metadata = safeObject(event.metadata);
+    if (
+      event.actorType !== "TEACHER"
+      || event.feature !== "student-profile"
+      || event.action !== "teacher-daily-observation"
+      || metadata.schemaVersion !== "teacher-observation-v1"
+      || metadata.source !== "teacher-conversation"
+      || metadata.reviewStatus !== "teacher_confirmed"
+      || metadata.visibility !== "teacher_only_pending_profile_review"
+      || !Array.isArray(metadata.subjectObservations)
+    ) return [];
+
+    return metadata.subjectObservations.flatMap((item, index) => {
+      const observation = safeObject(item);
+      const subject = subjectFromValue(observation.subject);
+      const summary = teacherObservationText(observation.observation);
+      if (!subject || !summary) return [];
+      return [{
+        id: `${event.id}:${index}`,
+        sourceEventId: event.id,
+        type: "teacher_observation",
+        subject,
+        title: `${subject}教师观察`,
+        at: isoDate(event.occurredAt),
+        summary,
+        nextFocus: teacherObservationText(observation.nextFocus),
+        confidence: "confirmed"
+      }];
+    });
+  });
+}
+
+function teacherObservationSourceCount(evidence) {
+  return new Set((Array.isArray(evidence) ? evidence : []).map((item) => item.sourceEventId).filter(Boolean)).size;
+}
+
+function teacherObservationText(value) {
+  return typeof value === "string" ? value.trim().slice(0, 600) : "";
 }
 
 function withEvidence(text, evidenceRefs, confidence) {
