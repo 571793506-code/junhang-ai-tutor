@@ -452,6 +452,41 @@ test("draftAssessmentService forwards the authoritative textbook baseline in gen
   });
 });
 
+test("draftAssessmentService keeps teacher-requirement emergency quizzes free of textbook claims", async () => {
+  let runnerInput = null;
+  await draftAssessmentService(
+    {},
+    {
+      subject: "数学",
+      kind: "小测",
+      grade: "五年级",
+      requirement: "围绕小数乘法，重点检查竖式和小数点位置。",
+      generationBasis: "teacher_requirement_emergency",
+      recoveryReason: "APPROVED_CONTENT_CONTEXT_NOT_FOUND",
+      contentContext: {
+        available: false,
+        approvedOnly: false,
+        approvedSourceCount: 0,
+        matchedCount: 0,
+        reason: "TEACHER_REQUIREMENT_EMERGENCY",
+        matches: []
+      }
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async (_config, input) => {
+        runnerInput = input;
+        return fakeAssessmentResult();
+      }
+    }
+  );
+
+  assert.equal(runnerInput.generationContext.rules.teacherRequirementEmergency, true);
+  assert.equal(runnerInput.generationContext.teaching.textbook.assetId, null);
+  assert.equal(runnerInput.generationContext.teaching.contentContext.reason, "TEACHER_REQUIREMENT_EMERGENCY");
+  assert.equal(runnerInput.generationContext.request.recoveryReason, "APPROVED_CONTENT_CONTEXT_NOT_FOUND");
+});
+
 test("assessment blueprint scales an English quiz to the requested item count", () => {
   const result = buildAssessmentBlueprintCheck({
     subject: "英语",

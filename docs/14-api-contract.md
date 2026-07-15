@@ -41,6 +41,8 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 | AI 问答 | `POST /api/ai/qa`、`POST /api/classroom/voice-qa` | 学生端、课堂平板复用同一服务端问答契约 | 最多一次 Terra 低推理调用，Terra 不可用时零调用且绝不调用 Sol；学习者响应不含学习信号或内部路由元数据 | `check --workspace apps/api`、`check:miniprogram-js` |
 | 今日任务 | `POST /api/teacher/tasks`、`GET /api/bootstrap` | 教师创建，学生/平板从启动数据或任务接口读取 | 未发布或教师未确认内容不进入学生/平板可见区 | `check --workspace apps/api` |
 | 组卷草稿 | `POST /api/assessments/draft` | 教师端提交要求、结构化题量和章节，服务层生成并修复草稿 | 草稿只供教师复核，不直接展示给学生/家长 | `check:content-context`、`check:teaching-content` |
+| 组卷任务队列 | `POST/GET /api/assessments/generation-jobs`、`POST /api/assessments/generation-jobs/:jobId/cancel` | Web、小程序和教师工作台复用同一任务状态、取消和草稿链接 | 队列最多并行运行 5 个独立任务；取消只清理未完成草稿，不影响其他任务 | `check:content-context`、`check --workspace apps/api` |
+| 教材修复与临时小测 | `POST /api/assessments/generation-recovery`、`POST /api/assessments/draft` | 各端先复用教材重扫和重新校验；教师可在证据仍不足时创建临时小测草稿 | 修复不自动批准资料；临时草稿只能由教师要求生成，且不声称教材依据 | `check:content-context`、`check:encoding` |
 | 草稿审查导出 | `POST /api/assessments/:assignmentId/draft-export` | 教师端打开审查 PDF | 返回审查资产、`pending_teacher_review` 和统一 `layoutValidation` | `check:content-context` |
 | 教师复核 | `POST /api/assessments/:assignmentId/draft-review` | 教师端确认或拒绝草稿 | 只有 `layoutValidation.ok=true` 的草稿才允许 `accept` | `check:content-context` |
 | 正式导出 | `POST /api/assessments/:assignmentId/print-export` | 教师确认后导出学生卷和解析卷 | 学生卷不包含答案；解析卷只给教师或授权场景 | `check:content-context`、`check:teaching-content` |
@@ -225,6 +227,15 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 ## 生成与批改
 
+- `POST /api/assessments/generation-recovery`
+  - 仅教师且数据库可用时调用。服务端依次重扫教材资产、重建普通教学资料索引、同步资料库，再重新执行教材与已复核来源校验。
+  - 返回 `recovery.status`（`ready` 或 `review_required`）、各修复步骤、失败摘要和 `temporaryDraftAllowed`。没有重新选择真实 `textbookAssetId` 或资料仍未审核时，不能把修复结果视为可按教材生成。
+  - 此接口不会创建资料来源、自动设置 `allowedForGeneration` 或绕过版本、系列、册次、年级和学科匹配；需要教师在资料审核流程中确认后，教材小测才能恢复。
+
+- `POST /api/assessments/generation-jobs`、`GET /api/assessments/generation-jobs`、`POST /api/assessments/generation-jobs/:jobId/cancel`
+  - 教师端异步创建、查询和取消组卷任务；队列最多并行运行 5 个独立任务。每个任务保留自己的教材上下文、草稿导出、复核状态和最终导出记录。
+  - 创建任务与同步草稿共用同一请求校验和教师复核门禁。取消只作用于当前教师自己的未完成任务，并在取消后清理该任务尚未完成的草稿资产。
+
 - `POST /api/assessments/draft`
   - 生成小测、练习、试卷草稿。
   - 关键字段：`kind`, `grade`, `subject`, `difficulty`, `requirement`。
@@ -232,6 +243,8 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 贵州遵义教材基准固定为：语文统编版 / 人教体系、数学人教版、英语人教版 PEP。教材小测或任何带教材标题、章节 ID、章节标题的请求必须提交真实 `textbookAssetId`；不能只传 `textbookChapterTitle` 让模型猜教材。
   - 服务端以 `TextbookAsset` 为权威，派生 `textbookEdition`, `textbookSeries`, `textbookVolume`, `textbookRegion` 并写入 `generationContext.teaching.textbook`。客户端同名字段不能覆盖服务端教材记录。
   - 未绑定任何教材字段的综合测评仍可作为通用生成请求；一旦声明教材或章节，若教材不符合遵义基准，返回 `422 ASSESSMENT_TEXTBOOK_BASELINE_MISMATCH`；若没有已复核且允许生成的同学科、年级且不与版本、系列和册次冲突的资料，返回 `422 ASSESSMENT_CONTENT_CONTEXT_REQUIRED`，且不调用模型。
+  - 教材证据暂未恢复时，教师可显式传 `generationBasis=teacher_requirement_emergency` 创建临时草稿。它只允许 `kind=小测`，并且必须包含年级、科目和明确 `requirement`；请求不得携带任何 `textbook*` 字段，否则返回 `422 EMERGENCY_DRAFT_TEXTBOOK_FIELDS_NOT_ALLOWED`。
+  - 临时草稿的 `generationContext` 会标记 `teacherRequirementEmergency=true`，模型只能依据教师范围出题，不得声称引用教材原文、版本、册次或章节。它仍须走异步任务、PDF 草稿审查和教师确认后正式导出，不能替代教材资料审核。
   - 可选字段：`generationProfile`, `assessmentTotalTimeoutMs` / `generationTimeoutMs`, `assessmentMaxTokens` / `generationMaxTokens`。其中 timeout 控制最多等待多久，maxTokens 控制模型最大输出长度；预算耗尽后服务层返回可复核动态兜底草稿，不继续等待后续模型 fallback。
   - 默认生成预算由服务层按场景推导：E2E/联调可显式传短预算；小测使用 `quiz-standard`，默认 120s / 16000 tokens；普通练习使用 `practice-standard`，默认 150s / 16000 tokens；试卷和个性化练习使用 `formal-full`，默认 240s / 24000 tokens。小测/练习的 2 个紧凑分区单区最多 8000 tokens，试卷的 4 个分区按默认预算各 6000 tokens。
   - `check:content-context` 中的低预算 E2E 已降级为 `link-guard`，只验证资料上下文、预算退出、教师复核和 PDF 导出链路，不作为生成内容质量验收。

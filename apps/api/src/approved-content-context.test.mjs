@@ -200,20 +200,21 @@ test("approved content resolver rejects any textbook intent without an asset bef
   assert.equal(sourceQueryCount, 0);
 });
 
-test("assessment draft route resolves server-side context and blocks missing textbook evidence", () => {
+test("assessment draft route reuses server-side context preparation and blocks missing textbook evidence", () => {
   const routeStart = serverSource.indexOf('app.post("/api/assessments/draft"');
   const routeEnd = serverSource.indexOf("app.post(", routeStart + 1);
   const routeSource = serverSource.slice(routeStart, routeEnd === -1 ? serverSource.length : routeEnd);
+  const prepareStart = serverSource.indexOf("async function prepareAssessmentDraftInput");
+  const prepareEnd = serverSource.indexOf("\nfunction assessmentGenerationJobRequest", prepareStart);
+  const preparationSource = serverSource.slice(prepareStart, prepareEnd === -1 ? serverSource.length : prepareEnd);
 
-  assert.match(routeSource, /resolveApprovedAssessmentContentContext/);
-  assert.match(routeSource, /validateAssessmentContentContext/);
-  assert.match(routeSource, /ASSESSMENT_CONTENT_CONTEXT_REQUIRED/);
-  assert.match(routeSource, /contentContext\.reason === "TEXTBOOK_ASSET_REQUIRED"/);
-  assert.match(routeSource, /contentContextValidation\.error === "TEXTBOOK_ASSET_REQUIRED"/);
-  assert.match(routeSource, /error:\s*[\s\S]{0,200}"TEXTBOOK_ASSET_REQUIRED"/);
+  assert.match(routeSource, /prepareAssessmentDraftInput\(req\)/);
   assert.match(routeSource, /res\.status\(422\)/);
-  assert.match(routeSource, /contentContext/);
-  assert.match(routeSource, /textbookContext/);
+  assert.match(preparationSource, /resolveApprovedAssessmentContentContext/);
+  assert.match(preparationSource, /validateAssessmentContentContext/);
+  assert.match(preparationSource, /assessmentContentContextFailure/);
+  assert.match(preparationSource, /contentContext/);
+  assert.match(preparationSource, /textbookContext/);
 });
 
 test("textbook list hides stale non-edupdf records even before import cleanup", () => {
