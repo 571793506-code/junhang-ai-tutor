@@ -1,4 +1,6 @@
-# Student Vocabulary Wordbook Implementation Plan
+# Student Vocabulary Wordbook Implementation Plan (Superseded)
+
+> **Status:** Superseded on 2026-07-16 by `../specs/2026-07-16-student-english-dictionary-design.md`. Do not execute this plan. It is retained only as implementation history.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
