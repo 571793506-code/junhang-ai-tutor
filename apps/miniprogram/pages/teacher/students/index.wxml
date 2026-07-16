@@ -14,7 +14,7 @@
     <input class="input" placeholder="班级，例如：三年级晚辅A班" value="{{draft.className}}" data-field="className" bindinput="setDraft" />
     <input class="input" placeholder="家长姓名" value="{{draft.guardianName}}" data-field="guardianName" bindinput="setDraft" />
     <input class="input" placeholder="家长电话" type="number" value="{{draft.guardianPhone}}" data-field="guardianPhone" bindinput="setDraft" />
-    <input class="input" placeholder="贵州遵义教材基准" value="{{draft.textbookVersion}}" data-field="textbookVersion" bindinput="setDraft" />
+    <input class="input" placeholder="教材版本，例如：人教版" value="{{draft.textbookVersion}}" data-field="textbookVersion" bindinput="setDraft" />
     <textarea class="textarea" placeholder="学习重点或入班备注" value="{{draft.notes}}" data-field="notes" bindinput="setDraft" />
     <button class="button" loading="{{creating}}" bindtap="createStudent">登记并生成专属码</button>
     <text wx:if="{{createMessage}}" class="subtitle">{{createMessage}}</text>
