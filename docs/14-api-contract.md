@@ -403,3 +403,14 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 - Web 教师端默认显示登录校验页，通过 `POST /api/teacher-login` 后才能进入终端控制、学生权限、任务生成、试卷批改和档案计划。
 - 课堂平板端保留设备绑定入口，根据设备绑定码进入对应平板状态。
 - 为了方便演示，页面可以保留“示例账号进入”按钮；该按钮也必须调用真实登录接口，不能绕过权限校验。
+
+## 2026-07-16 学生共享英语词典
+
+- `POST /api/student/dictionary/query`
+  - 仅接受已登录学生会话，请求为 `{ "word": "carried" }`。
+  - 查询不接收或保存 `studentId`、学生姓名、年级、个人历史或个人笔记。
+  - 缓存命中直接返回共享词条；未命中时生成、校验并写入共享缓存。
+  - 成功响应为 `{ "ok": true, "result": { "entry": student-dictionary-entry-v1 } }`。
+  - 非英文输入返回 `400 DICTIONARY_WORD_INVALID`。
+  - 模型失败、结构不完整或共享缓存不可用返回通用 `503 DICTIONARY_QUERY_UNAVAILABLE`。
+  - 响应不得包含供应商、模型名、prompt、raw、模型运行 ID、数据库 ID 或缓存状态。

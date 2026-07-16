@@ -387,7 +387,7 @@ test("QA routes use server-confirmed actor context and response cleaners", () =>
   const source = readFileSync(new URL("./server.js", import.meta.url), "utf8");
   const qaRoute = source.slice(
     source.indexOf('app.post("/api/ai/qa"'),
-    source.indexOf('app.post("/api/ai/vocabulary"')
+    source.indexOf('app.post("/api/student/dictionary/query"')
   );
   const classroomRoute = source.slice(
     source.indexOf('app.post("/api/classroom/voice-qa"'),
@@ -412,9 +412,11 @@ test("QA routes use server-confirmed actor context and response cleaners", () =>
 
 test("Web QA response types expose only learner-visible route fields", () => {
   const source = readFileSync(new URL("../../../apps/web/src/api.ts", import.meta.url), "utf8");
+  const dictionaryTypeIndex = source.indexOf("export type StudentDictionaryEntry");
+  const vocabularyTypeIndex = source.indexOf("export type VocabularyCard");
   const qaType = source.slice(
     source.indexOf("export async function askStudentQuestion"),
-    source.indexOf("export type VocabularyCard")
+    dictionaryTypeIndex >= 0 ? dictionaryTypeIndex : vocabularyTypeIndex
   );
   const classroomType = source.slice(
     source.indexOf("export async function askClassroomVoice"),

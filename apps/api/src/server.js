@@ -32,20 +32,17 @@ import {
   updateStudentAccessStatus
 } from "@junhang/db";
 import {
-  addStudentVocabularyEntriesService,
   answerStudentQuestionService,
-  deleteStudentVocabularyEntryService,
   dictationSpeechService,
   draftAssessmentService,
   draftTeacherTaskService,
-  generateVocabularyCardService,
   gradeSubmissionService,
-  listStudentVocabularyEntriesService,
   matchApprovedContentContext,
+  queryStudentDictionaryService,
   validateAssessmentContentContext
 } from "@junhang/services";
 import { checkDatabaseStatus, persistenceOptions, requireDatabase } from "./db-status.js";
-import { cleanVocabularyEntryForStudent } from "./student-vocabulary-wordbook.js";
+import { cleanStudentDictionaryEntry } from "./student-dictionary-response.js";
 import { resolveApprovedAssessmentContentContext } from "./approved-content-context.js";
 import { assessmentPageBalanceFillRatio, buildAssessmentLayoutValidation } from "./assessment-layout-validation.js";
 import { createAssessmentGenerationJobs } from "./assessment-generation-jobs.js";
@@ -3308,81 +3305,21 @@ app.post("/api/ai/qa", requireSession(config, ["student", "teacher", "classroom"
   res.json({ ok: true, result: cleanQaResultForClient(result) });
 }));
 
-app.post("/api/ai/vocabulary", requireSession(config, ["student", "teacher", "classroom"]), asyncRoute(async (req, res) => {
-  const input = getBody(req);
-  const session = req.session;
-  if (session?.role === "student") {
-    const scopeError = assertStudentOwnsRequest({ session }, input.studentId);
-    if (scopeError) return res.status(403).json(scopeError);
-  }
-  if (session?.role === "teacher" && input.studentId) {
-    if (!(await teacherCanAccessStudent(session.teacherId, input.studentId))) {
-      return forbidden(res, "TEACHER_STUDENT_SCOPE_MISMATCH", "当前教师无权访问该学生。");
-    }
-  }
-  if (session?.role === "classroom" && input.studentId) {
-    if (!(await assertClassroomStudentScope({ session }, res, input.studentId))) return;
-  }
-  const { options, persistence } = await persistenceOptions(input);
-  const result = await generateVocabularyCardService(config, input, options);
-  res.json({
-    ok: true,
-    persistence,
-    result: {
-      available: Boolean(result.available),
-      card: result.card,
-      persisted: result.persisted || {}
-    }
-  });
-}));
-
-app.post("/api/student/vocabulary", requireDatabase, requireSession(config, ["student"]), asyncRoute(async (req, res) => {
+app.post("/api/student/dictionary/query", requireDatabase, requireSession(config, ["student"]), asyncRoute(async (req, res) => {
   const body = getBody(req);
-  const student = await prisma.student.findUnique({
-    where: { id: req.session.studentId },
-    select: { displayName: true, grade: true }
-  });
-  if (!student) {
-    return res.status(404).json({
+  const result = await queryStudentDictionaryService(config, { word: body.word });
+  if (!result.ok) {
+    const status = result.error === "DICTIONARY_WORD_INVALID" ? 400 : 503;
+    return res.status(status).json({
       ok: false,
-      error: "STUDENT_NOT_FOUND",
-      message: "学生信息不存在，请重新登录。"
+      error: result.error,
+      message: result.message
     });
   }
-  const { options } = await persistenceOptions({ studentId: req.session.studentId });
-  const result = await addStudentVocabularyEntriesService(config, {
-    studentId: req.session.studentId,
-    studentName: student.displayName,
-    grade: student.grade,
-    words: body.words
-  }, options);
   res.json({
     ok: true,
-    result: {
-      entries: result.entries.map(cleanVocabularyEntryForStudent),
-      failures: result.failures
-    }
+    result: { entry: cleanStudentDictionaryEntry(result.entry) }
   });
-}));
-
-app.get("/api/student/vocabulary", requireDatabase, requireSession(config, ["student"]), asyncRoute(async (req, res) => {
-  const entries = await listStudentVocabularyEntriesService({ studentId: req.session.studentId });
-  res.json({ ok: true, result: { entries: entries.map(cleanVocabularyEntryForStudent) } });
-}));
-
-app.delete("/api/student/vocabulary/:entryId", requireDatabase, requireSession(config, ["student"]), asyncRoute(async (req, res) => {
-  const deleted = await deleteStudentVocabularyEntryService({
-    studentId: req.session.studentId,
-    entryId: req.params.entryId
-  });
-  if (!deleted) {
-    return res.status(404).json({
-      ok: false,
-      error: "VOCABULARY_ENTRY_NOT_FOUND",
-      message: "词卡不存在或已删除。"
-    });
-  }
-  res.json({ ok: true, result: { entryId: req.params.entryId } });
 }));
 
 app.post("/api/teacher/tasks", requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
