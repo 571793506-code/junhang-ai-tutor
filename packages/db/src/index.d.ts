@@ -19,9 +19,13 @@ export declare function createDictationTask(input: Record<string, unknown>, opti
 export declare function createReadingTask(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
 export declare function recordVoiceInteraction(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
 export declare function recordQaSession(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
-export declare function recordVocabularyRecord(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
-export declare function upsertVocabularyEntry(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
-export declare function listStudentVocabularyEntries(studentId: string, options?: { prisma?: PrismaClient }): Promise<unknown>;
-export declare function deleteStudentVocabularyEntry(studentId: string, entryId: string, options?: { prisma?: PrismaClient }): Promise<boolean>;
+export declare function findDictionaryEntryByTerm(
+  term: string,
+  options?: { prisma?: PrismaClient }
+): Promise<any>;
+export declare function upsertDictionaryEntryWithAliases(
+  input: Record<string, any>,
+  options?: { prisma?: PrismaClient }
+): Promise<any>;
 export declare function createAssignmentDraft(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
 export declare function recordSubmissionGrading(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;

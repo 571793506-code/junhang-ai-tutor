@@ -426,62 +426,6 @@ export async function recordQaSession(
   });
 }
 
-export async function recordVocabularyRecord(
-  input,
-  { prisma = defaultPrisma } = {}
-) {
-  return prisma.vocabularyRecord.create({
-    data: {
-      studentId: input.studentId,
-      term: input.term,
-      content: input.content || {}
-    }
-  });
-}
-
-export async function upsertVocabularyEntry(
-  input,
-  { prisma = defaultPrisma } = {}
-) {
-  return prisma.vocabularyEntry.upsert({
-    where: {
-      studentId_word: {
-        studentId: input.studentId,
-        word: input.word
-      }
-    },
-    create: {
-      studentId: input.studentId,
-      word: input.word,
-      card: input.card
-    },
-    update: {
-      card: input.card
-    }
-  });
-}
-
-export async function listStudentVocabularyEntries(
-  studentId,
-  { prisma = defaultPrisma } = {}
-) {
-  return prisma.vocabularyEntry.findMany({
-    where: { studentId },
-    orderBy: { updatedAt: "desc" }
-  });
-}
-
-export async function deleteStudentVocabularyEntry(
-  studentId,
-  entryId,
-  { prisma = defaultPrisma } = {}
-) {
-  const result = await prisma.vocabularyEntry.deleteMany({
-    where: { id: entryId, studentId }
-  });
-  return result.count > 0;
-}
-
 export async function recordBehaviorEvent(
   input,
   { prisma = defaultPrisma } = {}

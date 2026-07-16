@@ -106,7 +106,6 @@ model Student {
   dictations           DictationSession[]
   qaSessions           QaSession[]
   vocabulary           VocabularyRecord[]
-  vocabularyEntries    VocabularyEntry[]
   submissions          Submission[]
   mistakes             MistakeRecord[]
   behaviorEvents       BehaviorEvent[]
@@ -395,17 +394,24 @@ model VocabularyRecord {
   student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
 }
 
-model VocabularyEntry {
-  id        String   @id @default(cuid())
-  studentId String
-  word      String
-  card      Json
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+model DictionaryEntry {
+  id            String            @id @default(cuid())
+  headword      String            @unique
+  schemaVersion String            @default("student-dictionary-entry-v1")
+  card          Json
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  aliases       DictionaryAlias[]
+}
 
-  @@unique([studentId, word])
-  @@index([studentId, updatedAt])
+model DictionaryAlias {
+  term          String          @id
+  entryId       String
+  relationType  String
+  relationLabel String
+  entry         DictionaryEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
 }
 
 model Assignment {
