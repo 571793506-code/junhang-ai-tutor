@@ -5,7 +5,6 @@ import {
   draftAssessment,
   draftTeacherTask,
   generateSubmissionReferenceAnswers,
-  generateVocabularyCard,
   gradeSubmissionText,
   normalizeRuntimeConfig,
   reviewWithGpt55,
@@ -17,18 +16,15 @@ import { matchesTextbookEvidenceScope } from "@junhang/core";
 import {
   createAssignmentDraft,
   createLearningTask,
-  deleteStudentVocabularyEntry,
-  listStudentVocabularyEntries,
   recordModelRun,
   recordQaSession,
   recordSubmissionGrading,
-  recordVocabularyRecord,
-  recordVoiceInteraction,
-  upsertVocabularyEntry
+  recordVoiceInteraction
 } from "@junhang/db";
 import { buildQaLearningRecord, sanitizeQaAnswer } from "./qa-learning-record.js";
 
 export { buildQaLearningRecord, sanitizeQaAnswer, sanitizeQaText } from "./qa-learning-record.js";
+export * from "./student-dictionary.js";
 
 function normalizeAssessmentKind(kind) {
   const text = String(kind || "");
@@ -3973,114 +3969,6 @@ export async function answerStudentQuestionService(config, input = {}, options =
       voiceInteractionId: voiceInteraction?.id || null
     }
   };
-}
-
-export async function generateVocabularyCardService(config, input = {}, options = {}) {
-  const generateCard = options.generateCard || generateVocabularyCard;
-  const result = await generateCard(config, input);
-  const modelRun = await persistRun(result.modelRun, options);
-  const vocabularyRecord =
-    options.persist === false || options.recordVocabulary === false || !input.studentId
-      ? null
-      : await recordVocabularyRecord(
-          {
-            studentId: input.studentId,
-            term: result.card?.word || input.word,
-            content: {
-              card: result.card,
-              available: result.available,
-              modelRunId: modelRun?.id || null
-            }
-          },
-          options
-        );
-  return {
-    ...result,
-    persisted: {
-      modelRunId: modelRun?.id || null,
-      vocabularyRecordId: vocabularyRecord?.id || null
-    }
-  };
-}
-
-export function normalizeVocabularyWords(values) {
-  const seen = new Set();
-  const words = [];
-  const rejected = [];
-  const overflow = [];
-  for (const value of Array.isArray(values) ? values : []) {
-    const word = String(value || "").trim().toLowerCase();
-    if (!/^[a-z]+(?:['-][a-z]+)*$/.test(word)) {
-      if (word) rejected.push(word);
-      continue;
-    }
-    if (seen.has(word)) continue;
-    seen.add(word);
-    if (words.length >= 10) {
-      overflow.push(word);
-      continue;
-    }
-    words.push(word);
-  }
-  return { words, rejected, overflow };
-}
-
-function completeVocabularyCardForWord(word, card = {}) {
-  const expectedWord = String(word || "").trim().toLowerCase();
-  const cardWord = String(card.word || "").trim().toLowerCase();
-  const examples = Array.isArray(card.examples)
-    ? card.examples.map((item) => String(item || "").trim()).filter(Boolean)
-    : [];
-  return Boolean(
-    expectedWord &&
-    cardWord === expectedWord &&
-    String(card.phonetic || "").trim() &&
-    String(card.part || "").trim() &&
-    String(card.partCn || "").trim() &&
-    String(card.meaning || "").trim() &&
-    Array.isArray(card.related) &&
-    examples.length >= 2 &&
-    String(card.pitfall || "").trim()
-  );
-}
-
-export async function addStudentVocabularyEntriesService(config, input = {}, options = {}) {
-  const { words, rejected, overflow } = normalizeVocabularyWords(input.words);
-  const entries = [];
-  const failures = [
-    ...rejected.map((word) => ({ word, message: "请输入英文单词。" })),
-    ...overflow.map((word) => ({ word, message: "本次最多生成 10 张词卡。" }))
-  ];
-  for (const word of words) {
-    try {
-      const generated = await generateVocabularyCardService(config, {
-        word,
-        studentId: input.studentId,
-        grade: input.grade || null,
-        studentName: input.studentName || null
-      }, { ...options, recordVocabulary: false });
-      if (!generated.available || !completeVocabularyCardForWord(word, generated.card)) {
-        failures.push({ word, message: "词卡暂时无法生成，请稍后重试。" });
-        continue;
-      }
-      entries.push(await upsertVocabularyEntry({
-        studentId: input.studentId,
-        word,
-        card: generated.card
-      }, options));
-    } catch {
-      failures.push({ word, message: "词卡暂时无法生成，请稍后重试。" });
-    }
-  }
-  return { entries, failures };
-}
-
-export async function listStudentVocabularyEntriesService(input = {}, options = {}) {
-  return listStudentVocabularyEntries(input.studentId, options);
-}
-
-export async function deleteStudentVocabularyEntryService(input = {}, options = {}) {
-  return deleteStudentVocabularyEntry(input.studentId, input.entryId, options);
 }
 
 export async function draftTeacherTaskService(config, input = {}, options = {}) {

@@ -53,33 +53,16 @@ export declare function answerStudentQuestionService(
   options?: Record<string, unknown>
 ): Promise<Record<string, unknown>>;
 
-export declare function generateVocabularyCardService(
+export declare function normalizeDictionaryTerm(value: unknown): string;
+export declare function validateDictionaryDraft(
+  queryTerm: string,
+  draft: Record<string, unknown>
+): { ok: boolean; issues: string[]; card: Record<string, unknown> };
+export declare function queryStudentDictionaryService(
   config: Record<string, string | undefined>,
   input?: Record<string, unknown>,
   options?: Record<string, unknown>
 ): Promise<Record<string, unknown>>;
-
-export declare function normalizeVocabularyWords(values?: unknown): {
-  words: string[];
-  rejected: string[];
-  overflow: string[];
-};
-
-export declare function addStudentVocabularyEntriesService(
-  config: Record<string, string | undefined>,
-  input?: Record<string, unknown>,
-  options?: Record<string, unknown>
-): Promise<Record<string, unknown>>;
-
-export declare function listStudentVocabularyEntriesService(
-  input?: Record<string, unknown>,
-  options?: Record<string, unknown>
-): Promise<Record<string, unknown>>;
-
-export declare function deleteStudentVocabularyEntryService(
-  input?: Record<string, unknown>,
-  options?: Record<string, unknown>
-): Promise<boolean>;
 
 export declare function draftTeacherTaskService(
   config: Record<string, string | undefined>,
