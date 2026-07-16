@@ -60,9 +60,9 @@ export const capabilityCatalog = [
   },
   {
     id: "vocabulary-text",
-    label: "英语词汇解释",
+    label: "英语词典查询",
     providerId: "gpt56",
-    appSurface: "英语词汇助手"
+    appSurface: "英语词典"
   },
   {
     id: "task-draft",
@@ -86,13 +86,13 @@ export const capabilityCatalog = [
     id: "vocabulary-voice",
     label: "词汇发音/跟读",
     providerId: "minimax",
-    appSurface: "英语词汇助手"
+    appSurface: "英语词典"
   },
   {
     id: "spoken-practice",
     label: "口语对话",
     providerId: "minimax",
-    appSurface: "英语词汇助手"
+    appSurface: "英语词典"
   },
   {
     id: "premium-grading-review",
@@ -661,102 +661,6 @@ function hasUsableGradingQuestionStructure(parsed = {}) {
     const status = String(source.status || "").trim().toLowerCase();
     return Boolean(questionNo) && allowedStatuses.has(status);
   });
-}
-
-function normalizeVocabularyCard(input = {}, parsed = {}) {
-  const word = String(parsed.word || parsed.term || input.word || "").trim().toLowerCase();
-  const related = Array.isArray(parsed.related)
-    ? parsed.related.map((item) => ({
-        word: String(item?.word || "").trim(),
-        part: String(item?.part || item?.partOfSpeech || "").trim(),
-        partCn: String(item?.partCn || item?.partOfSpeechCn || "").trim(),
-        meaning: String(item?.meaning || "").trim()
-      })).filter((item) => item.word)
-    : [];
-  const examples = Array.isArray(parsed.examples)
-    ? parsed.examples.map((item) => String(item || "").trim()).filter(Boolean)
-    : [];
-  return {
-    word: word || "word",
-    phonetic: String(parsed.phonetic || "").trim(),
-    part: String(parsed.part || parsed.partOfSpeech || "").trim(),
-    partCn: String(parsed.partCn || parsed.partOfSpeechCn || "").trim(),
-    meaning: String(parsed.meaning || "").trim(),
-    related,
-    examples,
-    pitfall: String(parsed.pitfall || parsed.pitfalls || parsed.commonMistake || "").trim(),
-    needsTeacherReview: Boolean(parsed.needsTeacherReview ?? true),
-    aiGenerated: true
-  };
-}
-
-export async function generateVocabularyCard(config, input = {}) {
-  const snapshot = buildAiStartupSnapshot(config);
-  const provider = snapshot.providers.find((item) => item.id === "gpt56");
-  const word = String(input.word || input.term || "").trim();
-  if (provider?.status !== "ready") {
-    return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
-      card: normalizeVocabularyCard(input, {
-        word,
-        meaning: "AI 词汇生成暂时不可用，请稍后重试或交给老师补充。",
-        needsTeacherReview: true
-      }),
-      modelRun: {
-        provider: "gpt56",
-        model: provider?.model,
-        skill: "vocabulary-card",
-        inputSummary: word,
-        outputSummary: "Provider unavailable",
-        status: "SKIPPED"
-      }
-    });
-  }
-
-  const messages = [
-    {
-      role: "system",
-      content: withProjectPromptPrinciples(
-        "你是小学三到六年级英语词汇助教。根据学生输入的英文单词生成学习卡片，只返回严格 JSON，不要输出 JSON 之外的内容。字段必须为：word, phonetic, part, partCn, meaning, related, examples, pitfall, needsTeacherReview。related 是数组，每项包含 word, part, partCn, meaning；examples 给 2 个适合小学生的英文例句；pitfall 写易错点。不要提及模型或供应商。"
-      )
-    },
-    {
-      role: "user",
-      content: JSON.stringify({
-        word,
-        grade: input.grade || null,
-        studentName: input.studentName || null
-      }, null, 2)
-    }
-  ];
-
-  const result = await timedCall(() => callGpt56Chat(config, messages, {
-    temperature: 0.2,
-    responseFormat: { type: "json_object" },
-    maxTokens: 900,
-    timeoutMs: 30000,
-    reasoningEffort: "none"
-  }));
-  const text = result.body ? extractChatText(result.body) : "";
-  const parsed = parseJsonObjectText(text) || {};
-  const card = normalizeVocabularyCard(input, parsed);
-  return {
-    available: result.status === "SUCCESS",
-    providerId: "gpt56",
-    model: provider.model,
-    card,
-    raw: result.body,
-    error: result.error,
-    modelRun: {
-      provider: "gpt56",
-      model: provider.model,
-      skill: "vocabulary-card",
-      inputSummary: word,
-      outputSummary: JSON.stringify(card).slice(0, 240),
-      status: result.status,
-      latencyMs: result.latencyMs,
-      metadata: { word, grade: input.grade || null }
-    }
-  };
 }
 
 export async function draftTeacherTask(config, input = {}) {

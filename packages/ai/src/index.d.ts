@@ -199,7 +199,11 @@ export declare function callGpt56Chat(config: RuntimeConfigLike, messages: Array
 export declare function extractChatText(body: unknown): string;
 export declare function inferClassroomQaMode(question?: string): QaMode;
 export declare function answerStudentQuestion(config: RuntimeConfigLike, input?: QaQuestionInput): Promise<QaRuntimeResult>;
-export declare function generateVocabularyCard(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
+export declare function generateStudentDictionaryDraft(
+  config: RuntimeConfigLike,
+  input?: Record<string, unknown>,
+  options?: Record<string, unknown>
+): Promise<Record<string, unknown>>;
 export declare function draftTeacherTask(config: RuntimeConfigLike, input?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function draftAssessment(
   config: RuntimeConfigLike,

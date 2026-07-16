@@ -9,11 +9,11 @@ import {
   draftStudentProfileNarrative,
   draftTeacherTask,
   generateSubmissionReferenceAnswers,
-  generateVocabularyCard,
   gradeSubmissionText,
   normalizeRuntimeConfig,
   reviewWithGpt55
 } from "./runtime.js";
+import { generateStudentDictionaryDraft } from "./student-dictionary.js";
 import {
   QA_BLOCKED_ANSWER,
   QA_UNAVAILABLE_ANSWER
@@ -672,8 +672,26 @@ test("Junhang text workflows use GPT-5.6 as their primary provider", async () =>
       const payload = JSON.parse(body);
       payloads.push(payload);
       const system = String(payload.messages?.[0]?.content || "");
-      const content = system.includes("词汇助教")
-        ? JSON.stringify({ word: "study", meaning: "学习", related: [], examples: [], needsTeacherReview: true })
+      const content = system.includes("英语词典编写助手")
+        ? JSON.stringify({
+            schemaVersion: "student-dictionary-entry-v1",
+            queryTerm: "study",
+            headword: "study",
+            phonetic: "/ˈstʌdi/",
+            queryRelation: { type: "headword", label: "study 的原形" },
+            parts: [{ part: "verb", partCn: "动词", meanings: ["学习"] }],
+            forms: [],
+            wordFamily: [],
+            synonyms: [],
+            antonyms: [],
+            collocations: [],
+            examples: [
+              { sentence: "I study English.", translation: "我学习英语。" },
+              { sentence: "We study at school.", translation: "我们在学校学习。" }
+            ],
+            usageNotes: [],
+            pitfalls: []
+          })
         : system.includes("标准答案生成助手")
           ? JSON.stringify({ referenceAnswers: [], confidence: 0.8, needsTeacherReview: true })
           : system.includes("批改助手")
@@ -700,7 +718,7 @@ test("Junhang text workflows use GPT-5.6 as their primary provider", async () =>
   try {
     const results = await Promise.all([
       answerStudentQuestion(config, { question: "什么是小数？", subject: "数学" }),
-      generateVocabularyCard(config, { word: "study", grade: "五年级" }),
+      generateStudentDictionaryDraft(config, { word: "study" }),
       draftTeacherTask(config, { title: "今日任务", requirement: "复习小数" }),
       draftStudentProfileNarrative(config, { studentId: "synthetic", periodKey: "synthetic" }),
       generateSubmissionReferenceAnswers(config, { title: "合成样例", printedText: "1+1=?" }),
@@ -717,7 +735,7 @@ test("Junhang text workflows use GPT-5.6 as their primary provider", async () =>
       String(payload.messages?.[0]?.content || "").includes(marker)
     )?.reasoning_effort;
     assert.equal(effortForSystem("课后辅导助教"), "low");
-    assert.equal(effortForSystem("词汇助教"), "none");
+    assert.equal(effortForSystem("英语词典编写助手"), "none");
     assert.equal(effortForSystem("教师助手"), "low");
     assert.equal(effortForSystem("学情分析助手"), "low");
     assert.equal(effortForSystem("标准答案生成助手"), "high");
