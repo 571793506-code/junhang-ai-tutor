@@ -7,6 +7,15 @@ function safeMetadata(value) {
 
 export const TEACHER_CONFIRMED_TEXTBOOK_SCOPE = "teacher-confirmed-textbook-scope";
 
+export function mergeTeacherConfirmedTextbookScopeChapterIds(asset = {}, existingChapterIds = [], requestedChapterIds = []) {
+  const chapters = Array.isArray(safeMetadata(asset.metadata).chapters) ? safeMetadata(asset.metadata).chapters : [];
+  const validChapterIds = new Set(chapters.map((chapter) => String(chapter?.id || "").trim()).filter(Boolean));
+  return [...new Set([
+    ...(Array.isArray(existingChapterIds) ? existingChapterIds : []),
+    ...(Array.isArray(requestedChapterIds) ? requestedChapterIds : [])
+  ].map((id) => String(id || "").trim()).filter((id) => validChapterIds.has(id)))];
+}
+
 export function buildTeacherConfirmedTextbookScope(asset = {}, chapterIds = [], options = {}) {
   const metadata = safeMetadata(asset.metadata);
   const chapters = Array.isArray(metadata.chapters) ? metadata.chapters : [];

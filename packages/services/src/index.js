@@ -12,7 +12,7 @@ import {
   solEscalationEnabled
 } from "@junhang/ai";
 import { randomUUID } from "node:crypto";
-import { matchesTextbookEvidenceScope } from "@junhang/core";
+import { matchesTeacherConfirmedTextbookChapterScope, matchesTextbookEvidenceScope } from "@junhang/core";
 import {
   createAssignmentDraft,
   createLearningTask,
@@ -203,7 +203,10 @@ export function matchApprovedContentContext(input = {}, sources = []) {
       && source.licenseStatus !== "NOT_ALLOWED"
       && matchesContentDimension(input.subject, contextValues(source.subject, metadata.subjects), canonicalContentSubject)
       && matchesContentDimension(requestedGrade, contextValues(source.grade, metadata.grades), canonicalContentGrade)
-      && (!textbookBound || matchesTextbookEvidenceScope(textbookScope, source));
+      && (!textbookBound || (
+        matchesTextbookEvidenceScope(textbookScope, source)
+        && matchesTeacherConfirmedTextbookChapterScope(source, input.textbookChapterId)
+      ));
   });
   const matches = approvedSources
     .map((source) => {

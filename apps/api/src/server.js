@@ -56,7 +56,7 @@ import { filterNewReviewedMistakes } from "./grading-mistake-archive.js";
 import { hydrateQuestionDraftsFromOcr } from "./grading-workbench-question-drafts.js";
 import { resolveKnowledgeSourceId } from "./knowledge-source-id.js";
 import { buildKnowledgeSourceTextbookBinding, preserveKnowledgeSourceTextbookBinding } from "./knowledge-source-textbook-scope.js";
-import { buildTeacherConfirmedTextbookScope, TEACHER_CONFIRMED_TEXTBOOK_SCOPE } from "./textbook-generation-scope.js";
+import { buildTeacherConfirmedTextbookScope, mergeTeacherConfirmedTextbookScopeChapterIds, TEACHER_CONFIRMED_TEXTBOOK_SCOPE } from "./textbook-generation-scope.js";
 import {
   buildQaActorContext,
   cleanClassroomQaResultForClient,
@@ -1341,9 +1341,19 @@ function textbookScopeFailure(error) {
 }
 
 async function replaceTeacherConfirmedTextbookScope(asset, chapterIds, teacherId) {
-  const scope = buildTeacherConfirmedTextbookScope(asset, chapterIds, { teacherId });
-  if (!scope.ok) return scope;
   const sourceId = `ks_textbook_scope_${asset.id}`;
+  const requestedScope = buildTeacherConfirmedTextbookScope(asset, chapterIds, { teacherId });
+  if (!requestedScope.ok) return requestedScope;
+  const existing = await prisma.knowledgeSource.findUnique({
+    where: { id: sourceId },
+    select: { metadata: true }
+  });
+  const confirmedChapterIds = mergeTeacherConfirmedTextbookScopeChapterIds(
+    asset,
+    safeJson(existing?.metadata, {}).confirmedChapterIds,
+    chapterIds
+  );
+  const scope = buildTeacherConfirmedTextbookScope(asset, confirmedChapterIds, { teacherId });
   const sourceData = { ...scope.source };
   const source = await prisma.knowledgeSource.upsert({
     where: { id: sourceId },

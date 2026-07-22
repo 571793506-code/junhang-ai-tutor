@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { chapterDraftsForTextbookAsset, matchesTextbookEvidenceScope, mergeTextbookChapterDrafts } from "@junhang/core";
+import { chapterDraftsForTextbookAsset, matchesTeacherConfirmedTextbookChapterScope, matchesTextbookEvidenceScope, mergeTextbookChapterDrafts } from "@junhang/core";
 import {
   Activity,
   ArrowLeft,
@@ -1586,6 +1586,7 @@ function TeacherWorkspace({
         && source.licenseStatus !== "NOT_ALLOWED"
         && source.chunkCount > 0
         && matchesTextbookEvidenceScope(generationTextbookContext.asset, source)
+        && matchesTeacherConfirmedTextbookChapterScope(source, generationTextbookContext?.chapter?.id)
     ))
     : [], [generationTextbookContext, knowledgeSources]);
   const hasApprovedTextbookSource = matchingApprovedTextbookSources.length > 0;
@@ -1657,7 +1658,7 @@ function TeacherWorkspace({
     `生成内容：${activeGenerationMode.title}`,
     `生成依据：${activeGenerationMode.sourceLabel}`,
     `对象范围：${generationTargetScope === "student" ? generationSelectedStudent?.displayName || "所选学生" : generationTargetGrade}`,
-    `教材范围：${assessmentSourceRange}`,
+    `${generationMode === "quiz" ? "教材范围" : generationMode === "practice" ? "练习范围" : "考试范围"}：${assessmentSourceRange}`,
     `题型结构：${assessmentStructure}`,
     `题量/页数：${generationMode === "exam" ? `4 页 A4，${assessmentTotalScore}` : assessmentQuestionCount}`,
     `考试/训练目标：${generationMode === "exam" ? assessmentExamType : generationMode === "practice" ? assessmentTrainingTarget : selectedQuizChapterLabel}`,
@@ -1691,12 +1692,13 @@ function TeacherWorkspace({
       ...(emergency ? {
         generationBasis: "teacher_requirement_emergency" as const,
         recoveryReason: quizGenerationBlockReason || "TEACHER_CONFIRMED_SCOPE"
-      } : {
+      } : {}),
+      ...(generationMode === "quiz" && !emergency ? {
         textbookAssetId: generationTextbookContext?.asset.id,
         textbookTitle: generationTextbookContext?.asset.title,
         textbookChapterId: generationTextbookContext?.chapter?.id,
         textbookChapterTitle: generationTextbookContext?.chapter?.title
-      })
+      } : {})
     };
   };
   const submitAssessmentDraft = () => {
@@ -1712,6 +1714,14 @@ function TeacherWorkspace({
     } finally {
       setIsAssessmentRecoveryBusy(false);
     }
+  };
+  const confirmCurrentTextbookGenerationScope = () => {
+    if (!generationTextbookContext?.chapter) return;
+    void onConfirmTextbookGenerationScope(generationTextbookContext.asset.id, [generationTextbookContext.chapter.id]);
+  };
+  const confirmWholeTextbookGenerationScope = () => {
+    if (!generationTextbookContext || !generationTextbookChapters.length) return;
+    void onConfirmTextbookGenerationScope(generationTextbookContext.asset.id, generationTextbookChapters.map((chapter) => chapter.id));
   };
   const generationFeedbackVisible = activeAssessmentJobs.length > 0 || sync.message.includes("生成任务") || sync.message.startsWith("生成失败");
   const generationFeedbackMessage = activeAssessmentJobs[0]?.message || sync.message;
@@ -1907,7 +1917,7 @@ function TeacherWorkspace({
               }}><option value="">请选择匹配的贵州遵义教材基准</option>{generationTextbookAssets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title} · {asset.volume}</option>)}</select></label>
               : null}
             {generationMode === "quiz" && generationTextbookContext && !generationTextbookChapters.length ? <div className="context-note blocked"><span>当前教材暂无章节索引；请先补齐目录草案并核对后再按章节生成。</span><button className="secondary-button" disabled={!chapterDraftsForTextbookAsset(generationTextbookContext.asset).length} onClick={() => onSaveTextbookChapters(generationTextbookContext.asset.id, chapterDraftsForTextbookAsset(generationTextbookContext.asset))} type="button"><FileText size={16} />建立章节草案</button></div> : null}
-            <label className="wide-field">知识点 / 考查范围<input value={textbookHint || assessmentKnowledgeRange} onChange={(event) => setAssessmentKnowledgeRange(event.target.value)} /></label>
+            <label className="wide-field">知识点 / 考查范围<input value={generationMode === "quiz" ? textbookHint || assessmentKnowledgeRange : assessmentKnowledgeRange} onChange={(event) => setAssessmentKnowledgeRange(event.target.value)} /></label>
           </div>
           <div className="generation-section-box">
             <strong>{generationMode === "exam" ? "题型与分值结构" : generationMode === "practice" ? "训练结构" : "题型组成"}</strong>
@@ -1925,12 +1935,13 @@ function TeacherWorkspace({
         <aside className="generation-review-rail">
           <div className="generation-panel-head"><strong>依据与复核流程</strong><span>右侧固定展示生成依据、草稿状态和导出闸门。</span></div>
           <div className="generation-source-card"><strong>当前依据<StatusPill label="已接入" status="ready" /></strong><span>{activeGenerationMode.sourceLabel}</span></div>
-          <div className="generation-source-card"><strong>教材内容<StatusPill label={generationMode === "quiz" ? generationTextbookContext ? "已匹配" : "待选择" : textbookHint ? "已选择" : "待选择"} status={generationMode === "quiz" ? generationTextbookContext ? "ready" : "pending" : textbookHint ? "ready" : "pending"} /></strong><span>{generationMode === "quiz" ? generationTextbookContext ? `${generationTextbookContext.asset.title}${generationTextbookContext.chapter ? ` / ${generationTextbookContext.chapter.title}` : ""}` : "请选择当前年级和科目匹配的教材。" : textbookHint || "未选择教材时，服务层会按教师输入范围生成草稿。"}</span></div>
+          {generationMode === "practice" ? <div className="generation-source-card"><strong>学生学习记录<StatusPill label="已接入" status="ready" /></strong><span>学生近期错题、批改记录、任务完成和薄弱点摘要将作为本次练习依据。</span></div> : <div className="generation-source-card"><strong>教材内容<StatusPill label={generationMode === "quiz" ? generationTextbookContext ? "已匹配" : "待选择" : textbookHint ? "已选择" : "待选择"} status={generationMode === "quiz" ? generationTextbookContext ? "ready" : "pending" : textbookHint ? "ready" : "pending"} /></strong><span>{generationMode === "quiz" ? generationTextbookContext ? `${generationTextbookContext.asset.title}${generationTextbookContext.chapter ? ` / ${generationTextbookContext.chapter.title}` : ""}` : "请选择当前年级和科目匹配的教材。" : textbookHint || "未选择教材时，服务层会按教师输入范围生成草稿。"}</span></div>}
           <div className="generation-source-card"><strong>资料上下文<StatusPill label={generationMode === "quiz" ? hasApprovedTextbookSource ? "可生成" : "待复核" : contentIndex?.available ? "可用" : "待重建"} status={generationMode === "quiz" ? hasApprovedTextbookSource ? "ready" : "pending" : contentIndex?.available ? "ready" : "pending"} /></strong><span>{generationMode === "quiz" ? hasApprovedTextbookSource ? `当前教材已有 ${matchingApprovedTextbookSources.length} 份可用资料。` : "需要先完成资料索引和教师复核，审核通过后才允许生成。" : "只使用教师复核通过的资料摘要，不展示 Markdown chunk。"}</span></div>
           <div className="generation-step-card ready"><strong>1. 生成 PDF 草稿</strong><span>服务层完成结构化生成、修复和本地审查。</span></div>
           <div className="generation-step-card active"><strong>2. 教师打开审查</strong><span>先看题目、题量、页数和排版，不在页面内直接发布题面。</span></div>
           <div className="generation-step-card"><strong>3. 正式导出</strong><span>确认后才生成学生卷与答案解析卷。</span></div>
           <div className="generation-action-dock">
+            {generationMode === "quiz" && generationTextbookContext && !hasApprovedTextbookSource ? <div className="button-row generation-scope-actions">{generationTextbookContext.chapter ? <button className="secondary-button" onClick={confirmCurrentTextbookGenerationScope} type="button"><ShieldCheck size={17} />确认当前章节范围</button> : null}<button className="secondary-button" disabled={!generationTextbookChapters.length} onClick={confirmWholeTextbookGenerationScope} type="button"><ShieldCheck size={17} />确认本册全部章节范围</button></div> : null}
             <button className="primary-button" disabled={Boolean(quizGenerationBlockReason)} onClick={submitAssessmentDraft}><Printer size={17} />生成 PDF 草稿</button>
             {latestAssessmentDraft?.draftAsset ? <a className="draft-pdf-link" href={latestAssessmentDraft.draftAsset.url} target="_blank" rel="noreferrer"><FileText size={17} />打开审查 PDF</a> : <button className="secondary-button" disabled type="button"><FileText size={17} />打开审查 PDF</button>}
             {latestAssessmentDraft?.layoutValidation?.ok === false || (latestAssessmentDraft && !latestAssessmentDraft.layoutValidation) ? <p className="context-note blocked"><ShieldCheck size={15} />排版校验未通过：{latestAssessmentDraft.layoutValidation?.issues.join("；") || "缺少有效的页数和题目坐标校验，请重新导出草稿。"}</p> : null}

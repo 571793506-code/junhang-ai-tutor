@@ -43,3 +43,12 @@ test("teacher-confirmed textbook scope rejects a missing or non-baseline chapter
   assert.equal(buildTeacherConfirmedTextbookScope({ ...textbook, metadata: { chapters: [] } }).error, "TEXTBOOK_CHAPTER_INDEX_REQUIRED");
   assert.equal(buildTeacherConfirmedTextbookScope({ ...textbook, edition: "外研版", path: "D:\\textbooks\\外研版英语五年级下册.edupdf" }).error, "TEXTBOOK_BASELINE_MISMATCH");
 });
+
+test("teacher confirmations retain earlier valid chapters for the same textbook", async () => {
+  const { mergeTeacherConfirmedTextbookScopeChapterIds } = await import(moduleUrl);
+
+  assert.deepEqual(
+    mergeTeacherConfirmedTextbookScopeChapterIds(textbook, ["unit-1", "removed-unit"], ["unit-2"]),
+    ["unit-1", "unit-2"]
+  );
+});

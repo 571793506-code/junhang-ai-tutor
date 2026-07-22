@@ -155,3 +155,16 @@ test("shared textbook evidence scope requires an exact textbook asset binding", 
     metadata: { ...source.metadata, textbookAssetId: undefined }
   }), false);
 });
+
+test("teacher-confirmed textbook scopes only cover their confirmed chapters", () => {
+  assert.equal(typeof textbookBaseline.matchesTeacherConfirmedTextbookChapterScope, "function");
+  const source = {
+    sourceType: "teacher-confirmed-textbook-scope",
+    metadata: { confirmedChapterIds: ["unit-1", "unit-3"] }
+  };
+
+  assert.equal(textbookBaseline.matchesTeacherConfirmedTextbookChapterScope(source, "unit-1"), true);
+  assert.equal(textbookBaseline.matchesTeacherConfirmedTextbookChapterScope(source, "unit-2"), false);
+  assert.equal(textbookBaseline.matchesTeacherConfirmedTextbookChapterScope(source, ""), true);
+  assert.equal(textbookBaseline.matchesTeacherConfirmedTextbookChapterScope({ ...source, sourceType: "teacher-upload" }, "unit-2"), true);
+});

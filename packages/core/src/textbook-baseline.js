@@ -184,6 +184,16 @@ export function matchesTextbookEvidenceScope(textbook = {}, source = {}) {
     && matchesRequiredScope(textbookRegion, sourceRegion, normalizedRegion);
 }
 
+export function matchesTeacherConfirmedTextbookChapterScope(source = {}, chapterId = "") {
+  if (source.sourceType !== "teacher-confirmed-textbook-scope") return true;
+  const requestedChapterId = normalizedText(chapterId);
+  if (!requestedChapterId) return true;
+  const metadata = safeMetadata(source.metadata);
+  return scopeValues(metadata.confirmedChapterIds)
+    .map(normalizedText)
+    .some((confirmedChapterId) => confirmedChapterId === requestedChapterId);
+}
+
 export function matchesTextbookAssetSearch(asset = {}, search = "") {
   const query = normalizedText(search);
   if (!query) return true;

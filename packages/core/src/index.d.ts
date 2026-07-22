@@ -299,6 +299,11 @@ export declare function matchesTextbookEvidenceScope(
   }
 ): boolean;
 
+export declare function matchesTeacherConfirmedTextbookChapterScope(
+  source?: { sourceType?: string; metadata?: unknown },
+  chapterId?: string
+): boolean;
+
 export declare function matchesTextbookAssetSearch(
   asset?: Partial<TextbookAssetCard> & {
     series?: string | string[];

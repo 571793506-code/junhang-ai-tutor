@@ -91,6 +91,45 @@ test("textbook-grounded assessment is blocked without an approved match", () => 
   assert.equal(validation.error, "ASSESSMENT_CONTENT_CONTEXT_REQUIRED");
 });
 
+test("teacher-confirmed textbook evidence cannot satisfy an unconfirmed chapter", () => {
+  const result = matchApprovedContentContext(
+    {
+      subject: "数学",
+      grade: "五年级",
+      textbookAssetId: "tb-math-5a",
+      textbookEdition: "人教版",
+      textbookSeries: "人教版",
+      textbookVolume: "上册",
+      textbookRegion: "贵州遵义",
+      textbookChapterId: "unit-2",
+      textbookChapterTitle: "第二单元",
+      knowledgePoints: ["整数四则运算"]
+    },
+    [{
+      id: "scope-unit-1",
+      title: "五年级数学上册教师确认范围",
+      sourceType: "teacher-confirmed-textbook-scope",
+      subject: "数学",
+      grade: "五年级",
+      edition: "人教版",
+      volume: "上册",
+      reviewStatus: "APPROVED",
+      allowedForGeneration: true,
+      licenseStatus: "TEACHER_CONFIRMED_SCOPE",
+      metadata: {
+        textbookAssetId: "tb-math-5a",
+        curriculumSeries: "人教版",
+        curriculumRegion: "贵州遵义",
+        confirmedChapterIds: ["unit-1"]
+      },
+      chunks: [{ id: "scope-1", orderIndex: 1, text: "整数四则运算", preview: "第一单元" }]
+    }]
+  );
+
+  assert.equal(result.matchedCount, 0);
+  assert.equal(result.reason, "APPROVED_CONTENT_CONTEXT_NOT_FOUND");
+});
+
 test("any textbook intent without an asset id requires a real textbook asset", () => {
   const emptyApprovedContext = {
     available: false,

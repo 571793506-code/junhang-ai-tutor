@@ -27,6 +27,18 @@ test("generation workbench sends structured item count and chapter context", () 
   assert.doesNotMatch(source, /textbookChapterTitle:[\s\S]{0,160}assessmentQuizChapter/);
 });
 
+test("only textbook quizzes submit textbook evidence and expose scope confirmation at the action dock", () => {
+  assert.match(source, /generationMode === "quiz" && !emergency/);
+  assert.match(source, /matchesTeacherConfirmedTextbookChapterScope\(source, generationTextbookContext\?\.chapter\?\.id\)/);
+  assert.match(source, /确认当前章节范围/);
+  assert.match(source, /确认本册全部章节范围/);
+});
+
+test("personalized practice keeps its student basis independent from textbook selection", () => {
+  assert.match(source, /value=\{generationMode === "quiz" \? textbookHint \|\| assessmentKnowledgeRange : assessmentKnowledgeRange\}/);
+  assert.match(source, /generationMode === "practice" \? <div className="generation-source-card"><strong>学生学习记录/);
+});
+
 test("grade generation uses a grade-scoped title instead of the current student", () => {
   assert.match(source, /contentScope: generationMode === "quiz"/);
   assert.match(source, /const titlePrefix = request\.targetScope === "grade" \? grade : student\.displayName/);
