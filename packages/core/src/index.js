@@ -4,3 +4,4 @@ export * from "./encoding-guard.js";
 export * from "./import-plan.js";
 export * from "./startup-mode.js";
 export * from "./textbook-baseline.js";
+export * from "./textbook-chapter-drafts.js";

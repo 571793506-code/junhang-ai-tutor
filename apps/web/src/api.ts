@@ -151,17 +151,20 @@ export async function askStudentQuestion(input: {
   }>(response);
 }
 
-export type VocabularyCard = {
-  word: string;
+export type StudentDictionaryEntry = {
+  schemaVersion: "student-dictionary-entry-v1";
+  headword: string;
   phonetic: string;
-  part: string;
-  partCn: string;
-  meaning: string;
-  related: Array<{ word: string; part: string; partCn: string; meaning: string }>;
-  examples: string[];
-  pitfall: string;
-  needsTeacherReview?: boolean;
-  aiGenerated?: boolean;
+  queryRelation: { term: string; headword: string; type: string; label: string };
+  parts: Array<{ part: string; partCn: string; meanings: string[] }>;
+  forms: Array<{ term: string; type: string; label: string }>;
+  wordFamily: Array<{ word: string; partCn: string; meaning: string }>;
+  synonyms: Array<{ word: string; meaning: string; difference: string }>;
+  antonyms: Array<{ word: string; meaning: string }>;
+  collocations: Array<{ phrase: string; meaning: string }>;
+  examples: Array<{ sentence: string; translation: string }>;
+  usageNotes: string[];
+  pitfalls: string[];
 };
 
 export type AssessmentLayoutValidation = {
@@ -196,25 +199,13 @@ export type AssessmentGenerationJob = {
   updatedAt: string;
 };
 
-export async function generateVocabularyCard(input: {
-  word: string;
-  studentId?: string;
-  studentName?: string;
-  grade?: string;
-}) {
-  const response = await fetch(`${API_BASE_URL}/api/ai/vocabulary`, {
+export async function queryStudentDictionary(word: string) {
+  const response = await fetch(`${API_BASE_URL}/api/student/dictionary/query`, {
     method: "POST",
     headers: jsonHeaders(),
-    body: JSON.stringify(input)
+    body: JSON.stringify({ word })
   });
-  return readJson<{
-    ok: boolean;
-    result: {
-      available: boolean;
-      card: VocabularyCard;
-      persisted?: { modelRunId?: string | null; vocabularyRecordId?: string | null };
-    };
-  }>(response);
+  return readJson<{ ok: true; result: { entry: StudentDictionaryEntry } }>(response);
 }
 
 export async function registerStudent(input: Record<string, unknown>) {
@@ -1094,4 +1085,22 @@ export async function updateTextbookChapters(assetId: string, chapters: Textbook
     ok: boolean;
     asset: TextbookAssetCard;
   }>(response);
+}
+
+export async function repairTextbookChapterDrafts() {
+  const response = await fetch(`${API_BASE_URL}/api/textbooks/chapter-drafts/repair`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({})
+  });
+  return readJson<{ ok: boolean; repairedAssetCount: number; assets: TextbookAssetCard[] }>(response);
+}
+
+export async function confirmTextbookGenerationScope(assetId: string, chapterIds: string[]) {
+  const response = await fetch(`${API_BASE_URL}/api/textbooks/${assetId}/confirm-generation-scope`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ chapterIds })
+  });
+  return readJson<{ ok: boolean; source: KnowledgeSource }>(response);
 }

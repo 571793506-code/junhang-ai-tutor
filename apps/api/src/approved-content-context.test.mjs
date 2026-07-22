@@ -259,3 +259,18 @@ test("knowledge-source review keeps textbook asset binding visible", () => {
   assert.match(reviewSource, /textbookAssetId/);
   assert.match(reviewSource, /metadata/);
 });
+
+test("textbook routes repair only chapter metadata and require a fresh teacher scope confirmation", () => {
+  const repairStart = serverSource.indexOf('app.post("/api/textbooks/chapter-drafts/repair"');
+  const confirmStart = serverSource.indexOf('app.post("/api/textbooks/:assetId/confirm-generation-scope"');
+  const chapterPatchStart = serverSource.indexOf('app.patch("/api/textbooks/:assetId/chapters"');
+  const chapterPatchEnd = serverSource.indexOf("app.post(\"/api/textbooks/rescan\"", chapterPatchStart);
+  const chapterPatchSource = serverSource.slice(chapterPatchStart, chapterPatchEnd);
+
+  assert.ok(repairStart >= 0);
+  assert.ok(confirmStart >= 0);
+  assert.match(serverSource.slice(repairStart, confirmStart), /mergeTextbookChapterDrafts/);
+  assert.match(serverSource.slice(confirmStart), /replaceTeacherConfirmedTextbookScope/);
+  assert.match(chapterPatchSource, /invalidateTeacherConfirmedTextbookScopes/);
+  assert.match(serverSource, /TEACHER_CONFIRMED_TEXTBOOK_SCOPE/);
+});

@@ -35,6 +35,12 @@ test("production assessment queue runs up to five independent teacher jobs", () 
   assert.match(source, /createAssessmentGenerationJobs\(\{ concurrency:\s*5 \}\)/);
 });
 
+test("assessment routes normalize grade targets before validation and queueing", () => {
+  assert.match(source, /import \{ normalizeAssessmentTargetScope \} from "\.\/assessment-target-scope\.js"/);
+  assert.match(source, /function assessmentDraftInputFromRequest\(req\) \{\s*return normalizeAssessmentTargetScope/);
+  assert.match(source, /"requestedItemCount", "contentScope"/);
+});
+
 test("textbook recovery repairs evidence without auto-approving it", () => {
   const recoveryRoute = routeSource('post("/api/assessments/generation-recovery"');
   const recoveryStart = source.indexOf("async function recoverAssessmentGenerationContext");

@@ -14,7 +14,7 @@ import {
   createMiniMaxSpeechTask,
   draftStudentProfileNarrative
 } from "@junhang/ai";
-import { classifyTextbookBaseline, inspectEncodingPayload, matchesTextbookAssetSearch } from "@junhang/core";
+import { classifyTextbookBaseline, inspectEncodingPayload, matchesTextbookAssetSearch, mergeTextbookChapterDrafts } from "@junhang/core";
 import { recognizeImages } from "@junhang/ai/ocr-node";
 import {
   createClassroomBroadcast,
@@ -47,6 +47,7 @@ import { resolveApprovedAssessmentContentContext } from "./approved-content-cont
 import { assessmentPageBalanceFillRatio, buildAssessmentLayoutValidation } from "./assessment-layout-validation.js";
 import { createAssessmentGenerationJobs } from "./assessment-generation-jobs.js";
 import { prepareTeacherRequirementEmergency, TEACHER_REQUIREMENT_EMERGENCY } from "./assessment-generation-emergency.js";
+import { normalizeAssessmentTargetScope } from "./assessment-target-scope.js";
 import { isNoMarkdownDocumentsError, summarizeContentIndexState } from "./content-index-state.js";
 import { createEncodingGuardMiddleware } from "./encoding-guard-middleware.js";
 import { loadRuntimeConfig, publicConfigSummary } from "./env.js";
@@ -55,6 +56,7 @@ import { filterNewReviewedMistakes } from "./grading-mistake-archive.js";
 import { hydrateQuestionDraftsFromOcr } from "./grading-workbench-question-drafts.js";
 import { resolveKnowledgeSourceId } from "./knowledge-source-id.js";
 import { buildKnowledgeSourceTextbookBinding, preserveKnowledgeSourceTextbookBinding } from "./knowledge-source-textbook-scope.js";
+import { buildTeacherConfirmedTextbookScope, TEACHER_CONFIRMED_TEXTBOOK_SCOPE } from "./textbook-generation-scope.js";
 import {
   buildQaActorContext,
   cleanClassroomQaResultForClient,
@@ -1231,6 +1233,7 @@ function mapAssignment(assignment, options = {}) {
           textbookRegion: readableText(metadata.textbookRegion || generationTeaching.textbookRegion || generationTextbook.region, "") || undefined,
           textbookChapterId: readableText(metadata.textbookChapterId || generationTeaching.textbookChapterId, "") || undefined,
           textbookChapterTitle: readableText(metadata.textbookChapterTitle || generationTeaching.textbookChapterTitle, "") || undefined,
+          contentScope: readableText(metadata.contentScope, "") || undefined,
           generationBasis: readableText(metadata.generationBasis || generationContext.request?.generationBasis, "") || undefined,
           recoveryReason: readableText(metadata.recoveryReason || generationContext.request?.recoveryReason, "") || undefined
         }
@@ -1297,6 +1300,67 @@ function normalizeTextbookChapter(input = {}, index = 0) {
     dictationItems: Array.isArray(input.dictationItems) ? input.dictationItems.map((item) => readableText(item, "")).filter(Boolean) : [],
     readingSupport: readableText(input.readingSupport || input.supportNote, "")
   };
+}
+
+function textbookChapterIndexFingerprint(chapters = []) {
+  return JSON.stringify((Array.isArray(chapters) ? chapters : []).map((chapter, index) => normalizeTextbookChapter(chapter, index)));
+}
+
+async function invalidateTeacherConfirmedTextbookScopes(assetId, teacherId = null) {
+  const sources = await prisma.knowledgeSource.findMany({
+    where: { sourceType: TEACHER_CONFIRMED_TEXTBOOK_SCOPE }
+  });
+  const affected = sources.filter((source) => safeJson(source.metadata, {}).textbookAssetId === assetId);
+  await Promise.all(affected.map((source) => {
+    const metadata = safeJson(source.metadata, {});
+    return prisma.knowledgeSource.update({
+      where: { id: source.id },
+      data: {
+        reviewStatus: "PENDING",
+        allowedForGeneration: false,
+        metadata: {
+          ...metadata,
+          scopeInvalidatedAt: new Date().toISOString(),
+          scopeInvalidatedByTeacherId: teacherId,
+          scopeInvalidatedReason: "chapter-index-changed"
+        }
+      }
+    });
+  }));
+  return affected.length;
+}
+
+function textbookScopeFailure(error) {
+  const messages = {
+    TEXTBOOK_CHAPTER_INDEX_REQUIRED: "当前教材还没有章节目录，请先补齐目录草案并核对。",
+    TEXTBOOK_CHAPTER_REQUIRED: "请至少选择一个教材章节范围后再确认。",
+    TEXTBOOK_CHAPTER_NOT_FOUND: "所选章节不属于当前教材，请重新选择。",
+    TEXTBOOK_BASELINE_MISMATCH: "所选教材不符合贵州遵义教材基准。"
+  };
+  return { error, message: messages[error] || "无法确认当前教材生成范围。" };
+}
+
+async function replaceTeacherConfirmedTextbookScope(asset, chapterIds, teacherId) {
+  const scope = buildTeacherConfirmedTextbookScope(asset, chapterIds, { teacherId });
+  if (!scope.ok) return scope;
+  const sourceId = `ks_textbook_scope_${asset.id}`;
+  const sourceData = { ...scope.source };
+  const source = await prisma.knowledgeSource.upsert({
+    where: { id: sourceId },
+    create: { id: sourceId, ...sourceData, chunks: { create: scope.chunks } },
+    update: { ...sourceData, chunks: { deleteMany: {}, create: scope.chunks } },
+    include: { chunks: { orderBy: { orderIndex: "asc" } } }
+  });
+  await prisma.sourceReview.create({
+    data: {
+      id: `sr_${randomUUID()}`,
+      sourceId,
+      teacherId,
+      status: "APPROVED",
+      note: "教师已确认教材章节范围；仅作为范围参考，不代表教材正文。"
+    }
+  });
+  return { ok: true, source };
 }
 
 function mapDevice(device) {
@@ -3386,7 +3450,7 @@ app.patch("/api/tasks/:taskId/complete", requireDatabase, requireSession(config,
 }));
 
 function assessmentDraftInputFromRequest(req) {
-  return { ...getBody(req), teacherId: sessionTeacherId(req, req.body?.teacherId) };
+  return normalizeAssessmentTargetScope({ ...getBody(req), teacherId: sessionTeacherId(req, req.body?.teacherId) });
 }
 
 function assessmentContentContextFailure(contentContext, contentContextValidation) {
@@ -3435,13 +3499,13 @@ async function prepareAssessmentDraftInput(req) {
   }
   input.contentContext = contentContext;
   input.generationBasis = input.textbookAssetId ? "textbook_reviewed" : "teacher_requirement";
-  return { ok: true, input };
+  return { ok: true, input: normalizeAssessmentTargetScope(input) };
 }
 
 function assessmentGenerationJobRequest(input = {}) {
   const request = {};
   for (const key of [
-    "targetScope", "studentId", "targetGrade", "subject", "kind", "difficulty", "requirement", "requestedItemCount",
+    "targetScope", "studentId", "targetGrade", "subject", "kind", "difficulty", "requirement", "requestedItemCount", "contentScope",
     "textbookAssetId", "textbookTitle", "textbookEdition", "textbookSeries", "textbookVolume", "textbookRegion",
     "textbookChapterId", "textbookChapterTitle", "generationBasis", "recoveryReason"
   ]) {
@@ -5592,6 +5656,7 @@ app.patch("/api/textbooks/:assetId/chapters", requireDatabase, requireSession(co
   const chapters = Array.isArray(body.chapters)
     ? body.chapters.map(normalizeTextbookChapter)
     : [];
+  const chapterIndexChanged = textbookChapterIndexFingerprint(currentMetadata.chapters) !== textbookChapterIndexFingerprint(chapters);
   const updated = await prisma.textbookAsset.update({
     where: { id: asset.id },
     data: {
@@ -5604,16 +5669,81 @@ app.patch("/api/textbooks/:assetId/chapters", requireDatabase, requireSession(co
       }
     }
   });
+  const invalidatedScopeCount = chapterIndexChanged
+    ? await invalidateTeacherConfirmedTextbookScopes(asset.id, req.session.teacherId)
+    : 0;
   await auditEvent(req, {
     feature: "textbook-library",
     action: "update-chapters",
     metadata: {
       assetId: asset.id,
       title: asset.title,
-      chapterCount: chapters.length
+      chapterCount: chapters.length,
+      invalidatedScopeCount
     }
   });
   res.json({ ok: true, asset: mapTextbookAsset(updated) });
+}));
+
+app.post("/api/textbooks/chapter-drafts/repair", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  const assets = await prisma.textbookAsset.findMany({
+    where: { path: { not: null, endsWith: ".edupdf", mode: "insensitive" } },
+    orderBy: { updatedAt: "desc" },
+    take: 200
+  });
+  const repaired = [];
+  for (const asset of assets) {
+    const metadata = safeJson(asset.metadata, {});
+    const baseline = classifyTextbookBaseline({
+      subject: asset.subject,
+      edition: asset.edition,
+      series: metadata.curriculumSeries,
+      title: asset.title,
+      source: asset.source,
+      path: asset.path
+    });
+    if (!baseline.baselineMatched) continue;
+    const chapters = mergeTextbookChapterDrafts(asset, metadata.chapters);
+    if (chapters.length === (Array.isArray(metadata.chapters) ? metadata.chapters.length : 0)) continue;
+    const updated = await prisma.textbookAsset.update({
+      where: { id: asset.id },
+      data: {
+        metadata: {
+          ...metadata,
+          chapters,
+          chapterIndexStatus: "teacher-draft",
+          chapterIndexUpdatedAt: new Date().toISOString(),
+          chapterIndexUpdatedByTeacherId: req.session.teacherId
+        }
+      }
+    });
+    await invalidateTeacherConfirmedTextbookScopes(asset.id, req.session.teacherId);
+    repaired.push(mapTextbookAsset(updated));
+  }
+  await auditEvent(req, {
+    feature: "textbook-library",
+    action: "repair-chapter-drafts",
+    metadata: { repairedAssetCount: repaired.length }
+  });
+  res.json({ ok: true, repairedAssetCount: repaired.length, assets: repaired });
+}));
+
+app.post("/api/textbooks/:assetId/confirm-generation-scope", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  const asset = await prisma.textbookAsset.findUnique({ where: { id: req.params.assetId } });
+  if (!asset) return res.status(404).json({ ok: false, error: "TEXTBOOK_NOT_FOUND", message: "未找到教材索引。" });
+  const body = getBody(req);
+  const result = await replaceTeacherConfirmedTextbookScope(asset, body.chapterIds, req.session.teacherId);
+  if (!result.ok) return res.status(422).json({ ok: false, ...textbookScopeFailure(result.error) });
+  await auditEvent(req, {
+    feature: "textbook-library",
+    action: "confirm-generation-scope",
+    metadata: {
+      assetId: asset.id,
+      sourceId: result.source.id,
+      chapterIds: safeJson(result.source.metadata, {}).confirmedChapterIds || []
+    }
+  });
+  res.json({ ok: true, source: mapKnowledgeSourceRow({ ...result.source, chunkCount: result.source.chunks.length }) });
 }));
 
 app.post("/api/textbooks/rescan", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {

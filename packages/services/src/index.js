@@ -4184,6 +4184,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
               targetScope: input.targetScope || null,
               targetStudentId: input.studentId || null,
               targetGrade: input.targetGrade || input.grade || null,
+              contentScope: input.contentScope || null,
               teacherId: input.teacherId || null,
               layoutTemplate,
               printProfile,

@@ -2383,6 +2383,17 @@ button:disabled {
   width: 100%;
 }
 
+.generation-final-assets {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0 2px;
+}
+
+.generation-final-assets strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
 .generation-inline-status {
   display: flex;
   align-items: flex-start;
@@ -5194,6 +5205,74 @@ button:disabled {
 .student-vocab-panel {
   display: grid;
   gap: 14px;
+}
+
+.dictionary-entry {
+  display: grid;
+  gap: 14px;
+}
+
+.dictionary-entry > section,
+.dictionary-entry-head {
+  padding: 16px;
+  border: 1px solid #dce8ed;
+  border-radius: 10px;
+  background: #fbfcfd;
+}
+
+.dictionary-entry-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dictionary-entry-head h2 {
+  margin: 0;
+  font-size: 32px;
+}
+
+.dictionary-entry-head p {
+  margin: 4px 0;
+  color: #167c7d;
+}
+
+.dictionary-entry h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.dictionary-part + .dictionary-part {
+  margin-top: 12px;
+}
+
+.dictionary-card-grid,
+.dictionary-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dictionary-card-grid > div,
+.dictionary-chip-grid > span,
+.dictionary-example-list > div {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #eef4f6;
+}
+
+.dictionary-example-list {
+  display: grid;
+  gap: 10px;
+}
+
+@media (max-width: 760px) {
+  .dictionary-card-grid,
+  .dictionary-chip-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .student-login-card,

@@ -717,6 +717,18 @@ const matchedFixture = matchedSources.find((source) => source.id === fixtureSour
 const matchedFixtureChunk = matchedFixture?.chunks?.find((chunk) =>
   `${chunk.text || ""} ${chunk.preview || ""}`.includes(e2eContentSentinel)
 );
+const expectedTextbookScopeSourceId = e2eTextbook?.id ? `ks_textbook_scope_${e2eTextbook.id}` : null;
+const matchedTextbookScope = expectedTextbookScopeSourceId
+  ? matchedSources.find((source) => source.id === expectedTextbookScopeSourceId)
+  : null;
+const onlyAllowedAssessmentSources = matchedSources.every((source) =>
+  source.id === fixtureSourceId
+    || (
+      source.id === expectedTextbookScopeSourceId
+      && source.sourceType === "teacher-confirmed-textbook-scope"
+      && source.textbookAssetId === e2eTextbook?.id
+    )
+);
 pass("assessment draft injects clean content context", assessment?.ok && assessmentId && assessmentResult.contentContext?.matchedCount >= 1 && !hasCorrupt(assessment.body), {
   verificationScope: verificationMeta.verificationScope,
   assessesGenerationQuality: verificationMeta.assessesGenerationQuality,
@@ -735,16 +747,20 @@ pass("assessment draft injects clean content context", assessment?.ok && assessm
 });
 pass("assessment context names the approved fixture source and matching chunk", Boolean(
   assessment?.ok
-    && matchedSources.length === 1
+    && matchedSources.length >= 1
+    && onlyAllowedAssessmentSources
     && matchedFixture?.id === fixtureSourceId
     && assessmentResult.contentContext?.textbookContext?.assetId === e2eTextbook?.id
     && matchedFixtureChunk
 ), {
   fixtureSourceId,
+  expectedTextbookScopeSourceId,
   textbookAssetId: assessmentResult.contentContext?.textbookContext?.assetId || null,
   matchedSourceIds: matchedSources.map((source) => source.id),
+  matchedSourceTypes: matchedSources.map((source) => source.sourceType || null),
   matchedChunkId: matchedFixtureChunk?.id || null,
   matchedChunkPreview: matchedFixtureChunk?.preview || null,
+  matchedTextbookScopeId: matchedTextbookScope?.id || null,
   approvedOnly: assessmentResult.contentContext?.approvedOnly ?? null
 });
 

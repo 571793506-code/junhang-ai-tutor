@@ -6,7 +6,6 @@ const source = fs.readFileSync(new URL("../apps/web/src/main.tsx", import.meta.u
 const apiSource = fs.readFileSync(new URL("../apps/web/src/api.ts", import.meta.url), "utf8");
 
 test("generation workbench keeps selectable options for preview-matched fields", () => {
-  assert.match(source, /const quizChapterOptionsByGradeAndSubject: Record<string, Record<SubjectLabel, string\[]>> = /);
   assert.match(source, /const practiceTrainingTargetOptions = \[/);
   assert.match(source, /const questionCountOptionsByMode: Record<GenerationMode, string\[]> = /);
   assert.match(source, /const examTypeOptions = \[/);
@@ -16,7 +15,6 @@ test("generation workbench keeps selectable options for preview-matched fields",
   assert.match(source, /const generationTargetStudents = students\.filter/);
   assert.match(source, /selectGenerationStudent/);
   assert.match(source, /student\.grade === targetGrade/);
-  assert.match(source, /activeQuizChapterOptions\.map/);
   assert.match(source, /assessmentSubject === "数学"/);
   assert.match(source, /附加题/);
   assert.doesNotMatch(source, /训练目标" : "章节 \/ 单元"}<input/);
@@ -25,7 +23,61 @@ test("generation workbench keeps selectable options for preview-matched fields",
 
 test("generation workbench sends structured item count and chapter context", () => {
   assert.match(source, /requestedItemCount:/);
-  assert.match(source, /textbookChapterTitle:\s*generationTextbookContext\?\.chapter\?\.title\s*\|\|\s*\(generationMode === "quiz" \? assessmentQuizChapter : undefined\)/);
+  assert.match(source, /textbookChapterTitle:\s*generationTextbookContext\?\.chapter\?\.title/);
+  assert.doesNotMatch(source, /textbookChapterTitle:[\s\S]{0,160}assessmentQuizChapter/);
+});
+
+test("grade generation uses a grade-scoped title instead of the current student", () => {
+  assert.match(source, /contentScope: generationMode === "quiz"/);
+  assert.match(source, /const titlePrefix = request\.targetScope === "grade" \? grade : student\.displayName/);
+  assert.match(source, /\.\.\.\(request\.targetScope === "student" \? \{ studentName: student\.displayName \} : \{\}\)/);
+  assert.match(source, /title: `\$\{titlePrefix\}\$\{request\.subject\}\$\{titleScope\}\$\{request\.kind\}`/);
+  assert.doesNotMatch(source, /title: `\$\{student\.displayName\}\$\{request\.subject\}\$\{request\.kind\}/);
+});
+
+test("grade quiz titles use the teacher's stated range when no textbook chapter is selected", () => {
+  assert.match(source, /const assessmentGenerationContentScope =/);
+  assert.match(source, /assessmentKnowledgeRange\.trim\(\)/);
+  assert.match(source, /contentScope:\s*generationMode === "quiz"\s*\? assessmentGenerationContentScope/);
+});
+
+test("textbook quiz chapters are derived from the selected textbook volume", () => {
+  assert.doesNotMatch(source, /quizChapterOptionsByGradeAndSubject/);
+  assert.doesNotMatch(source, /activeQuizChapterOptions/);
+  assert.match(source, /generationTextbookChapters = generationTextbookContext\?\.asset\.chapters \|\| \[\]/);
+  assert.match(source, /章节 \/ 单元<select disabled=\{!generationTextbookContext \|\| !generationTextbookChapters\.length\} value=\{generationTextbookContext\?\.chapter\?\.id \|\| ""\}/);
+  assert.match(source, /const chapter = asset\.chapters\?\.\[0\];/);
+  assert.match(source, /setAssessmentQuizChapter\(chapter\?\.title \|\| ""\)/);
+  assert.match(source, /generationTextbookChapters\.map\(\(chapter\) => <option key=\{chapter\.id\} value=\{chapter\.id\}>/);
+});
+
+test("sixth-grade lower-volume math textbooks offer a reviewable chapter-index repair", () => {
+  assert.match(source, /chapterDraftsForTextbookAsset/);
+  assert.match(source, /建立章节草案/);
+  assert.match(source, /onSaveTextbookChapters\(generationTextbookContext\.asset\.id, chapterDraftsForTextbookAsset\(generationTextbookContext\.asset\)\)/);
+});
+
+test("sixth-grade math chapter drafts keep upper and lower volumes separate", () => {
+  const catalogSource = fs.readFileSync(new URL("../packages/core/src/textbook-chapter-drafts.js", import.meta.url), "utf8");
+  assert.match(catalogSource, /"六年级-上册": \[/);
+  assert.match(catalogSource, /第一单元.*分数乘法/);
+  assert.match(catalogSource, /第二单元.*位置与方向（二）/);
+  assert.match(catalogSource, /第九单元.*总复习/);
+  assert.match(catalogSource, /"六年级-下册": \[/);
+  assert.match(catalogSource, /第三单元.*圆柱与圆锥/);
+});
+
+test("chapter draft UI distinguishes a complete index from an index that can be repaired", () => {
+  assert.match(source, /const seedChapters = defaultChaptersForAsset\(asset\);/);
+  assert.match(source, /const missingChapterCount = draftChapters\.length - chapters\.length;/);
+  assert.match(source, /请手工录入目录/);
+});
+
+test("chapter draft repair preserves indexed chapters and appends only missing units", () => {
+  assert.match(source, /function mergedChaptersForAsset\(asset: TextbookAsset, existingChapters: TextbookChapter\[\] = \[\]\)/);
+  assert.match(source, /return mergeTextbookChapterDrafts\(asset, existingChapters\);/);
+  assert.match(source, /const draftChapters = mergedChaptersForAsset\(asset, chapters\);/);
+  assert.match(source, /chaptersToDraftText\(draftChapters\)/);
 });
 
 test("generation workbench blocks textbook quizzes until matching baseline evidence is selected", () => {
@@ -56,6 +108,16 @@ test("generation workbench offers separate evidence repair and teacher-requireme
   assert.match(source, /修复教材依据/);
   assert.match(source, /按教师要求生成临时草稿/);
   assert.match(source, /generationBasis:\s*"teacher_requirement_emergency"/);
+});
+
+test("textbook repair and teacher scope confirmation use shared server-backed actions", () => {
+  assert.match(apiSource, /export async function repairTextbookChapterDrafts/);
+  assert.match(apiSource, /export async function confirmTextbookGenerationScope/);
+  assert.match(source, /onRepairTextbookChapterDrafts/);
+  assert.match(source, /onConfirmTextbookGenerationScope/);
+  assert.match(source, /补齐可用教材目录/);
+  assert.match(source, /确认当前教材章节范围并恢复小测/);
+  assert.match(apiSource, /confirm-generation-scope/);
 });
 
 test("generation workbench submits independent jobs, supports cancellation, and keeps job records selectable", () => {
@@ -107,4 +169,30 @@ test("generation workbench restores and selects server-backed review drafts", ()
   assert.match(source, /setLatestAssessmentDraft\(\(current\) =>/);
   assert.match(source, /onAssessmentDraftSelect/);
   assert.match(source, /onClick=\{\(\) => onAssessmentDraftSelect\(assignment\)\}/);
+});
+
+test("generation review separates draft rejection from regeneration", () => {
+  const rejectStart = source.indexOf("async function rejectAssessmentDraft");
+  const regenerateStart = source.indexOf("async function regenerateAssessmentDraft");
+  const rejectSource = source.slice(rejectStart, regenerateStart);
+
+  assert.ok(rejectStart >= 0);
+  assert.ok(regenerateStart > rejectStart);
+  assert.match(rejectSource, /reviewAssessmentDraft\(assignmentId, "reject"\)/);
+  assert.doesNotMatch(rejectSource, /createAssessment\(/);
+  assert.match(source, /async function regenerateAssessmentDraft/);
+  assert.match(source, /await createAssessment\(draft\.request\)/);
+  assert.match(source, /onAssessmentRegenerate/);
+  assert.match(source, /否决草稿/);
+  assert.match(source, /重新生成/);
+  assert.match(source, /latestAssessmentDraft\.reviewStatus !== "rejected"/);
+});
+
+test("generation review exposes the selected draft's student and answer PDFs", () => {
+  assert.match(source, /finalExportAssets:\s*assignment\.finalExportAssets/);
+  assert.match(source, /finalExportAssets:\s*\{\s*studentPaper: response\.asset/);
+  assert.match(source, /学生卷 PDF/);
+  assert.match(source, /答案解析 PDF/);
+  assert.match(source, /latestAssessmentDraft\?\.finalExportAssets\?\.studentPaper/);
+  assert.match(source, /latestAssessmentDraft\?\.finalExportAssets\?\.answerAnalysis/);
 });

@@ -177,6 +177,7 @@ export interface AssignmentCard {
     difficulty?: string;
     requirement?: string;
     requestedItemCount?: number;
+    contentScope?: string;
     textbookAssetId?: string;
     textbookTitle?: string;
     textbookEdition?: string;
@@ -306,6 +307,13 @@ export declare function matchesTextbookAssetSearch(
   },
   search?: string
 ): boolean;
+
+export declare function chapterDraftsForTextbookAsset(asset?: Partial<TextbookAssetCard>): NonNullable<TextbookAssetCard["chapters"]>;
+
+export declare function mergeTextbookChapterDrafts(
+  asset?: Partial<TextbookAssetCard>,
+  existingChapters?: NonNullable<TextbookAssetCard["chapters"]>
+): NonNullable<TextbookAssetCard["chapters"]>;
 
 export interface LearningLog {
   id: string;

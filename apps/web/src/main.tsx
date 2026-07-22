@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { matchesTextbookEvidenceScope } from "@junhang/core";
+import { chapterDraftsForTextbookAsset, matchesTextbookEvidenceScope, mergeTextbookChapterDrafts } from "@junhang/core";
 import {
   Activity,
   ArrowLeft,
@@ -39,13 +39,14 @@ import type { AssignmentCard, ClassroomBroadcast, ClassroomDevice, CorrectionRec
 import {
   askStudentQuestion,
   cancelAssessmentGenerationJob,
+  confirmTextbookGenerationScope,
   createAssessmentGenerationJob,
   recoverAssessmentGenerationContext,
   type AssessmentGenerationJob,
   type AssessmentLayoutValidation,
   completeLearningTask,
   type ContentIndexSummary,
-  type VocabularyCard,
+  type StudentDictionaryEntry,
   draftStudentTermReport,
   draftStudentProfile,
   draftTeacherTask,
@@ -59,7 +60,7 @@ import {
   archiveGradingWorkbench,
   listGradingWorkbenches,
   listAssessmentGenerationJobs,
-  generateVocabularyCard,
+  queryStudentDictionary,
   createKnowledgeSource,
   listKnowledgeSources,
   type KnowledgeSourceReviewInput,
@@ -78,6 +79,7 @@ import {
   publishStudentProfile,
   recognizeReviewSubmission,
   rebuildContentIndex,
+  repairTextbookChapterDrafts,
   reviewKnowledgeSource,
   registerStudent,
   reviewAssessmentDraft,
@@ -109,8 +111,8 @@ type ProfileDraft = { studentId: string; studentName: string; snapshot: Record<s
 type ProfilePeriodType = "weekly" | "monthly";
 type TermReportDraftState = { report: StudentReportCard; teacherText: string };
 type GenerationMode = "quiz" | "practice" | "exam";
-type AssessmentRequestInput = { targetScope?: "student" | "grade"; studentId?: string; targetGrade?: string; subject?: SubjectLabel; kind?: string; difficulty?: string; requirement?: string; requestedItemCount?: number; textbookAssetId?: string; textbookTitle?: string; textbookEdition?: string; textbookSeries?: string; textbookVolume?: string; textbookRegion?: string; textbookChapterId?: string; textbookChapterTitle?: string; generationBasis?: "textbook_reviewed" | "teacher_requirement" | "teacher_requirement_emergency"; recoveryReason?: string };
-type AssessmentDraftRef = { assignmentId: string; title: string; subject: SubjectLabel; kind: string; targetLabel: string; request: AssessmentRequestInput; draftAsset?: PrintAssetLink; layoutValidation?: AssessmentLayoutValidation; reviewStatus: "pending" | "accepted" | "rejected" };
+type AssessmentRequestInput = { targetScope?: "student" | "grade"; studentId?: string; targetGrade?: string; subject?: SubjectLabel; kind?: string; difficulty?: string; requirement?: string; requestedItemCount?: number; contentScope?: string; textbookAssetId?: string; textbookTitle?: string; textbookEdition?: string; textbookSeries?: string; textbookVolume?: string; textbookRegion?: string; textbookChapterId?: string; textbookChapterTitle?: string; generationBasis?: "textbook_reviewed" | "teacher_requirement" | "teacher_requirement_emergency"; recoveryReason?: string };
+type AssessmentDraftRef = { assignmentId: string; title: string; subject: SubjectLabel; kind: string; targetLabel: string; request: AssessmentRequestInput; draftAsset?: PrintAssetLink; finalExportAssets?: AssignmentCard["finalExportAssets"]; layoutValidation?: AssessmentLayoutValidation; reviewStatus: "pending" | "accepted" | "rejected" };
 type StudentRegistrationInput = { displayName: string; grade: string; className: string; school: string; textbookVersion: string; guardianName: string; guardianPhone: string; notes: string; enrollmentStatus: string };
 type ReviewUploadSource = "taskEvidence" | "grading";
 type ReviewSubmissionBatch = {
@@ -163,6 +165,7 @@ function assessmentDraftRefFromAssignment(assignment: AssignmentCard): Assessmen
       requestedItemCount: assignment.audit?.itemCount
     },
     draftAsset: assignment.draftReviewAsset,
+    finalExportAssets: assignment.finalExportAssets,
     layoutValidation: assignment.layoutValidation as AssessmentLayoutValidation | undefined,
     reviewStatus
   };
@@ -337,28 +340,6 @@ function profileDraftToPlainText(snapshot: Record<string, unknown>, studentName:
 
 const subjects: SubjectLabel[] = ["语文", "数学", "英语"] as SubjectLabel[];
 const gradeOptions = ["三年级", "四年级", "五年级", "六年级"];
-const quizChapterOptionsByGradeAndSubject: Record<string, Record<SubjectLabel, string[]>> = {
-  三年级: {
-    语文: ["按当前教材章节", "第一单元 童年生活", "第二单元 寓言故事", "第三单元 传统文化", "阅读理解专题", "习作表达专题"],
-    数学: ["按当前教材章节", "第一单元 位置与方向", "第二单元 除数是一位数的除法", "第三单元 复式统计表", "第四单元 两位数乘两位数", "综合应用专题"],
-    英语: ["按当前教材章节", "Unit 1 Welcome back to school", "Unit 2 My family", "Unit 3 At the zoo", "词汇句型专题", "阅读理解专题"]
-  },
-  四年级: {
-    语文: ["按当前教材章节", "第一单元 自然景物", "第二单元 观察与发现", "第三单元 现代诗", "阅读理解专题", "习作表达专题"],
-    数学: ["按当前教材章节", "第一单元 四则运算", "第二单元 观察物体", "第三单元 运算定律", "第四单元 小数的意义和性质", "综合应用专题"],
-    英语: ["按当前教材章节", "Unit 1 My school", "Unit 2 What time is it?", "Unit 3 Weather", "词汇句型专题", "阅读理解专题"]
-  },
-  五年级: {
-    语文: ["按当前教材章节", "第一单元 万物有灵", "第二单元 古典名著", "第三单元 综合性学习", "阅读理解专题", "习作表达专题"],
-    数学: ["按当前教材章节", "第一单元 小数乘法", "第二单元 位置", "第三单元 小数除法", "第四单元 可能性", "综合应用专题"],
-    英语: ["按当前教材章节", "Unit 1 My day", "Unit 2 My favourite season", "Unit 3 My school calendar", "词汇句型专题", "阅读理解专题"]
-  },
-  六年级: {
-    语文: ["按当前教材章节", "第一单元 民风民俗", "第二单元 外国文学名著", "第三单元 习作单元", "阅读理解专题", "习作表达专题"],
-    数学: ["按当前教材章节", "第一单元 分数乘法", "第二单元 位置与方向", "第三单元 分数除法", "第四单元 比", "综合应用专题"],
-    英语: ["按当前教材章节", "Unit 1 How can I get there?", "Unit 2 Ways to go to school", "Unit 3 My weekend plan", "词汇句型专题", "阅读理解专题"]
-  }
-};
 const practiceTrainingTargetOptions = ["错因纠正 + 同类变式", "基础巩固", "同类变式", "综合提升"];
 const questionCountOptionsByMode: Record<GenerationMode, string[]> = {
   quiz: ["8 题左右", "12 题左右", "16 题左右", "20 题左右"],
@@ -765,6 +746,7 @@ function App() {
       difficulty: input?.difficulty || "基础",
       requirement,
       requestedItemCount: input?.requestedItemCount,
+      contentScope: input?.contentScope,
       textbookAssetId: input?.textbookAssetId,
       textbookTitle: input?.textbookTitle,
       textbookEdition: input?.textbookEdition,
@@ -781,13 +763,15 @@ function App() {
 
   async function createAssessment(input?: AssessmentRequestInput) {
     const { request, student } = buildAssessmentRequest(input);
-    const titleSuffix = request.generationBasis === "teacher_requirement_emergency" ? "临时草稿" : "草稿";
+    const grade = request.targetGrade || student.grade;
+    const titlePrefix = request.targetScope === "grade" ? grade : student.displayName;
+    const titleScope = request.contentScope || "";
     try {
       const response = await createAssessmentGenerationJob({
         ...request,
-        grade: request.targetGrade || student.grade,
-        studentName: student.displayName,
-        title: `${student.displayName}${request.subject}${request.kind}${titleSuffix}`
+        grade,
+        ...(request.targetScope === "student" ? { studentName: student.displayName } : {}),
+        title: `${titlePrefix}${request.subject}${titleScope}${request.kind}`
       });
       setAssessmentJobs((jobs) => [response.job, ...jobs.filter((job) => job.id !== response.job.id)]);
       setSync({ busy: false, ok: true, message: `${request.kind}${request.generationBasis === "teacher_requirement_emergency" ? "临时" : ""}生成任务已加入队列，可继续创建其他任务。` });
@@ -803,7 +787,7 @@ function App() {
       const response = await recoverAssessmentGenerationContext({
         ...request,
         grade: request.targetGrade || student.grade,
-        studentName: student.displayName
+        ...(request.targetScope === "student" ? { studentName: student.displayName } : {})
       });
       await refreshTeacherOps();
       setSync({ busy: false, ok: response.recovery.status === "ready", message: response.recovery.message });
@@ -834,7 +818,11 @@ function App() {
       await reviewAssessmentDraft(assignmentId, "accept");
       const response = await exportAssessmentPrint(assignmentId);
       setPrintAssets((response.assets?.length ? response.assets : [response.asset, response.analysisAsset].filter(Boolean)) as PrintAssetLink[]);
-      setLatestAssessmentDraft((current) => current?.assignmentId === assignmentId ? { ...current, reviewStatus: "accepted" } : current);
+      setLatestAssessmentDraft((current) => current?.assignmentId === assignmentId ? {
+        ...current,
+        reviewStatus: "accepted",
+        finalExportAssets: { studentPaper: response.asset, answerAnalysis: response.analysisAsset || null }
+      } : current);
       setSync({ busy: false, ok: true, message: response.analysisAsset ? "题目 PDF 和解析 PDF 已生成" : `打印稿已生成：${response.asset.title}` });
       await applyBootstrap();
       await refreshTeacherOps();
@@ -850,11 +838,18 @@ function App() {
       await reviewAssessmentDraft(assignmentId, "reject");
       setLatestAssessmentDraft({ ...draft, reviewStatus: "rejected" });
       setPrintAssets([]);
-      setSync({ busy: false, ok: null, message: "已否决当前草稿，正在按原要求重新加入生成队列。" });
-      await createAssessment(draft.request);
+      setSync({ busy: false, ok: null, message: "已否决当前草稿。需要时可按原要求重新生成。" });
+      await applyBootstrap();
     } catch (error) {
-      setSync({ busy: false, ok: false, message: `重新生成草稿失败：${error instanceof Error ? error.message : String(error)}` });
+      setSync({ busy: false, ok: false, message: `否决草稿失败：${error instanceof Error ? error.message : String(error)}` });
     }
+  }
+
+  async function regenerateAssessmentDraft(assignmentId: string) {
+    const draft = latestAssessmentDraft;
+    if (!draft || draft.assignmentId !== assignmentId || draft.reviewStatus !== "rejected") return;
+    setSync({ busy: true, ok: null, message: "正在按原要求创建新的生成任务..." });
+    await createAssessment(draft.request);
   }
 
   async function uploadForReview(input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[]; assignmentId?: string }) {
@@ -1060,6 +1055,31 @@ function App() {
     }
   }
 
+  async function repairTextbookChapterDraftsForTeacher() {
+    try {
+      const response = await repairTextbookChapterDrafts();
+      const repairedById = new Map(response.assets.map((asset) => [asset.id, asset]));
+      setTextbooks((items) => items.map((asset) => repairedById.get(asset.id) || asset));
+      setSelectedTextbookContext((current) => {
+        const asset = current ? repairedById.get(current.asset.id) : null;
+        return asset ? { asset, chapter: asset.chapters?.[0] } : current;
+      });
+      setSync({ busy: false, ok: true, message: `已补齐 ${response.repairedAssetCount} 本教材的可用目录草案，请核对后确认生成范围。` });
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `教材目录补齐失败：${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
+  async function confirmTextbookGenerationScopeForTeacher(assetId: string, chapterIds: string[]) {
+    try {
+      const response = await confirmTextbookGenerationScope(assetId, chapterIds);
+      setKnowledgeSources((items) => [response.source, ...items.filter((item) => item.id !== response.source.id)]);
+      setSync({ busy: false, ok: true, message: "当前教材章节范围已由教师确认，小测生成已恢复可用。" });
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `确认教材生成范围失败：${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
   async function resetStudentCode(studentId: string) {
     try {
       const response = await resetStudentAccessCodeApi(studentId);
@@ -1255,7 +1275,7 @@ function App() {
             setLatestAssessmentDraft(draft);
             setPrintAssets([]);
           }
-        }} onAssessmentReject={rejectAssessmentDraft} onContentIndexRebuild={rebuildTeachingContentIndex} onContentUpload={uploadTeachingContent} onExportPrint={exportLatestPrint} onKnowledgeRefresh={refreshKnowledgeLibrary} onKnowledgeReview={reviewKnowledgeLibrarySource} onKnowledgeSourceCreate={addKnowledgeSource} onKnowledgeSync={syncKnowledgeLibrary} onMarkReviewed={markReviewed} onOpenModule={(module) => setActiveModule((value) => ({ ...value, teacher: module }))} onOpenTextbook={openTextbookAsset} onProfileDraft={createStudentProfileDraft} onProfilePrint={generateStudentProfilePrintFile} onProfilePublish={publishStudentProfileDraft} onQuestionReview={reviewQuestion} onRecognize={recognizeSubmission} onRefreshOps={refreshReviewQueue} onRefreshTextbooks={refreshTextbookLibrary} onRescanTextbooks={rescanTextbookLibrary} onResetCode={resetStudentCode} onSaveTextbookChapters={saveTextbookChapters} onSelectTextbookContext={setSelectedTextbookContext} onStudentAccess={updateStudentAccess} onStudentCreate={async (input) => {
+        }} onAssessmentRegenerate={regenerateAssessmentDraft} onAssessmentReject={rejectAssessmentDraft} onConfirmTextbookGenerationScope={confirmTextbookGenerationScopeForTeacher} onContentIndexRebuild={rebuildTeachingContentIndex} onContentUpload={uploadTeachingContent} onExportPrint={exportLatestPrint} onKnowledgeRefresh={refreshKnowledgeLibrary} onKnowledgeReview={reviewKnowledgeLibrarySource} onKnowledgeSourceCreate={addKnowledgeSource} onKnowledgeSync={syncKnowledgeLibrary} onMarkReviewed={markReviewed} onOpenModule={(module) => setActiveModule((value) => ({ ...value, teacher: module }))} onOpenTextbook={openTextbookAsset} onProfileDraft={createStudentProfileDraft} onProfilePrint={generateStudentProfilePrintFile} onProfilePublish={publishStudentProfileDraft} onQuestionReview={reviewQuestion} onRecognize={recognizeSubmission} onRefreshOps={refreshReviewQueue} onRefreshTextbooks={refreshTextbookLibrary} onRepairTextbookChapterDrafts={repairTextbookChapterDraftsForTeacher} onRescanTextbooks={rescanTextbookLibrary} onResetCode={resetStudentCode} onSaveTextbookChapters={saveTextbookChapters} onSelectTextbookContext={setSelectedTextbookContext} onStudentAccess={updateStudentAccess} onStudentCreate={async (input) => {
           const name = input.displayName.trim();
           if (!name || !input.guardianPhone.trim()) {
             setSync({ busy: false, ok: false, message: "请至少填写学生姓名和家长电话" });
@@ -1292,7 +1312,7 @@ function App() {
 }
 
 const teacherNav = ["工作台", "学生权限", "今日任务", "生成打印", "批改复核", "学生档案", "教材资料", "课堂设备", "系统状态"];
-const studentNav = ["主页", "今日任务", "AI问答", "英语词汇", "拍照提交", "学生档案"];
+const studentNav = ["主页", "今日任务", "AI问答", "英语词典", "拍照提交", "学生档案"];
 const classroomNav = ["课堂主页", "今日任务", "AI问答", "听写播报", "课文跟读"];
 
 function extractReadingFocusDraft(passage: string, subject: "语文" | "英语", context: { asset: TextbookAsset; chapter?: TextbookChapter } | null) {
@@ -1332,7 +1352,9 @@ function TeacherWorkspace({
   onAssessmentJobSelect,
   onAssessmentRecovery,
   onAssessmentDraftSelect,
+  onAssessmentRegenerate,
   onAssessmentReject,
+  onConfirmTextbookGenerationScope,
   onContentIndexRebuild,
   onContentUpload,
   onExportPrint,
@@ -1350,6 +1372,7 @@ function TeacherWorkspace({
   onRecognize,
   onRefreshOps,
   onRefreshTextbooks,
+  onRepairTextbookChapterDrafts,
   onRescanTextbooks,
   onResetCode,
   onSaveTextbookChapters,
@@ -1394,7 +1417,9 @@ function TeacherWorkspace({
   onAssessmentJobSelect: (job: AssessmentGenerationJob) => void;
   onAssessmentRecovery: (input: AssessmentRequestInput) => Promise<void>;
   onAssessmentDraftSelect: (assignment: AssignmentCard) => void;
+  onAssessmentRegenerate: (assignmentId: string) => void;
   onAssessmentReject: (assignmentId: string) => void;
+  onConfirmTextbookGenerationScope: (assetId: string, chapterIds: string[]) => Promise<void>;
   onContentIndexRebuild: () => void;
   onContentUpload: (files: File[]) => void;
   onExportPrint: (assignmentId: string) => void;
@@ -1412,6 +1437,7 @@ function TeacherWorkspace({
   onRecognize: (submissionId: string) => void;
   onRefreshOps: () => void;
   onRefreshTextbooks: (filters?: { subject?: string; grade?: string; volume?: string; search?: string }) => void;
+  onRepairTextbookChapterDrafts: () => Promise<void>;
   onRescanTextbooks: () => void;
   onResetCode: (studentId: string) => void;
   onSaveTextbookChapters: (assetId: string, chapters: TextbookChapter[]) => void;
@@ -1450,7 +1476,7 @@ function TeacherWorkspace({
   const [assessmentSubject, setAssessmentSubject] = useState<SubjectLabel>("数学");
   const [generationMode, setGenerationMode] = useState<GenerationMode>("quiz");
   const [assessmentDifficulty, setAssessmentDifficulty] = useState("基础");
-  const [assessmentQuizChapter, setAssessmentQuizChapter] = useState(quizChapterOptionsByGradeAndSubject["六年级"].数学[0]);
+  const [assessmentQuizChapter, setAssessmentQuizChapter] = useState("");
   const [assessmentTrainingTarget, setAssessmentTrainingTarget] = useState(practiceTrainingTargetOptions[0]);
   const [assessmentKnowledgeRange, setAssessmentKnowledgeRange] = useState("教材章节重点、课堂已讲知识点、当周易错概念");
   const [assessmentStructure, setAssessmentStructure] = useState("基础默写 / 概念判断 / 简短应用");
@@ -1541,7 +1567,6 @@ function TeacherWorkspace({
   const visibleGenerationStudents = generationTargetStudents.length ? generationTargetStudents : students;
   const generationSelectedStudent = visibleGenerationStudents.find((student) => student.id === generationStudentId) || visibleGenerationStudents[0] || students[0];
   const generationTargetGrade = generationTargetScope === "student" ? generationSelectedStudent?.grade || targetGrade : targetGrade;
-  const activeQuizChapterOptions = quizChapterOptionsByGradeAndSubject[generationTargetGrade]?.[assessmentSubject] || quizChapterOptionsByGradeAndSubject["六年级"].数学;
   const generationTextbookAssets = useMemo(() => textbooks.filter((asset) => (
     asset.subject === assessmentSubject
       && asset.grade === generationTargetGrade
@@ -1572,14 +1597,14 @@ function TeacherWorkspace({
         ? "当前教材还没有已复核且允许生成的资料来源。"
         : "";
   const updateRegistration = (field: keyof StudentRegistrationInput, value: string) => setStudentRegistration((current) => ({ ...current, [field]: value }));
-  const textbookHint = selectedTextbookContext
-    ? `${selectedTextbookContext.asset.title}${selectedTextbookContext.chapter ? ` / ${selectedTextbookContext.chapter.title}` : ""}`
+  const textbookHint = selectedTextbookContext?.chapter
+    ? `${selectedTextbookContext.asset.title} / ${selectedTextbookContext.chapter.title}`
     : "";
   useEffect(() => {
-    if (generationMode === "quiz" && !activeQuizChapterOptions.includes(assessmentQuizChapter)) {
-      setAssessmentQuizChapter(activeQuizChapterOptions[0]);
-    }
-  }, [activeQuizChapterOptions, assessmentQuizChapter, generationMode]);
+    if (generationMode !== "quiz") return;
+    const chapterTitle = generationTextbookContext?.chapter?.title || "";
+    if (assessmentQuizChapter !== chapterTitle) setAssessmentQuizChapter(chapterTitle);
+  }, [assessmentQuizChapter, generationMode, generationTextbookContext?.asset.id, generationTextbookContext?.chapter?.id, generationTextbookContext?.chapter?.title]);
 
   useEffect(() => {
     if (generationTargetScope === "student" && generationSelectedStudent?.id && generationSelectedStudent.id !== generationStudentId) {
@@ -1593,9 +1618,9 @@ function TeacherWorkspace({
     setGenerationStudentId(studentId);
   };
 
-  const selectedQuizChapterLabel = generationTextbookContext?.chapter
-    ? `${generationTextbookContext.asset.title}${generationTextbookContext.chapter ? ` / ${generationTextbookContext.chapter.title}` : ""}`
-    : assessmentQuizChapter;
+  const selectedQuizChapterLabel = generationTextbookContext?.chapter?.title
+    || assessmentQuizChapter
+    || (generationTextbookContext ? "整册 / 教师自定义范围" : "");
   const assessmentSourceRange = generationMode === "quiz"
     ? [selectedQuizChapterLabel, assessmentKnowledgeRange].filter(Boolean).join("；")
     : assessmentKnowledgeRange;
@@ -1635,7 +1660,7 @@ function TeacherWorkspace({
     `教材范围：${assessmentSourceRange}`,
     `题型结构：${assessmentStructure}`,
     `题量/页数：${generationMode === "exam" ? `4 页 A4，${assessmentTotalScore}` : assessmentQuestionCount}`,
-    `考试/训练目标：${generationMode === "exam" ? assessmentExamType : generationMode === "practice" ? assessmentTrainingTarget : assessmentQuizChapter}`,
+    `考试/训练目标：${generationMode === "exam" ? assessmentExamType : generationMode === "practice" ? assessmentTrainingTarget : selectedQuizChapterLabel}`,
     generationMode === "exam" && assessmentSubject === "数学" ? `数学附加题：${assessmentMathBonusQuestion}` : "",
     "排版要求：学生卷不得出现答案；解析卷必须包含答案、步骤和易错提醒；数学保留过程书写区，英语写词/造句/中译英使用四线格，语文阅读和作文扩大作答区域。",
     `教师补充：${assessmentRequirement}`
@@ -1643,6 +1668,10 @@ function TeacherWorkspace({
   const assessmentSubmissionInput = (emergency = false): AssessmentRequestInput => {
     const requestedItemCount = generationMode === "exam" ? undefined : Number.parseInt(assessmentQuestionCount, 10);
     const requirement = buildAssessmentRequirement();
+    const assessmentGenerationContentScope = generationTextbookContext?.chapter?.title
+      || (assessmentKnowledgeRange.trim() === "教材章节重点、课堂已讲知识点、当周易错概念"
+        ? selectedQuizChapterLabel
+        : assessmentKnowledgeRange.trim());
     return {
       targetScope: generationTargetScope,
       studentId: generationTargetScope === "student" ? generationSelectedStudent?.id : undefined,
@@ -1654,6 +1683,11 @@ function TeacherWorkspace({
         ? `${requirement}\n生成依据：教师要求临时小测。教材资料待恢复，不得声称引用教材原文。`
         : requirement,
       requestedItemCount: Number.isFinite(requestedItemCount) ? requestedItemCount : undefined,
+      contentScope: generationMode === "quiz"
+        ? assessmentGenerationContentScope
+        : generationMode === "practice"
+          ? assessmentTrainingTarget
+          : assessmentExamType,
       ...(emergency ? {
         generationBasis: "teacher_requirement_emergency" as const,
         recoveryReason: quizGenerationBlockReason || "TEACHER_CONFIRMED_SCOPE"
@@ -1661,7 +1695,7 @@ function TeacherWorkspace({
         textbookAssetId: generationTextbookContext?.asset.id,
         textbookTitle: generationTextbookContext?.asset.title,
         textbookChapterId: generationTextbookContext?.chapter?.id,
-        textbookChapterTitle: generationTextbookContext?.chapter?.title || (generationMode === "quiz" ? assessmentQuizChapter : undefined)
+        textbookChapterTitle: generationTextbookContext?.chapter?.title
       })
     };
   };
@@ -1801,7 +1835,7 @@ function TeacherWorkspace({
     <section className={moduleClass("学生权限", "panel full")}><PanelTitle icon={ShieldCheck} title="学生入学登记与权限" /><p className="muted-line">当前教师：{teacher.displayName}，教师码：{teacher.accessCode || "已隐藏"}。新学生由登记教师绑定，登记后生成学生专属码；退课后可停用登录码但保留学生档案。</p><div className="student-registration-card"><div className="review-card-head"><div><h3>新学生入学办理资料</h3><p>用于开通学生端和后续一对一学习归档。档案草稿生成已移至“学生档案”。</p></div><StatusPill label="登记后生成专属码" status="pending" /></div><div className="student-registration-form"><label>学生姓名<input value={studentRegistration.displayName} placeholder="例如：张思源" onChange={(event) => updateRegistration("displayName", event.target.value)} /></label><label>年级<select value={studentRegistration.grade} onChange={(event) => updateRegistration("grade", event.target.value)}>{gradeOptions.map((grade) => <option key={grade}>{grade}</option>)}</select></label><label>班级/分组<input value={studentRegistration.className} placeholder="例如：五年级 1 班 / 周六上午班" onChange={(event) => updateRegistration("className", event.target.value)} /></label><label>学校/来源<input value={studentRegistration.school} placeholder="例如：君航课堂 / XX小学" onChange={(event) => updateRegistration("school", event.target.value)} /></label><label>教材版本<input value={studentRegistration.textbookVersion} placeholder="贵州遵义教材基准" onChange={(event) => updateRegistration("textbookVersion", event.target.value)} /></label><label>入学状态<select value={studentRegistration.enrollmentStatus} onChange={(event) => updateRegistration("enrollmentStatus", event.target.value)}><option>在读</option><option>测试</option><option>暂停</option></select></label><label>家长姓名<input value={studentRegistration.guardianName} placeholder="例如：张女士" onChange={(event) => updateRegistration("guardianName", event.target.value)} /></label><label>家长电话<input value={studentRegistration.guardianPhone} placeholder="用于学生端登录校验" onChange={(event) => updateRegistration("guardianPhone", event.target.value)} /></label><label className="registration-notes">学习关注点/入学备注<textarea value={studentRegistration.notes} placeholder="例如：计算题速度偏慢，英语词汇拼写需要跟进。" onChange={(event) => updateRegistration("notes", event.target.value)} /></label></div><div className="button-row"><button className="primary-button" onClick={() => onStudentCreate(studentRegistration)}><Plus size={17} />登记学生并生成专属码</button><button className="secondary-button" onClick={() => setStudentRegistration({ displayName: "", grade: "三年级", className: "", school: "君航课堂", textbookVersion: "贵州遵义教材基准", guardianName: "", guardianPhone: "", notes: "", enrollmentStatus: "在读" })}><RotateCcw size={17} />清空表单</button></div></div><div className="template-controls"><label>操作已有学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label>{selectedStudent ? <button className="secondary-button" onClick={() => onResetCode(selectedStudent.id)}><RotateCcw size={17} />重置专属码</button> : null}</div><StudentList onAccess={onStudentAccess} students={students} /></section>
     <section className={moduleClass("今日任务", "panel full")}><PanelTitle badge="AI生成" icon={CalendarDays} title="生成今日任务" />{textbookHint ? <p className="context-note"><BookOpen size={15} />可引用教材位置：{textbookHint}</p> : null}<div className="template-controls"><label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName}</option>)}</select></label><label>科目<select value={taskSubject} onChange={(event) => setTaskSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label><label>预计用时<input type="number" min={5} max={60} value={taskMinutes} onChange={(event) => setTaskMinutes(Number(event.target.value) || 10)} /></label></div><label className="field-label">任务内容<textarea className="wide-textarea" value={taskRequirement} onChange={(event) => setTaskRequirement(event.target.value)} /></label><p className="muted-line">建议：写清“复习点、完成物、订正方式、是否需要家长查看”。{textbookTaskSuggestion ? ` 教材建议：${textbookTaskSuggestion}` : "具体调控仍由教师端决定。"}</p><button className="primary-button" onClick={() => selectedStudent && onTask({ studentId: selectedStudent.id, subject: taskSubject, title: `${selectedStudent.displayName} 今日${taskSubject}任务`, requirement: `${taskRequirement}${textbookHint ? `\n教材位置：${textbookHint}` : ""}`, minutes: taskMinutes })}><Send size={17} />写入今日任务</button></section>
     <section className={moduleClass("今日任务", "panel full")}><PanelTitle icon={ListChecks} title="已发布今日任务完成情况" /><p className="muted-line">平板端或学生端标记完成后会同步到这里。底部可上传完成情况照片，进入批改/归档队列，后续用于学生档案分析。</p><div className="record-list">{tasks.length ? tasks.slice(0, 10).map((task) => <div className="record-row task-detail-row" key={task.id}><SubjectBadge subject={task.subject} /><div><strong>{task.title}</strong><span>{task.studentName} · {task.status} · {task.minutes}分钟</span><p>{task.summary || task.description || "暂无具体任务说明"}</p></div><StatusPill label={task.status} status={statusToProviderStatus(task.status)} /></div>) : <p className="review-empty">暂无已发布今日任务</p>}</div><div className="student-registration-card"><div className="review-card-head"><div><h3>今日任务完成情况拍照上传</h3><p>用于上传订正本、作业本、听写本等完成证据，后续进入学生归档分析。</p></div><StatusPill label="教师复核" status="pending" /></div><div className="template-controls"><label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label><label>科目<select value={taskSubject} onChange={(event) => setTaskSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label></div><label className="field-label">记录标题<input value={taskEvidenceTitle} placeholder={selectedStudent ? `${selectedStudent.displayName} 今日任务完成情况` : "今日任务完成情况"} onChange={(event) => setTaskEvidenceTitle(event.target.value)} /></label><label className="field-label">拍照或选择图片<input multiple type="file" accept="image/*" capture="environment" onChange={(event) => setTaskEvidenceFiles(Array.from(event.target.files || []))} /></label><p className="muted-line">当前已选择 {taskEvidenceFiles.length} 张。可上传多页任务完成情况。</p><div className="review-upload-action"><button className="primary-button" disabled={!selectedStudent || !taskEvidenceFiles.length || isReviewUploading("taskEvidence")} onClick={() => selectedStudent && submitReviewUpload("taskEvidence", { studentId: selectedStudent.id, subject: taskSubject, kind: "作业", title: taskEvidenceTitle.trim() || `${selectedStudent.displayName} 今日任务完成情况`, images: taskEvidenceFiles })}><Upload size={17} />上传并写入归档队列</button>{renderReviewUploadStatus("taskEvidence")}</div></div></section>
-    <section className={moduleClass("教材资料", "panel full")}><PanelTitle icon={BookOpen} title="教材库与章节索引" /><p className="muted-line">当前教材文件保留在本机原路径，系统只记录年级、科目、册次、哈希、打开路径和教师确认的章节索引。需要查看原教材时交给智慧中小学 App 或本机默认关联程序打开，不转换文件格式。</p><div className="template-controls textbook-filter-grid"><label>年级<select value={textbookGrade} onChange={(event) => setTextbookGrade(event.target.value)}><option value="">全部年级</option>{gradeOptions.map((grade) => <option key={grade}>{grade}</option>)}</select></label><label>科目<select value={textbookSubject} onChange={(event) => setTextbookSubject(event.target.value)}><option value="">全部科目</option>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label><label>册次<select value={textbookVolume} onChange={(event) => setTextbookVolume(event.target.value)}><option value="">全部册次</option><option>上册</option><option>下册</option></select></label><label>关键词<input value={textbookSearch} onChange={(event) => setTextbookSearch(event.target.value)} placeholder="教材名、版本或路径关键词" /></label></div><div className="button-row"><button className="primary-button" onClick={() => onRefreshTextbooks({ subject: textbookSubject, grade: textbookGrade, volume: textbookVolume, search: textbookSearch })}><Search size={17} />筛选教材</button><button className="secondary-button" onClick={onRescanTextbooks}><RefreshCw size={17} />重扫教材目录</button></div><ContentIndexPanel files={contentFiles} index={contentIndex} notice={contentFileNotice} onFiles={selectContentFiles} onRebuild={onContentIndexRebuild} onUpload={() => onContentUpload(contentFiles)} /><KnowledgeLibraryPanel grade={knowledgeGrade} onGrade={setKnowledgeGrade} onRefresh={onKnowledgeRefresh} onReview={onKnowledgeReview} onSourceCreate={(input) => { onKnowledgeSourceCreate(input); setKnowledgeTitle(""); setKnowledgeUrl(""); setKnowledgeSummary(""); }} onSubject={setKnowledgeSubject} onSync={onKnowledgeSync} selectedTextbook={selectedTextbookContext?.asset || null} sources={knowledgeSources} subject={knowledgeSubject} summary={knowledgeSummary} title={knowledgeTitle} url={knowledgeUrl} onSummary={setKnowledgeSummary} onTitle={setKnowledgeTitle} onUrl={setKnowledgeUrl} /><TextbookLibrary assets={textbooks} onOpen={onOpenTextbook} onSaveChapters={onSaveTextbookChapters} onSelectContext={onSelectTextbookContext} selectedContext={selectedTextbookContext} /></section>
+    <section className={moduleClass("教材资料", "panel full")}><PanelTitle icon={BookOpen} title="教材库与章节索引" /><p className="muted-line">当前教材文件保留在本机原路径，系统只记录年级、科目、册次、哈希、打开路径和教师确认的章节索引。需要查看原教材时交给智慧中小学 App 或本机默认关联程序打开，不转换文件格式。</p><div className="template-controls textbook-filter-grid"><label>年级<select value={textbookGrade} onChange={(event) => setTextbookGrade(event.target.value)}><option value="">全部年级</option>{gradeOptions.map((grade) => <option key={grade}>{grade}</option>)}</select></label><label>科目<select value={textbookSubject} onChange={(event) => setTextbookSubject(event.target.value)}><option value="">全部科目</option>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label><label>册次<select value={textbookVolume} onChange={(event) => setTextbookVolume(event.target.value)}><option value="">全部册次</option><option>上册</option><option>下册</option></select></label><label>关键词<input value={textbookSearch} onChange={(event) => setTextbookSearch(event.target.value)} placeholder="教材名、版本或路径关键词" /></label></div><div className="button-row"><button className="primary-button" onClick={() => onRefreshTextbooks({ subject: textbookSubject, grade: textbookGrade, volume: textbookVolume, search: textbookSearch })}><Search size={17} />筛选教材</button><button className="secondary-button" onClick={onRescanTextbooks}><RefreshCw size={17} />重扫教材目录</button><button className="secondary-button" onClick={() => void onRepairTextbookChapterDrafts()}><ListChecks size={17} />补齐可用教材目录</button></div><ContentIndexPanel files={contentFiles} index={contentIndex} notice={contentFileNotice} onFiles={selectContentFiles} onRebuild={onContentIndexRebuild} onUpload={() => onContentUpload(contentFiles)} /><KnowledgeLibraryPanel grade={knowledgeGrade} onGrade={setKnowledgeGrade} onRefresh={onKnowledgeRefresh} onReview={onKnowledgeReview} onSourceCreate={(input) => { onKnowledgeSourceCreate(input); setKnowledgeTitle(""); setKnowledgeUrl(""); setKnowledgeSummary(""); }} onSubject={setKnowledgeSubject} onSync={onKnowledgeSync} selectedTextbook={selectedTextbookContext?.asset || null} sources={knowledgeSources} subject={knowledgeSubject} summary={knowledgeSummary} title={knowledgeTitle} url={knowledgeUrl} onSummary={setKnowledgeSummary} onTitle={setKnowledgeTitle} onUrl={setKnowledgeUrl} /><TextbookLibrary assets={textbooks} onConfirmGenerationScope={onConfirmTextbookGenerationScope} onOpen={onOpenTextbook} onSaveChapters={onSaveTextbookChapters} onSelectContext={onSelectTextbookContext} selectedContext={selectedTextbookContext} /></section>
     <section className={moduleClass("生成打印", "generation-workbench-shell full")}>
       <div className="generation-command-center">
         <div>
@@ -1849,7 +1883,11 @@ function TeacherWorkspace({
               ? <label>考试类型<select value={assessmentExamType} onChange={(event) => setAssessmentExamType(event.target.value)}>{examTypeOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
               : generationMode === "practice"
                 ? <label>训练目标<select value={assessmentTrainingTarget} onChange={(event) => setAssessmentTrainingTarget(event.target.value)}>{practiceTrainingTargetOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
-                : <label>章节 / 单元<select value={assessmentQuizChapter} onChange={(event) => setAssessmentQuizChapter(event.target.value)}>{activeQuizChapterOptions.map((item) => <option key={item}>{item}</option>)}</select></label>}
+                : <label>章节 / 单元<select disabled={!generationTextbookContext || !generationTextbookChapters.length} value={generationTextbookContext?.chapter?.id || ""} onChange={(event) => {
+                  const chapter = generationTextbookChapters.find((item) => item.id === event.target.value);
+                  setAssessmentQuizChapter(chapter?.title || "");
+                  onSelectTextbookContext(generationTextbookContext ? { asset: generationTextbookContext.asset, chapter } : null);
+                }}><option value="">{generationTextbookContext ? generationTextbookChapters.length ? "整册 / 教师自定义范围" : "当前教材暂无章节索引" : "请先选择教材基准"}</option>{generationTextbookChapters.map((chapter) => <option key={chapter.id} value={chapter.id}>{chapter.unit ? `${chapter.unit} · ` : ""}{chapter.title}</option>)}</select></label>}
             {generationMode === "exam"
               ? <label>总分<select value={assessmentTotalScore} onChange={(event) => setAssessmentTotalScore(event.target.value)}>{examTotalScoreOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
               : <label>题量目标<select value={assessmentQuestionCount} onChange={(event) => setAssessmentQuestionCount(event.target.value)}>{activeQuestionCountOptions.map((item) => <option key={item}>{item}</option>)}</select></label>}
@@ -1863,15 +1901,12 @@ function TeacherWorkspace({
                   onSelectTextbookContext(null);
                   return;
                 }
-                onSelectTextbookContext({ asset, chapter: asset.chapters?.[0] });
+                const chapter = asset.chapters?.[0];
+                setAssessmentQuizChapter(chapter?.title || "");
+                onSelectTextbookContext({ asset, chapter });
               }}><option value="">请选择匹配的贵州遵义教材基准</option>{generationTextbookAssets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title} · {asset.volume}</option>)}</select></label>
               : null}
-            {generationMode === "quiz" && generationTextbookContext && generationTextbookChapters.length
-              ? <label className="wide-field">教材章节<select value={generationTextbookContext.chapter?.id || ""} onChange={(event) => {
-                const chapter = generationTextbookChapters.find((item) => item.id === event.target.value);
-                onSelectTextbookContext({ asset: generationTextbookContext.asset, chapter });
-              }}><option value="">整册 / 教师自定义范围</option>{generationTextbookChapters.map((chapter) => <option key={chapter.id} value={chapter.id}>{chapter.unit ? `${chapter.unit} · ` : ""}{chapter.title}</option>)}</select></label>
-              : null}
+            {generationMode === "quiz" && generationTextbookContext && !generationTextbookChapters.length ? <div className="context-note blocked"><span>当前教材暂无章节索引；请先补齐目录草案并核对后再按章节生成。</span><button className="secondary-button" disabled={!chapterDraftsForTextbookAsset(generationTextbookContext.asset).length} onClick={() => onSaveTextbookChapters(generationTextbookContext.asset.id, chapterDraftsForTextbookAsset(generationTextbookContext.asset))} type="button"><FileText size={16} />建立章节草案</button></div> : null}
             <label className="wide-field">知识点 / 考查范围<input value={textbookHint || assessmentKnowledgeRange} onChange={(event) => setAssessmentKnowledgeRange(event.target.value)} /></label>
           </div>
           <div className="generation-section-box">
@@ -1883,7 +1918,7 @@ function TeacherWorkspace({
           </div>
           <label className="field-label">教师补充要求<textarea className="wide-textarea compact-textarea" value={assessmentRequirement} onChange={(event) => setAssessmentRequirement(event.target.value)} /></label>
           <p className="context-note"><ShieldCheck size={15} />排版规则已按当前题型自动优化：学生卷不出现答案，解析卷包含答案、步骤和易错提醒。</p>
-          {generationMode === "quiz" ? <div className="generation-source-card"><strong>教材资料状态<StatusPill label={hasApprovedTextbookSource ? "可生成" : generationTextbookContext ? "待复核" : "待选择"} status={hasApprovedTextbookSource ? "ready" : "pending"} /></strong><span>{generationTextbookContext ? hasApprovedTextbookSource ? `已找到 ${matchingApprovedTextbookSources.length} 份已复核且允许生成的资料。` : "当前教材需要先完成资料索引和教师复核，审核通过后即可生成小测。" : `当前年级和科目下有 ${generationTextbookAssets.length} 本可选教材。`}</span>{!hasApprovedTextbookSource ? <div className="button-row"><button className="secondary-button" disabled={isAssessmentRecoveryBusy} onClick={() => void recoverAssessmentEvidence()} type="button"><RefreshCw size={16} />{isAssessmentRecoveryBusy ? "正在修复教材依据" : "修复教材依据"}</button><button className="primary-button" onClick={submitTeacherRequirementEmergencyDraft} type="button"><ShieldCheck size={16} />按教师要求生成临时草稿</button><button className="secondary-button" onClick={() => onOpenModule("教材资料")} type="button"><BookOpen size={16} />前往教材资料审核</button></div> : null}</div> : null}
+          {generationMode === "quiz" ? <div className="generation-source-card"><strong>教材资料状态<StatusPill label={hasApprovedTextbookSource ? "可生成" : generationTextbookContext ? "待确认" : "待选择"} status={hasApprovedTextbookSource ? "ready" : "pending"} /></strong><span>{generationTextbookContext ? hasApprovedTextbookSource ? `已找到 ${matchingApprovedTextbookSources.length} 份已确认且允许生成的范围来源。` : "请由教师确认当前教材章节范围；这只恢复小测的范围依据，不转写教材正文。" : `当前年级和科目下有 ${generationTextbookAssets.length} 本可选教材。`}</span>{!hasApprovedTextbookSource ? <div className="button-row"><button className="secondary-button" disabled={isAssessmentRecoveryBusy} onClick={() => void recoverAssessmentEvidence()} type="button"><RefreshCw size={16} />{isAssessmentRecoveryBusy ? "正在修复教材依据" : "修复教材依据"}</button>{generationTextbookContext?.chapter ? <button className="primary-button" onClick={() => void onConfirmTextbookGenerationScope(generationTextbookContext.asset.id, [generationTextbookContext.chapter?.id || ""])} type="button"><ShieldCheck size={16} />确认当前教材章节范围并恢复小测</button> : null}<button className="primary-button" onClick={submitTeacherRequirementEmergencyDraft} type="button"><ShieldCheck size={16} />按教师要求生成临时草稿</button><button className="secondary-button" onClick={() => onOpenModule("教材资料")} type="button"><BookOpen size={16} />前往教材资料审核</button></div> : null}</div> : null}
           {quizGenerationBlockReason ? <p className="context-note blocked"><ShieldCheck size={15} />{quizGenerationBlockReason}</p> : null}
         </main>
 
@@ -1900,7 +1935,9 @@ function TeacherWorkspace({
             {latestAssessmentDraft?.draftAsset ? <a className="draft-pdf-link" href={latestAssessmentDraft.draftAsset.url} target="_blank" rel="noreferrer"><FileText size={17} />打开审查 PDF</a> : <button className="secondary-button" disabled type="button"><FileText size={17} />打开审查 PDF</button>}
             {latestAssessmentDraft?.layoutValidation?.ok === false || (latestAssessmentDraft && !latestAssessmentDraft.layoutValidation) ? <p className="context-note blocked"><ShieldCheck size={15} />排版校验未通过：{latestAssessmentDraft.layoutValidation?.issues.join("；") || "缺少有效的页数和题目坐标校验，请重新导出草稿。"}</p> : null}
             <button className="primary-button" disabled={!latestAssessmentDraft || latestAssessmentDraft.layoutValidation?.ok !== true} onClick={() => latestAssessmentDraft && onExportPrint(latestAssessmentDraft.assignmentId)}><CheckCircle2 size={17} />确认正式导出</button>
-            <button className="secondary-button danger-button" disabled={!latestAssessmentDraft} onClick={() => latestAssessmentDraft && onAssessmentReject(latestAssessmentDraft.assignmentId)}><RefreshCw size={17} />否决并重新生成</button>
+            <button className="secondary-button danger-button" disabled={!latestAssessmentDraft || latestAssessmentDraft.reviewStatus !== "pending"} onClick={() => latestAssessmentDraft && onAssessmentReject(latestAssessmentDraft.assignmentId)} type="button"><CircleX size={17} />否决草稿</button>
+            <button className="secondary-button" disabled={!latestAssessmentDraft || latestAssessmentDraft.reviewStatus !== "rejected"} onClick={() => latestAssessmentDraft && onAssessmentRegenerate(latestAssessmentDraft.assignmentId)} type="button"><RefreshCw size={17} />重新生成</button>
+            {latestAssessmentDraft?.finalExportAssets?.studentPaper || latestAssessmentDraft?.finalExportAssets?.answerAnalysis ? <div className="generation-final-assets"><strong>本任务正式导出</strong>{latestAssessmentDraft?.finalExportAssets?.studentPaper ? <a className="draft-pdf-link" href={latestAssessmentDraft.finalExportAssets.studentPaper.url} target="_blank" rel="noreferrer"><FileText size={17} />学生卷 PDF</a> : null}{latestAssessmentDraft?.finalExportAssets?.answerAnalysis ? <a className="draft-pdf-link" href={latestAssessmentDraft.finalExportAssets.answerAnalysis.url} target="_blank" rel="noreferrer"><FileText size={17} />答案解析 PDF</a> : null}</div> : null}
           </div>
           {generationFeedbackVisible ? <div className={`generation-inline-status ${generationFeedbackStatus}`}><StatusDot status={generationFeedbackStatus} /><span>{generationFeedbackMessage}</span></div> : null}
           {latestAssessmentDraft ? <div className="generation-current-draft"><strong>{latestAssessmentDraft.targetLabel} · {latestAssessmentDraft.subject} · {latestAssessmentDraft.kind}</strong><StatusPill label={latestAssessmentDraft.reviewStatus === "accepted" ? "已确认" : latestAssessmentDraft.reviewStatus === "rejected" ? "已否决" : "待审查"} status={latestAssessmentDraft.reviewStatus === "accepted" ? "ready" : latestAssessmentDraft.reviewStatus === "rejected" ? "blocked" : "pending"} /><span>请先打开 PDF 草稿审查题目、题量和排版。</span></div> : null}
@@ -2070,7 +2107,7 @@ function StudentWorkspace({
       {qaBusy ? <p className="thinking-box">小航正在思考中，请耐心等待。</p> : null}
       {answer ? <p className="answer-box">{answer}</p> : null}
     </section>
-    <section className={moduleClass("英语词汇", "panel full")}><PanelTitle badge="AI生成" icon={BookOpen} title="英语词汇助理" /><StudentVocabularyAssistant student={student} /></section>
+    <section className={moduleClass("英语词典", "panel full")}><PanelTitle badge="AI生成" icon={BookOpen} title="英语词典" /><StudentDictionary /></section>
     <section className={moduleClass("拍照提交", "panel full")}><PanelTitle icon={Upload} title="拍照提交" /><p className="muted-line">学生端用于作业、练习、小测、试卷和听写照片提交。提交后进入教师端复核，不在学生端直接展示批改细节。</p><div className="template-controls"><label>科目<select value={uploadSubject} onChange={(event) => setUploadSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label><label>类型<select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option>作业</option><option>练习</option><option>小测</option><option>试卷</option><option>听写</option></select></label></div><label className="field-label">记录标题<input value={uploadTitle} placeholder="例如：周三数学作业、Unit 2 听写" onChange={(event) => setUploadTitle(event.target.value)} /></label><label className="field-label">拍照或选择图片<input multiple type="file" accept="image/*" capture="environment" onChange={(event) => setUploadFiles(Array.from(event.target.files || []))} /></label><p className="muted-line">当前已选择 {uploadFiles.length} 张，可一次提交多页内容。</p><button className="primary-button" onClick={() => onUploadReview({ studentId: student.id, subject: uploadSubject, kind: uploadKind, title: submitTitle, images: uploadFiles })}><Upload size={17} />提交给老师</button></section>
     <section className={moduleClass("学生档案", "panel full")}><PanelTitle icon={FileText} title="学生档案" /><StudentArchive corrections={corrections} logs={logs} reports={reports} student={student} /></section>
   </div>;
@@ -2133,29 +2170,6 @@ const demoVocabulary = [
   }
 ];
 
-type VocabularyEntry = typeof demoVocabulary[number];
-
-function createVocabularyEntry(word: string): VocabularyEntry {
-  const normalized = word.trim().toLowerCase();
-  const existing = demoVocabulary.find((item) => item.word.toLowerCase() === normalized);
-  if (existing) return existing;
-  return {
-    word: normalized || "word",
-    phonetic: "待补充",
-    part: "待补充",
-    partCn: "词性待补充",
-    meaning: "释义待教师或 AI 补充",
-    forms: [],
-    related: [
-      { word: normalized || "word", part: "待补充", partCn: "词性待补充", meaning: "相关词义待补充" }
-    ],
-    examples: [
-      `I want to learn the word "${normalized || "word"}".`
-    ],
-    pitfall: "当前单词还没有进入本地词库，后续会接入 AI 词汇生成与教师复核。"
-  };
-}
-
 function englishFocusMeaning(item: string) {
   const trimmed = item.trim();
   if (!trimmed) return "";
@@ -2184,55 +2198,47 @@ function readingFocusLabel(item: string, subject: string) {
   return subject === "英语" ? englishFocusMeaning(item) : item;
 }
 
-function StudentVocabularyAssistant({ student }: { student: StudentProfile }) {
-  const [wordInput, setWordInput] = useState(demoVocabulary[0].word);
-  const [entry, setEntry] = useState<VocabularyCard | null>(null);
+function StudentDictionary() {
+  const [wordInput, setWordInput] = useState("");
+  const [entry, setEntry] = useState<StudentDictionaryEntry | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const related = entry?.related || [];
-  const examples = entry?.examples || [];
-  const generateWord = async () => {
-    const nextWord = wordInput.trim().toLowerCase();
-    if (!nextWord || busy) return;
+
+  const queryWord = async () => {
+    if (!wordInput.trim() || busy) return;
     setBusy(true);
     setError("");
+    setEntry(null);
     try {
-      const response = await generateVocabularyCard({
-        word: nextWord,
-        studentId: student.id,
-        studentName: student.displayName,
-        grade: student.grade
-      });
-      setEntry(response.result.card);
+      const response = await queryStudentDictionary(wordInput);
+      setEntry(response.result.entry);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message.includes("登录") ? "请先登录学生端后再生成词汇卡。" : message);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
   };
-  return <div className="student-vocab-panel">
+
+  return <div className="student-vocab-panel student-dictionary-panel">
     <div className="template-controls vocab-input-controls">
-      <label>输入单词<input value={wordInput} onChange={(event) => setWordInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void generateWord(); }} placeholder="例如：careful" /></label>
-      <button className="primary-button" disabled={busy} onClick={() => void generateWord()}><Sparkles size={17} />{busy ? "正在生成" : "生成词汇卡"}</button>
+      <label>输入单词<input value={wordInput} onChange={(event) => setWordInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void queryWord(); }} placeholder="例如：carried" /></label>
+      <button className="primary-button" disabled={busy} onClick={() => void queryWord()}><Search size={17} />{busy ? "正在查询" : "查询单词"}</button>
     </div>
-    <div className="button-row vocab-quick-row">
-      {demoVocabulary.map((item) => <button className="secondary-button" key={item.word} onClick={() => setWordInput(item.word)}>{item.word}</button>)}
-    </div>
-    {busy ? <p className="thinking-box">小航正在生成词汇卡，请耐心等待。</p> : null}
-    {error ? <p className="answer-box">词汇生成暂时不可用：{error}</p> : null}
-    {entry ? <article className="vocab-card">
-      <div>
-        <h2>{entry.word}</h2>
-        <p><strong>{entry.part}（{entry.partCn}）</strong><span>{entry.phonetic}</span><span>{entry.meaning}</span></p>
-      </div>
-      <StatusPill label="AI生成" status="ready" />
-    </article> : <p className="review-empty">输入单词后点击生成，系统会生成词性、中文释义、相关单词、造句和易错点。</p>}
-    {related.length ? <div className="related-word-grid">
-      {related.map((item) => <span key={item.word}><strong>{item.word}</strong><em>{item.part}（{item.partCn}）</em><b>{item.meaning}</b></span>)}
-    </div> : null}
-    {examples.length ? <div className="qa-card"><p className="question-line">造句</p><ul className="example-list">{examples.map((example) => <li key={example}>{example}</li>)}</ul></div> : null}
-    {entry?.pitfall ? <div className="qa-card"><p className="question-line">易错点</p><p className="note-line">{entry.pitfall}</p></div> : null}
+    {busy ? <p className="thinking-box">正在查询并整理词条，请稍候。</p> : null}
+    {error ? <p className="answer-box">{error}</p> : null}
+    {!busy && !error && !entry ? <p className="review-empty">输入英文单词或常见变化形式，查看完整词义与用法。</p> : null}
+    {entry ? <article className="dictionary-entry">
+      <header className="dictionary-entry-head"><div><h2>{entry.headword}</h2><p>{entry.phonetic}</p><strong>{entry.queryRelation.label}</strong></div><StatusPill label="AI生成" status="ready" /></header>
+      <section><h3>词性与释义</h3>{entry.parts.map((item) => <div className="dictionary-part" key={`${item.part}-${item.partCn}`}><strong>{item.partCn} · {item.part}</strong><ul>{item.meanings.map((meaning) => <li key={meaning}>{meaning}</li>)}</ul></div>)}</section>
+      {entry.forms.length ? <section><h3>词形变化</h3><div className="dictionary-chip-grid">{entry.forms.map((item) => <span key={`${item.term}-${item.type}`}><strong>{item.term}</strong>{item.label}</span>)}</div></section> : null}
+      {entry.wordFamily.length ? <section><h3>派生词</h3><div className="dictionary-card-grid">{entry.wordFamily.map((item) => <div key={item.word}><strong>{item.word}</strong><span>{item.partCn}</span><p>{item.meaning}</p></div>)}</div></section> : null}
+      {entry.synonyms.length ? <section><h3>近义词与区别</h3><div className="dictionary-card-grid">{entry.synonyms.map((item) => <div key={item.word}><strong>{item.word}</strong><p>{item.meaning}</p><span>{item.difference}</span></div>)}</div></section> : null}
+      {entry.antonyms.length ? <section><h3>反义词</h3><div className="dictionary-chip-grid">{entry.antonyms.map((item) => <span key={item.word}><strong>{item.word}</strong>{item.meaning}</span>)}</div></section> : null}
+      {entry.collocations.length ? <section><h3>常用搭配</h3><div className="dictionary-chip-grid">{entry.collocations.map((item) => <span key={item.phrase}><strong>{item.phrase}</strong>{item.meaning}</span>)}</div></section> : null}
+      <section><h3>双语例句</h3><div className="dictionary-example-list">{entry.examples.map((item) => <div key={item.sentence}><strong>{item.sentence}</strong><span>{item.translation}</span></div>)}</div></section>
+      {entry.usageNotes.length ? <section><h3>用法说明</h3><ul>{entry.usageNotes.map((item) => <li key={item}>{item}</li>)}</ul></section> : null}
+      {entry.pitfalls.length ? <section><h3>易错点</h3><ul>{entry.pitfalls.map((item) => <li key={item}>{item}</li>)}</ul></section> : null}
+    </article> : null}
   </div>;
 }
 
@@ -2248,7 +2254,7 @@ function StudentModuleHome({ assignments, corrections, isLoggedIn, logs, onLogin
   const moduleCards = [
     { icon: CalendarDays, title: "今日任务", text: "查看老师发布的任务、预计用时和提交状态。", stat: pendingTasks ? `待完成 ${pendingTasks}` : "今日已完成", tone: "blue", priority: "primary", note: latestTask?.title || "等待老师发布今日任务" },
     { icon: Bot, title: "AI问答", text: "遇到问题先看思路引导，再继续尝试。", stat: "可提问", tone: "green", priority: "standard", note: "知识解释 / 解题提示" },
-    { icon: BookOpen, title: "英语词汇", text: "查询词义、词性、词形变化和易错点。", stat: "词汇助手", tone: "cyan", priority: "standard", note: "单词查询 / 易错变化" },
+    { icon: BookOpen, title: "英语词典", text: "查询词义、词形、近义词、搭配和双语例句。", stat: "单词查询", tone: "cyan", priority: "standard", note: "原形 / 常见变化形式" },
     { icon: Upload, title: "拍照提交", text: "作业、练习、小测和听写都可以拍照上传。", stat: latestAssignment?.status || "等待提交", tone: "amber", priority: "standard", note: latestAssignment ? `${latestAssignment.subject}${latestAssignment.kind}：${latestAssignment.title}` : "提交后等待老师查看" },
     { icon: FileText, title: "学生档案", text: "查看老师复核后的阶段反馈和待巩固内容。", stat: reports.length ? `已发布 ${reports.length}` : `${corrections.length} 处待巩固`, tone: "purple", priority: "standard", note: latestReport?.title || "老师复核后同步" },
     { icon: UsersRound, title: "互动扩展", text: "老师开启后，可参加学习小队或阶段活动。", stat: "老师开启后", tone: "soft", priority: "secondary", note: "不做公开排名" }
@@ -3029,34 +3035,11 @@ function ReviewBatchCard({ batch, onMarkReviewed, onRecognize }: { batch: Review
 }
 
 function defaultChaptersForAsset(asset: TextbookAsset): TextbookChapter[] {
-  if (asset.subject === "英语") {
-    return Array.from({ length: 6 }, (_, index) => {
-      const unit = `Unit ${index + 1}`;
-      return {
-        id: `${asset.id}-unit-${index + 1}`,
-        unit,
-        title: `${unit} 预习与跟读`,
-        pageStart: null,
-        pageEnd: null,
-        focusItems: ["新单词", "重点句型", "课本音频跟读"],
-        dictationItems: [`请从${unit}课本词汇表核对后补充单词`],
-        readingSupport: `请结合智慧中小学授课模式核对 ${unit} 课文原文、页码和课本音频后再发布。`
-      };
-    });
-  }
-  if (asset.subject === "语文") {
-    return ["第一单元", "第二单元", "第三单元", "第四单元", "第五单元", "第六单元", "第七单元", "第八单元"].map((unit, index) => ({
-      id: `${asset.id}-unit-${index + 1}`,
-      unit,
-      title: `${unit} 课文跟读`,
-      pageStart: null,
-      pageEnd: null,
-      focusItems: ["难字词", "重点句", "朗读节奏"],
-      dictationItems: [`请从${unit}课后生字词核对后补充词语`],
-      readingSupport: `请结合智慧中小学授课模式核对${unit}课文原文、页码和朗读音频后再发布。`
-    }));
-  }
-  return [];
+  return chapterDraftsForTextbookAsset(asset);
+}
+
+function mergedChaptersForAsset(asset: TextbookAsset, existingChapters: TextbookChapter[] = []) {
+  return mergeTextbookChapterDrafts(asset, existingChapters);
 }
 
 function parseChapterDraft(text: string, asset: TextbookAsset): TextbookChapter[] {
@@ -3233,7 +3216,7 @@ function knowledgeStatusLabel(status: string) {
   return "待复核";
 }
 
-function TextbookLibrary({ assets, onOpen, onSaveChapters, onSelectContext, selectedContext }: { assets: TextbookAsset[]; onOpen: (assetId: string) => void; onSaveChapters: (assetId: string, chapters: TextbookChapter[]) => void; onSelectContext: (context: { asset: TextbookAsset; chapter?: TextbookChapter } | null) => void; selectedContext: { asset: TextbookAsset; chapter?: TextbookChapter } | null }) {
+function TextbookLibrary({ assets, onConfirmGenerationScope, onOpen, onSaveChapters, onSelectContext, selectedContext }: { assets: TextbookAsset[]; onConfirmGenerationScope: (assetId: string, chapterIds: string[]) => Promise<void>; onOpen: (assetId: string) => void; onSaveChapters: (assetId: string, chapters: TextbookChapter[]) => void; onSelectContext: (context: { asset: TextbookAsset; chapter?: TextbookChapter } | null) => void; selectedContext: { asset: TextbookAsset; chapter?: TextbookChapter } | null }) {
   const [editingAssetId, setEditingAssetId] = useState("");
   const [chapterDraft, setChapterDraft] = useState("");
   if (!assets.length) return <p className="review-empty">暂无教材索引。请先确认 D:\君航AI助教\textbooks 存在，然后点击“重扫教材目录”。</p>;
@@ -3242,7 +3225,54 @@ function TextbookLibrary({ assets, onOpen, onSaveChapters, onSelectContext, sele
     openable: assets.filter((asset) => asset.openable).length,
     readonly: assets.filter((asset) => asset.importState.includes("只读")).length
   };
-  return <div className="textbook-library"><div className="teacher-flow-grid compact-grid"><FlowCard icon={BookOpen} index={1} label="索引教材" state="ready" value={`${stats.total}`} hint="只读记录，不改原教材文件" /><FlowCard icon={ShieldCheck} index={2} label="原文件可访问" state={stats.openable ? "ready" : "pending"} value={`${stats.openable}`} hint="由智慧中小学 App 或默认程序打开" /><FlowCard icon={Lock} index={3} label="章节索引" state={assets.some((asset) => asset.chapterCount) ? "ready" : "pending"} value={`${assets.reduce((sum, asset) => sum + (asset.chapterCount || 0), 0)}`} hint="教师核对后可带入跟读、听写和组卷" /></div>{selectedContext ? <p className="context-note"><BookOpen size={15} />当前教材上下文：{selectedContext.asset.title}{selectedContext.chapter ? ` / ${selectedContext.chapter.title}` : ""}<button className="inline-link-button" onClick={() => onSelectContext(null)}>清除</button></p> : null}<div className="textbook-grid">{assets.map((asset) => { const chapters = asset.chapters?.length ? asset.chapters : []; const isEditing = editingAssetId === asset.id; return <article className="textbook-card" key={asset.id}><div className="textbook-card-head"><SubjectBadge subject={(subjects.includes(asset.subject as SubjectLabel) ? asset.subject : "语文") as SubjectLabel} /><StatusPill label={asset.chapterCount ? `${asset.chapterCount}章` : asset.importState || "只读索引"} status={asset.openable ? "ready" : "pending"} /></div><h3>{asset.title}</h3><p>{asset.grade} · {asset.subject} · {asset.editionDisplay || asset.edition} · {asset.volume}</p><small>{asset.relativePath || asset.source}</small><div className="review-meta-row"><span>{asset.ext || "文件"}</span><span>{asset.openWith || "智慧中小学"}</span><span>{asset.size ? `${Math.round(asset.size / 1024 / 1024)} MB` : "大小未知"}</span></div>{chapters.length ? <div className="chapter-chip-list">{chapters.slice(0, 4).map((chapter) => <button key={chapter.id} onClick={() => onSelectContext({ asset, chapter })}>{chapter.unit ? `${chapter.unit} · ` : ""}{chapter.title}</button>)}</div> : <p className="review-empty compact">暂无章节索引，可先生成草案后结合智慧中小学核对。</p>}{isEditing ? <div className="chapter-editor"><p>每行一个章节：单元 | 标题 | 起始页 | 结束页 | 重点 | 听写词 | 跟读说明</p><textarea value={chapterDraft} onChange={(event) => setChapterDraft(event.target.value)} /><div className="button-row"><button className="primary-button" onClick={() => { onSaveChapters(asset.id, parseChapterDraft(chapterDraft, asset)); setEditingAssetId(""); }}><ShieldCheck size={16} />保存章节索引</button><button className="secondary-button" onClick={() => setChapterDraft(chaptersToDraftText(defaultChaptersForAsset(asset)))}><RefreshCw size={16} />生成草案</button></div></div> : null}<div className="button-row"><button className="secondary-button" onClick={() => onOpen(asset.id)}><BookOpen size={16} />打开原教材</button><button className="secondary-button" onClick={() => { setEditingAssetId(isEditing ? "" : asset.id); setChapterDraft(chaptersToDraftText(chapters.length ? chapters : defaultChaptersForAsset(asset))); }}><FileText size={16} />章节索引</button><button className="secondary-button" onClick={() => onSelectContext({ asset, chapter: chapters[0] })}><Send size={16} />带入任务</button></div></article>; })}</div></div>;
+  return <div className="textbook-library">
+    <div className="teacher-flow-grid compact-grid">
+      <FlowCard icon={BookOpen} index={1} label="索引教材" state="ready" value={`${stats.total}`} hint="只读记录，不改原教材文件" />
+      <FlowCard icon={ShieldCheck} index={2} label="原文件可访问" state={stats.openable ? "ready" : "pending"} value={`${stats.openable}`} hint="由智慧中小学 App 或默认程序打开" />
+      <FlowCard icon={Lock} index={3} label="章节索引" state={assets.some((asset) => asset.chapterCount) ? "ready" : "pending"} value={`${assets.reduce((sum, asset) => sum + (asset.chapterCount || 0), 0)}`} hint="教师核对后可带入跟读、听写和组卷" />
+    </div>
+    {selectedContext ? <p className="context-note"><BookOpen size={15} />当前教材上下文：{selectedContext.asset.title}{selectedContext.chapter ? ` / ${selectedContext.chapter.title}` : ""}<button className="inline-link-button" onClick={() => onSelectContext(null)}>清除</button></p> : null}
+    <div className="textbook-grid">
+      {assets.map((asset) => {
+        const chapters = asset.chapters?.length ? asset.chapters : [];
+        const seedChapters = defaultChaptersForAsset(asset);
+        const draftChapters = mergedChaptersForAsset(asset, chapters);
+        const missingChapterCount = draftChapters.length - chapters.length;
+        const chapterIndexHint = chapters.length
+          ? missingChapterCount ? `${chapters.length}章，可补${missingChapterCount}章` : `${chapters.length}章`
+          : seedChapters.length ? "可建立章节草案" : "请手工录入目录";
+        const isEditing = editingAssetId === asset.id;
+        return <article className="textbook-card" key={asset.id}>
+          <div className="textbook-card-head">
+            <SubjectBadge subject={(subjects.includes(asset.subject as SubjectLabel) ? asset.subject : "语文") as SubjectLabel} />
+            <StatusPill label={chapterIndexHint} status={asset.openable ? "ready" : "pending"} />
+          </div>
+          <h3>{asset.title}</h3>
+          <p>{asset.grade} · {asset.subject} · {asset.editionDisplay || asset.edition} · {asset.volume}</p>
+          <small>{asset.relativePath || asset.source}</small>
+          <div className="review-meta-row"><span>{asset.ext || "文件"}</span><span>{asset.openWith || "智慧中小学"}</span><span>{asset.size ? `${Math.round(asset.size / 1024 / 1024)} MB` : "大小未知"}</span></div>
+          {chapters.length
+            ? <div className="chapter-chip-list">{chapters.slice(0, 4).map((chapter) => <button key={chapter.id} onClick={() => onSelectContext({ asset, chapter })}>{chapter.unit ? `${chapter.unit} · ` : ""}{chapter.title}</button>)}</div>
+            : <p className="review-empty compact">{seedChapters.length ? "暂无章节索引，可载入草案后结合智慧中小学核对。" : "暂无章节索引，请从教材目录手工录入。"}</p>}
+          {missingChapterCount > 0 ? <p className="review-empty compact">当前目录可补 {missingChapterCount} 章；载入草案后会保留已有章节。</p> : null}
+          {isEditing ? <div className="chapter-editor">
+            <p>每行一个章节：单元 | 标题 | 起始页 | 结束页 | 重点 | 听写词 | 跟读说明</p>
+            <textarea value={chapterDraft} onChange={(event) => setChapterDraft(event.target.value)} />
+            <div className="button-row">
+              <button className="primary-button" onClick={() => { onSaveChapters(asset.id, parseChapterDraft(chapterDraft, asset)); setEditingAssetId(""); }}><ShieldCheck size={16} />保存章节索引</button>
+              <button className="secondary-button" disabled={missingChapterCount === 0} onClick={() => setChapterDraft(chaptersToDraftText(draftChapters))}><RefreshCw size={16} />载入草案</button>
+            </div>
+          </div> : null}
+          <div className="button-row">
+            <button className="secondary-button" onClick={() => onOpen(asset.id)}><BookOpen size={16} />打开原教材</button>
+            <button className="secondary-button" onClick={() => { setEditingAssetId(isEditing ? "" : asset.id); setChapterDraft(chaptersToDraftText(draftChapters)); }}><FileText size={16} />章节索引</button>
+            <button className="primary-button" disabled={!chapters[0]} onClick={() => void onConfirmGenerationScope(asset.id, [chapters[0]?.id || ""])}><ShieldCheck size={16} />确认首章范围</button>
+            <button className="secondary-button" onClick={() => onSelectContext({ asset, chapter: chapters[0] })}><Send size={16} />带入任务</button>
+          </div>
+        </article>;
+      })}
+    </div>
+  </div>;
 }
 
 function reviewNeedsConfirmedScore(item: ReviewSubmission) {
