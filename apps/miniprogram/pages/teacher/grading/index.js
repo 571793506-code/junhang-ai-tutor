@@ -28,7 +28,7 @@ Page({
     api.bootstrap()
       .then((bootstrap) => {
         const students = (bootstrap.students || []).filter(
-          (item) => !item.responsibleTeacherId || item.responsibleTeacherId === teacher.id
+          (item) => (!item.responsibleTeacherId || item.responsibleTeacherId === teacher.id) && item.canReceiveNewWork
         );
         this.setData({
           students,

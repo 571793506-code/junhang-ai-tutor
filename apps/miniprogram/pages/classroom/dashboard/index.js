@@ -40,7 +40,7 @@ Page({
         {};
       const grade = device.grade || "三年级";
       const students = (bootstrap.students || [])
-        .filter((item) => item.grade === grade)
+        .filter((item) => item.grade === grade && item.canReceiveNewWork)
         .slice(0, 4)
         .map((item, index) => ({
           ...item,
