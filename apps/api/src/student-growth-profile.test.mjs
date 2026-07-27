@@ -207,6 +207,18 @@ function studentFixture() {
   };
 }
 
+test("teacher-reviewed graded submissions are admitted to profile evidence", () => {
+  const student = studentFixture();
+  student.submissions = [student.submissions[0]];
+  student.submissions[0].status = "GRADED";
+
+  const evidence = buildProfileEvidencePack(student, { now });
+
+  assert.equal(evidence.gradingEvidence.length, 1);
+  assert.equal(evidence.blockedEvidence.filter((item) => item.type === "grading").length, 0);
+  assert.equal(evidence.gradingEvidence[0].score, 82);
+});
+
 function periodBoundaryFixture(boundaries) {
   const fixture = studentFixture();
   fixture.tasks = boundaries.map(({ id, at }) => ({

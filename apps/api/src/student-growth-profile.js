@@ -26,9 +26,9 @@ export function buildProfileEvidencePack(student, options = {}) {
 
   submissions.forEach((submission) => {
     const result = safeObject(submission.grading?.result);
-    const blocked = submission.status !== "REVIEWED"
+    const blocked = !["GRADED", "REVIEWED"].includes(submission.status)
       || result.needsTeacherReview === true
-      || result.archiveEligible === false
+      || result.archiveEligible !== true
       || result.provisionalScore != null
       || String(result.confidence || "").toLowerCase() === "low";
     const item = {
