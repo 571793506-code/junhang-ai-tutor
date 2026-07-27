@@ -45,6 +45,7 @@
     "check:grading:quality": "node scripts/grading-quality-check.mjs",
     "check:generation:layout": "node scripts/generation-layout-check.mjs",
     "check:web:generation-workbench": "node scripts/web-generation-workbench-ui.test.mjs",
+    "check:web:grading-upload": "node --test apps/web/src/review-image-picker.test.mjs",
     "check:content-context": "node scripts/content-context-e2e.mjs",
     "check:content-upload-ui": "node scripts/content-upload-ui-contract.mjs",
     "check:teaching-content": "node scripts/teaching-content-check.mjs",

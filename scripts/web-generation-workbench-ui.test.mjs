@@ -12,7 +12,7 @@ test("generation workbench keeps selectable options for preview-matched fields",
   assert.match(source, /const examTotalScoreOptions = \[/);
   assert.match(source, /const mathBonusQuestionOptions = \[/);
   assert.match(source, /generationStudentId/);
-  assert.match(source, /const generationTargetStudents = students\.filter/);
+  assert.match(source, /const generationTargetStudents = selectableStudents\.filter/);
   assert.match(source, /selectGenerationStudent/);
   assert.match(source, /student\.grade === targetGrade/);
   assert.match(source, /assessmentSubject === "数学"/);
@@ -96,7 +96,7 @@ test("generation workbench blocks textbook quizzes until matching baseline evide
   assert.match(source, /generationTextbookContext/);
   assert.match(source, /quizGenerationBlockReason/);
   assert.match(source, /贵州遵义教材基准/);
-  assert.match(source, /disabled=\{Boolean\(quizGenerationBlockReason\)\}/);
+  assert.match(source, /disabled=\{Boolean\(assessmentGenerationBlockReason\)\}/);
   assert.match(source, /textbookAssetId:\s*generationTextbookContext\?\.asset\.id/);
   assert.match(source, /asset\.editionDisplay \|\| asset\.edition/);
   assert.match(source, /matchesTextbookEvidenceScope\(\s*generationTextbookContext\.asset,\s*source\s*\)/);
@@ -207,4 +207,15 @@ test("generation review exposes the selected draft's student and answer PDFs", (
   assert.match(source, /答案解析 PDF/);
   assert.match(source, /latestAssessmentDraft\?\.finalExportAssets\?\.studentPaper/);
   assert.match(source, /latestAssessmentDraft\?\.finalExportAssets\?\.answerAnalysis/);
+});
+
+test("teacher target selectors use the API availability contract", () => {
+  assert.match(source, /students\.find\(\(student\) => student\.canReceiveNewWork\)\?\.id/);
+  assert.match(source, /const selectableStudents = useMemo\(\(\) => students\.filter\(\(student\) => student\.canReceiveNewWork\), \[students\]\);/);
+  assert.match(source, /const generationTargetStudents = selectableStudents\.filter\(\(student\) => student\.grade === targetGrade\);/);
+  assert.match(source, /visibleGenerationStudents\.map\(\(student\) => <option key=\{student\.id\}/);
+  assert.match(source, /const assessmentTargetBlockReason = generationTargetScope === "student" && !generationSelectedStudent/);
+  assert.match(source, /title="生成今日任务"[\s\S]{0,1200}\{selectableStudents\.map\(\(student\) => <option key=\{student\.id\}/);
+  assert.match(source, /title="已发布今日任务完成情况"[\s\S]{0,1800}\{selectableStudents\.map\(\(student\) => <option key=\{student\.id\}/);
+  assert.match(source, /title="拍照上传批改"[\s\S]{0,800}\{selectableStudents\.map\(\(student\) => <option key=\{student\.id\}/);
 });

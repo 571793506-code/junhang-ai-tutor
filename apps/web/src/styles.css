@@ -1055,6 +1055,24 @@ button:disabled {
   margin-top: 10px;
 }
 
+.review-image-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.review-image-picker-controls,
+.review-image-picker-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.review-image-picker-summary {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .review-upload-status {
   display: grid;
   gap: 3px;
