@@ -3892,7 +3892,8 @@ function buildAssessmentGenerationPipeline({ result = {}, draft = {}, input = {}
       teacherReviewStatus: "not_exported",
       finalExportAllowed: false,
       finalExported: false,
-      answerAnalysisRequired: true
+      answerAnalysisRequired: true,
+      gradingSourcePackageRequired: true
     },
     print: {
       paper: "A4",
@@ -4068,7 +4069,8 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
       assessmentTotalTimeoutMs: generationBudget.assessmentTotalTimeoutMs,
       assessmentMaxTokens: generationBudget.assessmentMaxTokens,
       teacherReviewRequired: true,
-      includeAnswerAnalysis: true
+      includeAnswerAnalysis: true,
+      includeStructuredAnswerPackage: true
     },
     rules: {
       repairRequired: true,
@@ -4183,6 +4185,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
             difficulty: input.difficulty || null,
             items: draft.items,
             metadata: {
+              subject: input.subject || null,
               kind: input.kind || null,
               targetScope: input.targetScope || null,
               targetStudentId: input.studentId || null,
@@ -4196,6 +4199,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
               parsedDraft: draft.parsed,
               answerKey: draft.answerKey,
               totalScore: draft.totalScore,
+              gradingSourcePackageRequested: true,
               usedDynamicFallback: draft.usedDynamicFallback,
               printNotes: draft.printNotes,
               audit: draft.audit,

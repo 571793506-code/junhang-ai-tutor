@@ -161,6 +161,8 @@ test("draftAssessmentService does not run model review by default", async () => 
   assert.equal(result.generationPipeline.modelReview.required, false);
   assert.equal(result.generationPipeline.modelReview.status, "skipped");
   assert.equal(result.generationPipeline.gates.modelReviewRequired, false);
+  assert.equal(result.generationPipeline.gates.gradingSourcePackageRequired, true);
+  assert.equal(result.generationContext.output.includeStructuredAnswerPackage, true);
 });
 
 test("draftAssessmentService treats partial GPT-5.6 partition output as dynamic repair", async () => {

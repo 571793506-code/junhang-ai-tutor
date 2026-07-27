@@ -14,7 +14,15 @@ import {
   createMiniMaxSpeechTask,
   draftStudentProfileNarrative
 } from "@junhang/ai";
-import { classifyTextbookBaseline, inspectEncodingPayload, matchesTextbookAssetSearch, mergeTextbookChapterDrafts } from "@junhang/core";
+import {
+  GRADING_SOURCE_PACKAGE_SCHEMA_VERSION,
+  classifyTextbookBaseline,
+  gradingSourceQuestionMap,
+  inspectEncodingPayload,
+  matchesTextbookAssetSearch,
+  mergeTextbookChapterDrafts,
+  validateGradingSourcePackage
+} from "@junhang/core";
 import { recognizeImages } from "@junhang/ai/ocr-node";
 import {
   createClassroomBroadcast,
@@ -262,6 +270,7 @@ async function buildSubmissionGradeInputFromRecord(submission, recognition = nul
   const content = safeJson(submission.content, {});
   const assignment = submission.assignment || {};
   const assignmentMetadata = safeJson(assignment.metadata, {});
+  const gradingSourcePackage = gradingSourcePackageForAssignment(assignment);
   const gradingResult = safeJson(submission.grading?.result, {});
   const questionLayoutManifest =
     safeJson(assignmentMetadata.questionLayoutManifest, null) ||
@@ -304,20 +313,35 @@ async function buildSubmissionGradeInputFromRecord(submission, recognition = nul
     manualText: ocr.manualText || content.manualText || null,
     pageNumber: ocr.pageNumber ?? content.pageNumber ?? null,
     questionRange: ocr.questionRange ?? content.questionRange ?? null,
-    assignmentItems: assignment.items?.map((item) => ({
-      questionNo: item.orderIndex,
-      prompt: item.prompt,
-      answer: item.answer,
-      rubric: item.rubric,
-      metadata: item.metadata || {}
-    })) || [],
-    answerKey: assignmentMetadata.answerKey || null,
+    assignmentItems: gradingSourcePackage
+      ? gradingSourcePackage.questions.map((question) => ({
+          questionNo: question.questionNo,
+          prompt: question.prompt,
+          answer: question.correctAnswer,
+          rubric: question.rubric,
+          score: question.maxScore,
+          metadata: {
+            analysisSteps: question.analysisSteps,
+            knowledgePoint: question.knowledgePoint
+          }
+        }))
+      : assignment.items?.map((item) => ({
+          questionNo: item.orderIndex,
+          prompt: item.prompt,
+          answer: item.answer,
+          rubric: item.rubric,
+          metadata: item.metadata || {}
+        })) || [],
+    answerKey: gradingSourcePackage
+      ? Object.fromEntries(gradingSourcePackage.questions.map((question) => [question.questionNo, question.correctAnswer]))
+      : assignmentMetadata.answerKey || null,
     questionLayoutManifest,
     assignmentAnalysis: {
       subject: assignment.subject?.name || assignmentMetadata.subject || null,
       kind: assignmentMetadata.kind || null,
       difficulty: assignment.difficulty || null,
-      questionLayoutManifest
+      questionLayoutManifest,
+      gradingSource: gradingSourceReference(gradingSourcePackage)
     }
   };
 }
@@ -602,6 +626,30 @@ async function assertTeacherStudentScope(req, res, studentId) {
   return false;
 }
 
+async function studentCanReceiveNewWork(studentId) {
+  if (!studentId) return false;
+  const student = await prisma.student.findFirst({
+    where: {
+      id: studentId,
+      loginEnabled: true,
+      enrollmentStatus: { not: "WITHDRAWN" }
+    },
+    select: { id: true }
+  });
+  return Boolean(student);
+}
+
+async function assertStudentAvailableForNewWork(req, res, studentId) {
+  if (!studentId || await studentCanReceiveNewWork(studentId)) return true;
+  forbidden(res, "STUDENT_TARGET_UNAVAILABLE", "该学生已停用或已退课，不能创建新的任务、生成内容或提交批改。");
+  return false;
+}
+
+async function assertTeacherActiveStudentTarget(req, res, studentId) {
+  if (req.session?.role !== "teacher") return true;
+  return assertStudentAvailableForNewWork(req, res, studentId);
+}
+
 async function teacherCanAccessDevice(teacherId, deviceId) {
   if (!teacherId || !deviceId) return false;
   const device = await prisma.classroomDevice.findFirst({
@@ -720,6 +768,24 @@ function reportTypeToClient(type) {
 
 function safeJson(value, fallback) {
   return value && typeof value === "object" ? value : fallback;
+}
+
+function gradingSourcePackageForAssignment(assignment = {}) {
+  const metadata = safeJson(assignment.metadata, {});
+  const sourcePackage = safeJson(metadata.gradingSourcePackage, null);
+  if (!sourcePackage || sourcePackage.schemaVersion !== GRADING_SOURCE_PACKAGE_SCHEMA_VERSION) return null;
+  if (sourcePackage.sourceId !== assignment.id || !Array.isArray(sourcePackage.questions) || !sourcePackage.questions.length) return null;
+  if (!validateGradingSourcePackage(sourcePackage).ok) return null;
+  return sourcePackage;
+}
+
+function gradingSourceReference(sourcePackage = null) {
+  if (!sourcePackage) return null;
+  return {
+    sourceId: sourcePackage.sourceId,
+    version: sourcePackage.version,
+    fingerprint: sourcePackage.fingerprint
+  };
 }
 
 function readContentIndexSummary(indexPath = path.resolve(workspaceRoot, "exports/content-index/index.json")) {
@@ -1102,6 +1168,7 @@ function mapStudent(student, role = "teacher") {
     accessCode: student.accessCodes?.[0]?.codePreview || null,
     enrollmentStatus: enrollmentStatusToClient(student.enrollmentStatus),
     loginEnabled: student.loginEnabled,
+    canReceiveNewWork: student.loginEnabled && student.enrollmentStatus !== "WITHDRAWN",
     registeredAt: student.createdAt.toISOString().slice(0, 10),
     focus: student.notes || "",
     weeklyScore: profile.weeklyScore ?? 0,
@@ -2262,6 +2329,8 @@ function questionScoreNumber(item) {
 
 function buildQuestionLayoutManifest(assignment, options = {}) {
   const metadata = safeJson(assignment.metadata, {});
+  const gradingSourcePackage = gradingSourcePackageForAssignment(assignment);
+  const sourceQuestions = gradingSourceQuestionMap(gradingSourcePackage || {});
   const profile = metadata.printProfile || {};
   const items = assignment.items || [];
   const answerKey = safeJson(metadata.answerKey, null);
@@ -2287,6 +2356,8 @@ function buildQuestionLayoutManifest(assignment, options = {}) {
     for (const [index, entry] of entries.entries()) {
       const item = entry.item || {};
       const itemMetadata = safeJson(item.metadata, {});
+      const questionNo = String(entry.number || questions.length + 1);
+      const sourceQuestion = sourceQuestions.get(questionNo) || null;
       const height = Math.max(0.045, Math.min(0.26, (weights[index] / totalWeight) * usableHeight));
       const bboxHeight = Math.max(0.035, Math.min(height, Math.max(0.035, 0.94 - cursor)));
       const bbox = {
@@ -2299,15 +2370,17 @@ function buildQuestionLayoutManifest(assignment, options = {}) {
       questions.push({
         assignmentItemId: item.id || null,
         orderIndex: item.orderIndex || entry.number || questions.length + 1,
-        questionNo: String(entry.number || questions.length + 1),
+        questionNo,
         sectionTitle: sectionTitleForItem(item),
         itemType: printableItemType(item),
-        prompt: readableText(item.prompt, ""),
-        answer: itemAnswerForManifest(item, Number(entry.number || questions.length + 1) - 1, answerKey),
-        analysisSteps: printableAnalysisSteps(item),
-        knowledgePoint: formatPrintableValue(itemMetadata.knowledgePoint || itemMetadata.point || ""),
+        prompt: readableText(sourceQuestion?.prompt || item.prompt, ""),
+        answer: sourceQuestion
+          ? formatPrintableValue(sourceQuestion.correctAnswer)
+          : itemAnswerForManifest(item, Number(entry.number || questions.length + 1) - 1, answerKey),
+        analysisSteps: sourceQuestion?.analysisSteps?.length ? sourceQuestion.analysisSteps : printableAnalysisSteps(item),
+        knowledgePoint: sourceQuestion?.knowledgePoint || formatPrintableValue(itemMetadata.knowledgePoint || itemMetadata.point || ""),
         commonMistake: formatPrintableValue(itemMetadata.commonMistake || ""),
-        score: questionScoreNumber(item),
+        score: optionalNumber(sourceQuestion?.maxScore) ?? questionScoreNumber(item),
         page: page.pageIndex + 1,
         bbox,
         answerSpace: {
@@ -2331,6 +2404,7 @@ function buildQuestionLayoutManifest(assignment, options = {}) {
     pageCount: options.pdfPageCount || options.htmlPageCount || pageItems.length,
     plannedPageCount: pageItems.length,
     questionCount: questions.length,
+    gradingSource: gradingSourceReference(gradingSourcePackage),
     generatedAt: new Date().toISOString(),
     questions
   };
@@ -2421,6 +2495,8 @@ function mergeGenerationPipeline(metadata = {}, patch = {}) {
 
 function answerAnalysisHtml(assignment) {
   const metadata = safeJson(assignment.metadata, {});
+  const gradingSourcePackage = gradingSourcePackageForAssignment(assignment);
+  const sourceQuestions = gradingSourceQuestionMap(gradingSourcePackage || {});
   const profile = metadata.printProfile || {};
   const items = assignment.items || [];
   const answerKey = safeJson(metadata.answerKey, null);
@@ -2459,12 +2535,15 @@ h1 { margin: 4px 0 2px; font-size: 15pt; text-align: center; font-family: "SimHe
   </div>
   ${(items.length ? items : [{ prompt: "请教师补充题目内容。", answer: "", rubric: "" }]).map((item, index) => {
     const metadata = safeJson(item.metadata, {});
-    const answer = formatPrintableValue(item.answer) || formatPrintableValue(answerKey?.[index] || answerKey?.[String(index + 1)] || "");
-    const point = formatPrintableValue(metadata.knowledgePoint || metadata.point || "");
-    const steps = printableAnalysisSteps(item);
+    const sourceQuestion = sourceQuestions.get(String(item.orderIndex || index + 1)) || null;
+    const answer = sourceQuestion
+      ? formatPrintableValue(sourceQuestion.correctAnswer)
+      : formatPrintableValue(item.answer) || formatPrintableValue(answerKey?.[index] || answerKey?.[String(index + 1)] || "");
+    const point = sourceQuestion?.knowledgePoint || formatPrintableValue(metadata.knowledgePoint || metadata.point || "");
+    const steps = sourceQuestion?.analysisSteps?.length ? sourceQuestion.analysisSteps : printableAnalysisSteps(item);
     const commonMistake = formatPrintableValue(metadata.commonMistake || "");
     return `<div class="item">
-      <div class="prompt">${index + 1}. ${escapeHtml(item.prompt || item)}</div>
+      <div class="prompt">${index + 1}. ${escapeHtml(sourceQuestion?.prompt || item.prompt || item)}</div>
       <div class="answer"><span class="label">答案</span>${answer ? escapeHtml(answer) : "<span class='empty'>等待教师补充或复核</span>"}</div>
       <div class="analysis"><span class="label">解析步骤</span><ol class="steps">${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol></div>
       ${point ? `<div class="point"><span class="label">考点</span>${escapeHtml(point)}</div>` : ""}
@@ -2706,6 +2785,7 @@ function throwIfAssessmentGenerationCancelled(signal) {
 
 async function exportAssessmentPaperAsset(req, assignment, options = {}) {
   const metadata = safeJson(assignment.metadata, {});
+  const gradingSource = gradingSourceReference(gradingSourcePackageForAssignment(assignment));
   const suffix = options.suffix || "print";
   const titleSuffix = options.titleSuffix || "题目";
   const assetRole = options.role || "student-paper";
@@ -2765,6 +2845,7 @@ async function exportAssessmentPaperAsset(req, assignment, options = {}) {
         printProfile: metadata.printProfile || null,
         layoutTemplate: metadata.layoutTemplate || null,
         audit: metadata.audit || null,
+        gradingSource,
         htmlUrl: publicGeneratedUrl(htmlFileName, req),
         htmlPageCount: paperHtmlResult.pageCount,
         addedBlankPage: paperHtmlResult.addedBlankPage,
@@ -3285,6 +3366,8 @@ app.get("/api/bootstrap", requireDatabase, requireSession(config, ["student", "t
         student.teacherAssignments.some((binding) => binding.teacherId === req.session.teacherId);
     }
     return Boolean(classroomDevice) &&
+      student.loginEnabled &&
+      student.enrollmentStatus !== "WITHDRAWN" &&
       student.grade === classroomDevice.grade &&
       (!classroomDevice.className || student.className === classroomDevice.className);
   });
@@ -3399,6 +3482,7 @@ app.post("/api/student/dictionary/query", requireDatabase, requireSession(config
 app.post("/api/teacher/tasks", requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
   const input = { ...getBody(req), teacherId: sessionTeacherId(req, req.body?.teacherId) };
   if (!(await assertTeacherStudentScope(req, res, input.studentId))) return;
+  if (!(await assertTeacherActiveStudentTarget(req, res, input.studentId))) return;
   const { options, persistence } = await persistenceOptions(input);
   const result = await draftTeacherTaskService(config, input, options);
   await auditEvent(req, {
@@ -3626,6 +3710,7 @@ app.post("/api/assessments/generation-recovery", requireDatabase, requireSession
 app.post("/api/assessments/draft", requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
   const scopedInput = assessmentDraftInputFromRequest(req);
   if (scopedInput.studentId && !(await assertTeacherStudentScope(req, res, scopedInput.studentId))) return;
+  if (scopedInput.studentId && !(await assertTeacherActiveStudentTarget(req, res, scopedInput.studentId))) return;
   const prepared = await prepareAssessmentDraftInput(req);
   if (!prepared.ok) return res.status(422).json({ ok: false, ...prepared.failure });
   const input = prepared.input;
@@ -3658,6 +3743,7 @@ app.post("/api/assessments/draft", requireSession(config, ["teacher"]), asyncRou
 app.post("/api/assessments/generation-jobs", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
   const scopedInput = assessmentDraftInputFromRequest(req);
   if (scopedInput.studentId && !(await assertTeacherStudentScope(req, res, scopedInput.studentId))) return;
+  if (scopedInput.studentId && !(await assertTeacherActiveStudentTarget(req, res, scopedInput.studentId))) return;
   const prepared = await prepareAssessmentDraftInput(req);
   if (!prepared.ok) return res.status(422).json({ ok: false, ...prepared.failure });
   const input = { ...prepared.input, createAssignment: true, persist: true };
@@ -3892,6 +3978,7 @@ app.post("/api/assessments/:assignmentId/print-export", requireDatabase, require
   const asset = paperExport.asset;
   const paperAssetMetadata = safeJson(asset.metadata, {});
   const questionLayoutManifest = safeJson(paperAssetMetadata.questionLayoutManifest, null);
+  const gradingSource = gradingSourceReference(gradingSourcePackageForAssignment(assignment));
   const analysisAsset = await prisma.generatedAsset.create({
     data: {
       kind: analysisPdfResult.ok ? "assessment-analysis-pdf" : "assessment-analysis-html",
@@ -3902,6 +3989,7 @@ app.post("/api/assessments/:assignmentId/print-export", requireDatabase, require
         assignmentId: assignment.id,
         role: "answer-analysis",
         pairedAssetId: asset.id,
+        gradingSource,
         htmlUrl: publicGeneratedUrl(analysisHtmlFileName, req),
         htmlPageCount: analysisHtmlResult.pageCount,
         addedBlankPage: analysisHtmlResult.addedBlankPage,
@@ -3977,6 +4065,7 @@ app.post(
     const scopeError = assertStudentOwnsRequest(req, input.studentId);
     if (scopeError) return res.status(403).json(scopeError);
     if (!(await assertTeacherStudentScope(req, res, input.studentId))) return;
+    if (!(await assertStudentAvailableForNewWork(req, res, input.studentId))) return;
     input.imageNames = [
       ...(Array.isArray(input.imageNames) ? input.imageNames : []),
       ...input.uploadedFiles.map((file) => file.fileName)
@@ -4038,6 +4127,7 @@ app.post("/api/submissions/batches", requireDatabase, requireSession(config, ["s
   const scopeError = assertStudentOwnsRequest(req, input.studentId);
   if (scopeError) return res.status(403).json(scopeError);
   if (!(await assertTeacherStudentScope(req, res, input.studentId))) return;
+  if (!(await assertStudentAvailableForNewWork(req, res, input.studentId))) return;
   const batchId = input.batchId || `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const ocr = buildOcrMeta(input);
   const assignment = await createAssignmentDraft({

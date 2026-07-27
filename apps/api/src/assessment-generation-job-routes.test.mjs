@@ -10,6 +10,13 @@ function routeSource(path) {
   return source.slice(start, end === -1 ? source.length : end);
 }
 
+function multilineRouteSource(path) {
+  const pathStart = source.indexOf(`"${path}"`);
+  const start = source.lastIndexOf("app.post(", pathStart);
+  const end = source.indexOf("\napp.", pathStart + 1);
+  return source.slice(start, end === -1 ? source.length : end);
+}
+
 test("assessment generation jobs validate before queueing and keep draft export review-gated", () => {
   assert.match(source, /createAssessmentGenerationJobs/);
   assert.match(source, /async function prepareAssessmentDraftInput/);
@@ -73,4 +80,43 @@ test("teacher assignment records expose draft and completed export links", () =>
   assert.match(mapSource, /finalExportAssets:/);
   assert.match(mapSource, /studentPaper/);
   assert.match(mapSource, /answerAnalysis/);
+});
+
+test("teacher task and assessment creation reject disabled student targets", () => {
+  assert.match(source, /async function assertTeacherActiveStudentTarget/);
+  assert.match(source, /loginEnabled:\s*true/);
+  assert.match(source, /enrollmentStatus:\s*\{ not: "WITHDRAWN" \}/);
+
+  const teacherTaskRoute = routeSource('post("/api/teacher/tasks"');
+  const assessmentDraftRoute = routeSource('post("/api/assessments/draft"');
+  const assessmentJobRoute = routeSource('post("/api/assessments/generation-jobs"');
+
+  assert.match(teacherTaskRoute, /assertTeacherActiveStudentTarget\(req, res, input\.studentId\)/);
+  assert.match(assessmentDraftRoute, /assertTeacherActiveStudentTarget\(req, res, scopedInput\.studentId\)/);
+  assert.match(assessmentJobRoute, /assertTeacherActiveStudentTarget\(req, res, scopedInput\.studentId\)/);
+});
+
+test("grading uploads reject students that cannot receive new work", () => {
+  const gradeRoute = multilineRouteSource("/api/submissions/grade");
+  const batchRoute = routeSource('post("/api/submissions/batches"');
+
+  assert.match(gradeRoute, /assertStudentAvailableForNewWork\(req, res, input\.studentId\)/);
+  assert.match(batchRoute, /assertStudentAvailableForNewWork\(req, res, input\.studentId\)/);
+});
+
+test("classroom bootstrap excludes disabled students from the selectable roster", () => {
+  const bootstrapStart = source.indexOf('app.get("/api/bootstrap"');
+  const bootstrapEnd = source.indexOf('\napp.', bootstrapStart + 1);
+  const bootstrapSource = source.slice(bootstrapStart, bootstrapEnd === -1 ? source.length : bootstrapEnd);
+
+  assert.match(bootstrapSource, /student\.loginEnabled/);
+  assert.match(bootstrapSource, /student\.enrollmentStatus !== "WITHDRAWN"/);
+});
+
+test("bootstrap exposes one active-target contract for every client", () => {
+  const mapStart = source.indexOf("function mapStudent");
+  const mapEnd = source.indexOf("\n}\n\nfunction map", mapStart) + 2;
+  const mapSource = source.slice(mapStart, mapEnd);
+
+  assert.match(mapSource, /canReceiveNewWork:\s*student\.loginEnabled && student\.enrollmentStatus !== "WITHDRAWN"/);
 });

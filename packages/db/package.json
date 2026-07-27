@@ -7,6 +7,9 @@
     ".": "./src/index.js"
   },
   "types": "./src/index.d.ts",
+  "dependencies": {
+    "@junhang/core": "0.1.0"
+  },
   "scripts": {
     "db:generate": "node ../../node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
     "db:migrate": "node ../../node_modules/prisma/build/index.js migrate dev --schema prisma/schema.prisma",

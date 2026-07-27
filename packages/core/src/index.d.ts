@@ -48,6 +48,7 @@ export interface StudentProfile {
   accessCode: string | null;
   enrollmentStatus: "测试" | "在读" | "暂停" | "已退课";
   loginEnabled: boolean;
+  canReceiveNewWork: boolean;
   registeredAt: string;
   focus: string;
   weeklyScore: number;

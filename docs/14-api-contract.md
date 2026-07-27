@@ -34,7 +34,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 | 能力 | 主要接口 | 多端复用方式 | 角色与可见性 | 重点验证 |
 | --- | --- | --- | --- | --- |
-| 启动数据 | `GET /api/bootstrap` | Web、小程序、平板拉取同一套启动摘要 | 按角色展示任务、学生、设备、复核状态；不展示内部配置 | `check --workspace apps/api`、`check:miniprogram-js` |
+| 启动数据 | `GET /api/bootstrap` | Web、小程序、平板拉取同一套启动摘要 | `students[].canReceiveNewWork` 是新任务、生成和批改的唯一可选标记；历史档案仍可见，不展示内部配置 | `check --workspace apps/api`、`check:miniprogram-js` |
 | 学生登录 | `POST /api/student-login` | 学生 Web/小程序共用登录校验 | 只返回学生可见身份和学习状态 | `check --workspace apps/api` |
 | 教师登录 | `POST /api/teacher-login` | 教师 Web/小程序共用登录校验 | 可返回教师工作台所需状态，不返回完整密钥或数据库配置 | `check --workspace apps/api` |
 | 课堂设备登录 | `POST /api/classroom/device-login` | 课堂平板绑定设备后拉取课堂状态 | 只显示课堂任务、解锁状态和必要学生互动信息 | `check --workspace apps/api`、`check:miniprogram-js` |
@@ -253,8 +253,10 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 默认主模型为 `gpt-5.6-terra`：小测、普通练习和个性化练习使用 `medium`，正式试卷使用 `high`。只有可恢复 availability 故障或明确 quality 故障允许把最小失败分区升级到一次 `gpt-5.6-sol/high`；configuration 故障和教学证据不足的 evidence 故障不升级，后者直接进入教师复核。
   - 局部 Sol 生成使用独立 180 秒预算，token 继承原分区；Terra 完全没有可用分区时才允许整项 Sol 重做，并继承小测 120 秒、普通练习 150 秒、试卷或个性化练习 240 秒的场景预算。Sol 后不串接第三个文本模型。
   - 部分分区失败或使用动态修复时必须写入 `usedDynamicFallback=true`，本地审查状态为 `needs_teacher_review`。默认不执行深度模型审查；显式传入 `runModelReview=true` 或服务端配置开启时，正常路径只调用一次 GPT-5.6 风险审查。
-  - 返回和落库 `generationPipeline`，记录当前阶段、模型尝试、修复状态、模型审查是否执行、打印闸门和导出资产。Web、小程序、课堂平板只读取该结构，不自行重建生成链路。
-  - `model`、`reasoningEffort`、`usedModelEscalation`、触发原因和预算均为服务端内部诊断字段；前端请求不得提交模型或档位，学生、家长、课堂平板和公共屏响应不得暴露这些字段。任何 Sol 结果仍是结构化草稿，必须通过服务层校验和教师复核。
+- 返回和落库 `generationPipeline`，记录当前阶段、模型尝试、修复状态、模型审查是否执行、打印闸门和导出资产。Web、小程序、课堂平板只读取该结构，不自行重建生成链路。
+- `model`、`reasoningEffort`、`usedModelEscalation`、触发原因和预算均为服务端内部诊断字段；前端请求不得提交模型或档位，学生、家长、课堂平板和公共屏响应不得暴露这些字段。任何 Sol 结果仍是结构化草稿，必须通过服务层校验和教师复核。
+- 新生成的小测、练习和试卷在 `Assignment.metadata.gradingSourcePackage` 中保存内部 `junhang-grading-source-v1`：包含稳定 `sourceId`、版本、题号、题干、标准答案、分值、解析步骤、考点、评分依据和完整性指纹。它是后续批改的权威来源，不作为学生或家长响应字段；学生卷与解析卷均为该来源的派生产物。
+  - 答案包与作业题目在同一数据库事务内建立；校验或指纹生成失败时整笔写入回滚，不能留下可被后续批改引用的孤立作业。
 - `POST /api/assessments/:assignmentId/draft-export`
   - 将已生成内容导出为“内容审查 PDF 草稿”，只供教师打开 PDF 审查，不在 Web/小程序内展示完整题面。
   - 返回 `asset.url`、`reviewStatus=pending_teacher_review`、`layoutValidation` 和更新后的 `generationPipeline`。
@@ -265,7 +267,8 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 - `POST /api/assessments/:assignmentId/print-export`
   - 教师确认草稿后导出正式题目 PDF 和解析 PDF。
   - 正式导出前再次检查草稿 `layoutValidation`，正式题目渲染后再次比较实际页数；任何失败均返回 `409 ASSESSMENT_LAYOUT_INVALID`，不把错误布局写成已完成正式导出。
-  - 正式题目资产 `metadata.questionLayoutManifest` 会记录每道题的 `assignmentItemId`, `questionNo`, `page`, `bbox`, `bboxSource`, `score`, `answer`, `analysisSteps`, `knowledgePoint`，并同步写回作业元数据，供后续拍照批改对齐题号、答案和页内标注区域。
+- 正式题目资产 `metadata.questionLayoutManifest` 会记录每道题的 `assignmentItemId`, `questionNo`, `page`, `bbox`, `bboxSource`, `score`, `answer`, `analysisSteps`, `knowledgePoint`，并同步写回作业元数据，供后续拍照批改对齐题号、答案和页内标注区域。
+- 学生卷和解析卷资产 `metadata.gradingSource` 仅记录该答案包的 `sourceId`、版本和指纹；布局清单与解析内容优先从同一答案包取题干、答案、分值和解析，不能让 PDF 或 OCR 结果反向成为标准答案来源。
   - `coordinateSource=browser-dom` 表示已通过本地浏览器渲染后的真实 DOM 坐标测量；浏览器不可用时才降级为 `estimated`。
   - 正式导出会把学生卷、解析卷、`questionLayoutManifest` 来源和导出时间写回 `generationPipeline.assets` 与 `generationPipeline.print`。
 
@@ -274,7 +277,8 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 关键字段：`assignmentId`, `studentId`, `subject`, `kind`, `title`, `uploadedBy`。
   - 上传后先返回 `queued=true`，后台执行混合 OCR、参考答案准备、客观题确定性比较和 GPT-5.6 主观题批改。
   - 默认 OCR 链路为 `OCR_ENGINE=vision`：MiniMax 视觉最多 2 路并发识别学生作答、印刷题干、题目区域和批改痕迹，并保持页序稳定。
-  - 有 `assignmentId` 时优先使用生成记录里的题目和答案；没有答案键时先生成 `referenceAnswers` 再批改。
+- 有 `assignmentId` 时优先使用生成记录的 `gradingSourcePackage` 逐题题干、答案、分值和解析；历史记录没有该包时才兼容读取题目、答案键和布局清单。没有可用来源时先生成 `referenceAnswers` 再批改。
+  - 新任务、生成和批改上传均由服务端复核目标学生是否可接收新工作；不可用目标返回 `403 STUDENT_TARGET_UNAVAILABLE`，不能仅依赖 Web 或小程序选择器过滤。
   - 若关联作业含 `questionLayoutManifest`，服务层必须优先使用该清单进行逐题参考答案、分值、解析和近似图片标注位置对齐，避免把整页 OCR 文本重新猜分题。
   - 单一明确答案的选择、短填空和数值题优先在服务层保守比较；混合题只把未解决题目发送给 GPT-5.6。外部材料没有答案键时由 GPT-5.6 生成参考答案和评分点。
   - 正常批改先完成一次 Terra 主批改/风险复判；只有已分类为可恢复 availability 或证据充分的 quality 故障时，才允许对最小失败题追加一次 Sol。这里的“一次风险复判”不包含条件式 Sol 升级，也不允许 Sol 后再串接第三个文本模型。
@@ -380,7 +384,8 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 前端传入 `id` 时按同一任务 ID 去重，避免刷新后重复生成同一任务。
 - `POST /api/assessments/draft`
   - 生成默认写入 `Assignment`，生成和后续批改共享同一个 `assignmentId`。
-  - 前端传入 `items`、`layoutTemplate`、`printProfile`、`targetScope`、`targetGrade`、`studentId` 时会保存到 `metadata`，作为 A4 排版、年级/学生归档和后续批改的数据结构。
+- 前端传入 `items`、`layoutTemplate`、`printProfile`、`targetScope`、`targetGrade`、`studentId` 时会保存到 `metadata`，作为 A4 排版、年级/学生归档和后续批改的数据结构。
+- 服务端对新生成的小测、练习和试卷在持久化题目后建立版本化内部答案包；题目、答案、逐题分值或解析不完整，或分值合计与总分不一致时，拒绝把该草稿作为可批改来源。
   - 小测/练习前端选择的题量使用 `requestedItemCount` 传入；教材小测的章节下拉必须和真实 `textbookAssetId` 一起提交。服务端解析教材后把版本、系列、册次、地区和章节写入统一 `generationContext`，不能只留在 Web 页面状态或自由文本中。
   - 正式打印前必须经过 `draft-export` 生成 PDF 草稿，以及 `draft-review` 教师确认，避免未复核内容直接进入打印。
   - `draft-export` 会把 `layoutValidation` 写入 Assignment 元数据；页数或坐标校验失败的草稿保持待审查，不能确认或正式导出。

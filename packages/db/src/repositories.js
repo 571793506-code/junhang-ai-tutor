@@ -1,5 +1,6 @@
 import { prisma as defaultPrisma } from "./client.js";
 import { generateAccessCode, hashAccessCode, previewAccessCode } from "./access-codes.js";
+import { buildGradingSourcePackage } from "@junhang/core";
 
 export function normalizeGrade(grade) {
   if (!grade) return null;
@@ -446,6 +447,9 @@ export async function createAssignmentDraft(
   input,
   { prisma = defaultPrisma } = {}
 ) {
+  const metadata = { ...(input.metadata || {}) };
+  const gradingSourcePackageRequested = metadata.gradingSourcePackageRequested === true;
+  delete metadata.gradingSourcePackageRequested;
   let subjectId = input.subjectId || null;
   if (!subjectId && input.subject) {
     const subject = await prisma.subject.findFirst({
@@ -454,28 +458,48 @@ export async function createAssignmentDraft(
     subjectId = subject?.id || null;
   }
 
-  return prisma.assignment.create({
-    data: {
-      id: input.id || undefined,
-      subjectId,
-      title: input.title,
-      grade: normalizeGrade(input.grade),
-      difficulty: input.difficulty || null,
-      metadata: input.metadata || undefined,
-      items: input.items
-        ? {
-            create: input.items.map((item, index) => ({
-              orderIndex: index + 1,
-              itemType: item.itemType || item.type || "question",
-              prompt: item.prompt,
-              answer: item.answer || undefined,
-              rubric: item.rubric || undefined,
-              metadata: item.metadata || undefined
-            }))
-          }
-        : undefined
-    },
-    include: { items: true }
+  const data = {
+    id: input.id || undefined,
+    subjectId,
+    title: input.title,
+    grade: normalizeGrade(input.grade),
+    difficulty: input.difficulty || null,
+    metadata: metadata || undefined,
+    items: input.items
+      ? {
+          create: input.items.map((item, index) => ({
+            orderIndex: index + 1,
+            itemType: item.itemType || item.type || "question",
+            prompt: item.prompt,
+            answer: item.answer || undefined,
+            rubric: item.rubric || undefined,
+            metadata: item.metadata || undefined
+          }))
+        }
+      : undefined
+  };
+  if (!gradingSourcePackageRequested) return prisma.assignment.create({ data, include: { items: true } });
+
+  return prisma.$transaction(async (tx) => {
+    const assignment = await tx.assignment.create({ data, include: { items: true } });
+    const sourceResult = buildGradingSourcePackage(assignment);
+    if (!sourceResult.ok) {
+      const error = new Error("GRADING_SOURCE_PACKAGE_INVALID");
+      error.code = "GRADING_SOURCE_PACKAGE_INVALID";
+      error.issues = sourceResult.issues;
+      throw error;
+    }
+
+    return tx.assignment.update({
+      where: { id: assignment.id },
+      data: {
+        metadata: {
+          ...metadata,
+          gradingSourcePackage: sourceResult.package
+        }
+      },
+      include: { items: true }
+    });
   });
 }
 
