@@ -1037,6 +1037,10 @@ test("student profile routes enforce teacher drafts and role-based published sel
     server.indexOf('app.post("/api/students/:studentId/profile/aggregate"'),
     server.indexOf('app.get("/api/students/:studentId/profile"')
   );
+  const draftRoute = server.slice(
+    server.indexOf('app.post("/api/students/:studentId/profile/draft"'),
+    server.indexOf('app.post("/api/students/:studentId/profile/publish"')
+  );
   const getRoute = server.slice(
     server.indexOf('app.get("/api/students/:studentId/profile"'),
     server.indexOf('app.post("/api/students/:studentId/term-report/draft"')
@@ -1049,6 +1053,10 @@ test("student profile routes enforce teacher drafts and role-based published sel
   assert.match(aggregateRoute, /requireSession\(config, \["teacher"\]\)/);
   assert.match(aggregateRoute, /draftStatus: "draft"/);
   assert.match(aggregateRoute, /draftGeneratedAt: new Date\(\)\.toISOString\(\)/);
+  assert.match(aggregateRoute, /narrative: \{\s*\.\.\.safeJson\(mergedSnapshot\.narrative, \{\}\),\s*generatedBy: narrativeResult\.generatedBy,/);
+  assert.match(aggregateRoute, /narrative: \{\s*\.\.\.safeJson\(mergedSnapshot\.narrative, \{\}\),[\s\S]*aiGenerated: narrativeResult\.aiGenerated,/);
+  assert.match(draftRoute, /narrative: \{\s*\.\.\.safeJson\(mergedSnapshot\.narrative, \{\}\),\s*generatedBy: narrativeResult\.generatedBy,/);
+  assert.match(draftRoute, /narrative: \{\s*\.\.\.safeJson\(mergedSnapshot\.narrative, \{\}\),[\s\S]*aiGenerated: narrativeResult\.aiGenerated,/);
   assert.match(aggregateRoute, /filterStudentProfileSnapshot\(snapshot, "teacher"\)/);
   assert.match(profileQueryHelper, /role === "teacher"/);
   assert.match(profileQueryHelper, /path: \["draftStatus"\]/);

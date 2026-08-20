@@ -1,6 +1,6 @@
 import { prisma as defaultPrisma } from "./client.js";
 import { generateAccessCode, hashAccessCode, previewAccessCode } from "./access-codes.js";
-import { buildGradingSourcePackage } from "@junhang/core";
+import { buildGradingSourcePackage } from "@junhang/core/grading-source-package";
 
 export function normalizeGrade(grade) {
   if (!grade) return null;

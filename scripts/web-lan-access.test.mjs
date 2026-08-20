@@ -30,3 +30,8 @@ test("LAN helper scripts keep API and Web host settings explicit", () => {
   assert.match(webLanScript, /pushd apps\\web/);
   assert.match(webLanScript, /vite\.js --host 0\.0\.0\.0/);
 });
+
+test("browser core entry excludes Node-only grading source package", () => {
+  const coreIndex = fs.readFileSync(new URL("../packages/core/src/index.js", import.meta.url), "utf8");
+  assert.doesNotMatch(coreIndex, /export \* from "\.\/grading-source-package\.js";/);
+});

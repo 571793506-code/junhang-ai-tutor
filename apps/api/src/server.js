@@ -15,14 +15,16 @@ import {
   draftStudentProfileNarrative
 } from "@junhang/ai";
 import {
-  GRADING_SOURCE_PACKAGE_SCHEMA_VERSION,
   classifyTextbookBaseline,
-  gradingSourceQuestionMap,
   inspectEncodingPayload,
   matchesTextbookAssetSearch,
-  mergeTextbookChapterDrafts,
-  validateGradingSourcePackage
+  mergeTextbookChapterDrafts
 } from "@junhang/core";
+import {
+  GRADING_SOURCE_PACKAGE_SCHEMA_VERSION,
+  gradingSourceQuestionMap,
+  validateGradingSourcePackage
+} from "@junhang/core/grading-source-package";
 import { recognizeImages } from "@junhang/ai/ocr-node";
 import {
   createClassroomBroadcast,
@@ -4945,6 +4947,11 @@ app.post("/api/students/:studentId/profile/draft", requireDatabase, requireSessi
       };
   const snapshot = {
     ...mergedSnapshot,
+    narrative: {
+      ...safeJson(mergedSnapshot.narrative, {}),
+      generatedBy: narrativeResult.generatedBy,
+      aiGenerated: narrativeResult.aiGenerated
+    },
     generationState: {
       aiGenerated: narrativeResult.aiGenerated,
       generatedBy: narrativeResult.generatedBy,
@@ -5113,6 +5120,11 @@ app.post("/api/students/:studentId/profile/aggregate", requireDatabase, requireS
       };
   const snapshot = {
     ...mergedSnapshot,
+    narrative: {
+      ...safeJson(mergedSnapshot.narrative, {}),
+      generatedBy: narrativeResult.generatedBy,
+      aiGenerated: narrativeResult.aiGenerated
+    },
     generationState: {
       aiGenerated: narrativeResult.aiGenerated,
       generatedBy: narrativeResult.generatedBy,
