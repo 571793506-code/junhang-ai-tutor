@@ -27,6 +27,7 @@ cmd /c npm.cmd run workspace:guard
 - `推送状态`：把 `ahead`、`behind`、分叉、已同步和本地分支状态单独说明，避免把可推送状态误判为 dirty。
 - `收口顺序`：按 `收口提交`、`继续跟踪`、`本地保存`、`谨慎处理` 的顺序提示下一步处理。
 - `显式 stage 建议`：只为 `收口提交` 和 `继续跟踪` 输出 `git add -- <path>` 示例；`本地保存` 和 `谨慎处理` 只给文字说明，不建议直接 stage。
+- ignored 文件还会拆成 `运行残留`、`本地生成/会话文件` 和 `批准保留资产` 三类；后两类不使守护者失败，也不会产生 stage 建议。
 
 这些字段仍然只是审查提示，不会自动执行命令。真正提交前必须人工确认路径和验证结果。
 3. 如守护命令报告不通过，再运行 `git status --short`，确认 staged、unstaged、untracked 三类状态。
@@ -49,6 +50,12 @@ cmd /c npm.cmd run workspace:guard
 cmd /c npm.cmd run workspace:archive-residue
 ```
 
+需要先查看归档计划而不移动文件时运行：
+
+```bat
+cmd /c npm.cmd run workspace:archive-residue -- --dry-run
+```
+
 该命令只处理守护脚本识别到的 ignored 运行残留，并按原相对路径移动到仓库同级本地目录：
 
 ```text
@@ -57,7 +64,9 @@ cmd /c npm.cmd run workspace:archive-residue
 
 归档命令有文件移动副作用，因此不要把它作为普通审查命令自动触发。归档后重新运行 `cmd /c npm.cmd run workspace:guard`，确认“被忽略运行残留”为 0。
 
-已列入“被忽略本地保留”的文件即使被误传给归档函数，也会被跳过，不会移动到本地归档目录。
+归档前会为待移动文件计算 SHA-256、大小、修改时间和分类原因，并在归档目录写入 `manifest.json`。目标路径已存在时报告冲突并跳过，不覆盖目标。已列入“被忽略本地生成/会话文件”或“被忽略本地保留”的文件即使被误传给归档函数，也会被跳过，不会移动到本地归档目录。
+
+守护者和归档器都不会自动 stage、commit、push、删除、恢复或覆盖文件。
 
 ## 当前阶段分类
 
@@ -89,6 +98,8 @@ cmd /c npm.cmd run workspace:archive-residue
 
 这些默认不提交：
 
+- `output/pdf/`：学生卷、答案解析、结构化答案包和教学计划等生成物；只做本地保存，不归档。
+- `.superpowers/brainstorm/` 中除 `state/server.pid`、`state/server-stopped`、`state/server.log` 外的会话预览和设计过程文件；只做本地保存，不归档。
 - `exports/`
 - `storage/`
 - `apps/api/storage/uploads/`
@@ -109,6 +120,17 @@ cmd /c npm.cmd run workspace:archive-residue
   - `tmp/make_pdf_contact_sheet.py`
 
 处理方式：优先用 `.gitignore` 屏蔽，保留本地文件，不在未确认前删除。
+
+`output/pdf/` 和 `.superpowers/` 使用仓库根目录限定的忽略规则；它们会在 JSON 报告的 `ignored.local` 中列出，但不会使 `clean` 变为 false。
+
+### 运行残留
+
+以下文件仍需由用户显式决定是否归档：
+
+- `tmp/`、`storage/`、上传目录、`logs/` 下的运行文件。
+- `.superpowers/brainstorm/**/state/server.pid`、`server-stopped`、`server.log` 等运行状态文件。
+
+它们会进入 `ignored.runtime`，只有 `workspace:archive-residue` 执行时才可能移动。
 
 ### 谨慎处理
 
@@ -136,10 +158,11 @@ cmd /c npm.cmd run check:encoding
 ```bat
 cmd /c npm.cmd run check:workspace-guardian
 cmd /c npm.cmd run workspace:guard
+cmd /c npm.cmd run workspace:archive-residue -- --dry-run
 cmd /c npm.cmd run workspace:archive-residue
 ```
 
-如当前工作区确有 ignored 残留，`workspace:archive-residue` 会把它们移动到本地归档；如没有残留，应输出“无残留需要归档”。
+先运行 `--dry-run` 查看计划；确认后才运行无参数归档命令。无参数命令会把运行残留移动到本地归档；如没有残留，应输出“无残留需要归档”。
 
 涉及代码组提交时，根据范围追加：
 

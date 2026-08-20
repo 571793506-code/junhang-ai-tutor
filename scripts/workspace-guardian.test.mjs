@@ -98,24 +98,108 @@ test("buildWorkspaceGuardianReport treats local ahead as push reminder instead o
 test("classifyWorkspaceFile groups visible files by guardian closeout intent", () => {
   assert.deepEqual(classifyWorkspaceFile("docs/52-workspace-guardian.md"), {
     bucket: "closeout",
-    label: "收口提交"
+    label: "收口提交",
+    reason: "guardian-rule"
   });
   assert.deepEqual(classifyWorkspaceFile("scripts/workspace-guardian-lib.mjs"), {
     bucket: "closeout",
-    label: "收口提交"
+    label: "收口提交",
+    reason: "guardian-rule"
   });
   assert.deepEqual(classifyWorkspaceFile("apps/web/src/main.tsx"), {
     bucket: "track",
-    label: "继续跟踪"
+    label: "继续跟踪",
+    reason: "project-content"
   });
   assert.deepEqual(classifyWorkspaceFile("exports/demo.pdf"), {
     bucket: "local",
-    label: "本地保存"
+    label: "本地保存",
+    reason: "local-artifact"
   });
   assert.deepEqual(classifyWorkspaceFile("apps/miniprogram/pages/index/index.js"), {
     bucket: "caution",
-    label: "谨慎处理"
+    label: "谨慎处理",
+    reason: "multi-end-boundary"
   });
+  assert.deepEqual(classifyWorkspaceFile("output/pdf/sample.pdf"), {
+    bucket: "local",
+    label: "本地保存",
+    reason: "generated-output"
+  });
+  assert.deepEqual(classifyWorkspaceFile(".superpowers/brainstorm/demo/content.html"), {
+    bucket: "local",
+    label: "本地保存",
+    reason: "session-artifact"
+  });
+  assert.deepEqual(classifyWorkspaceFile(".superpowers/brainstorm/demo/state/server.pid"), {
+    bucket: "runtime",
+    label: "运行残留",
+    reason: "runtime-state"
+  });
+  assert.deepEqual(classifyWorkspaceFile(".superpowers/brainstorm/demo/state/server.log"), {
+    bucket: "runtime",
+    label: "运行残留",
+    reason: "runtime-state"
+  });
+});
+
+test("buildWorkspaceGuardianReport separates ignored local, runtime, and preserved files", async () => {
+  const runGit = async (args) => {
+    if (args.includes("--ignored")) {
+      return [
+        "!! output/pdf/sample.pdf",
+        "!! .superpowers/brainstorm/demo/content.html",
+        "!! .superpowers/brainstorm/demo/state/server.pid",
+        "!! exports/api-start.log",
+        "!! exports/student-profile-template-pngs/demo.png"
+      ];
+    }
+    if (args[0] === "status") return ["## main...origin/main"];
+    if (args[0] === "log") return ["abc1234 docs: update guard"];
+    return [];
+  };
+
+  const report = await buildWorkspaceGuardianReport({ runGit });
+
+  assert.deepEqual(report.ignoredLocalFiles, [
+    "output/pdf/sample.pdf",
+    ".superpowers/brainstorm/demo/content.html"
+  ]);
+  assert.deepEqual(report.ignoredRuntimeFiles, [
+    ".superpowers/brainstorm/demo/state/server.pid",
+    "exports/api-start.log"
+  ]);
+  assert.deepEqual(report.ignoredPreservedLocalFiles, [
+    "exports/student-profile-template-pngs/demo.png"
+  ]);
+  assert.equal(report.risk, "attention");
+  assert.deepEqual(report.visible, report.taskReview);
+  assert.deepEqual(report.ignored, {
+    runtime: report.ignoredRuntimeFiles,
+    local: report.ignoredLocalFiles,
+    preserved: report.ignoredPreservedLocalFiles
+  });
+  assert.equal(report.clean, false);
+});
+
+test("buildWorkspaceGuardianReport stays clean when ignored files are local only", async () => {
+  const runGit = async (args) => {
+    if (args.includes("--ignored")) {
+      return [
+        "!! output/pdf/sample.pdf",
+        "!! .superpowers/brainstorm/demo/content.html"
+      ];
+    }
+    if (args[0] === "status") return ["## main...origin/main"];
+    if (args[0] === "log") return ["abc1234 docs: update guard"];
+    return [];
+  };
+
+  const report = await buildWorkspaceGuardianReport({ runGit });
+
+  assert.equal(report.clean, true);
+  assert.deepEqual(report.ignoredRuntimeFiles, []);
+  assert.equal(report.ignoredLocalFiles.length, 2);
 });
 
 test("buildWorkspaceGuardianReport adds a task review summary for visible work", async () => {
@@ -421,4 +505,99 @@ test("archiveRuntimeResidue refuses to move approved preserved local files", asy
   assert.deepEqual(result.skippedFiles, [
     { file: preservedFile, reason: "PRESERVED_LOCAL_FILE" }
   ]);
+});
+
+test("archiveRuntimeResidue dry-run plans files with SHA-256 without moving them", async () => {
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "guardian-workspace-"));
+  const archiveRoot = fs.mkdtempSync(path.join(os.tmpdir(), "guardian-archive-"));
+  const relativeFile = "tmp/demo.log";
+  const sourcePath = path.join(workspaceRoot, relativeFile);
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.writeFileSync(sourcePath, "runtime residue", "utf8");
+
+  const result = await archiveRuntimeResidue({
+    cwd: workspaceRoot,
+    archiveRoot,
+    ignoredRuntimeFiles: [relativeFile],
+    timestamp: "2026-08-19T10-00-00",
+    dryRun: true
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.dryRun, true);
+  assert.equal(result.movedFiles.length, 0);
+  assert.equal(result.plannedFiles.length, 1);
+  assert.equal(result.plannedFiles[0].sha256.length, 64);
+  assert.equal(fs.existsSync(sourcePath), true);
+  assert.equal(fs.existsSync(result.archiveDir), false);
+});
+
+test("archiveRuntimeResidue writes a hash manifest before moving files", async () => {
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "guardian-workspace-"));
+  const archiveRoot = fs.mkdtempSync(path.join(os.tmpdir(), "guardian-archive-"));
+  const relativeFile = "tmp/demo.log";
+  const sourcePath = path.join(workspaceRoot, relativeFile);
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.writeFileSync(sourcePath, "runtime residue", "utf8");
+
+  const result = await archiveRuntimeResidue({
+    cwd: workspaceRoot,
+    archiveRoot,
+    ignoredRuntimeFiles: [relativeFile],
+    timestamp: "2026-08-19T10-00-01"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(fs.existsSync(result.manifestPath), true);
+  const manifest = JSON.parse(fs.readFileSync(result.manifestPath, "utf8"));
+  assert.equal(manifest.version, "workspace-archive-manifest-v1");
+  assert.equal(manifest.files.length, 1);
+  assert.equal(manifest.files[0].file, relativeFile);
+  assert.equal(manifest.files[0].sha256, result.movedFiles[0].sha256);
+});
+
+test("archiveRuntimeResidue skips destination conflicts without overwriting", async () => {
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "guardian-workspace-"));
+  const archiveRoot = fs.mkdtempSync(path.join(os.tmpdir(), "guardian-archive-"));
+  const relativeFile = "tmp/demo.log";
+  const sourcePath = path.join(workspaceRoot, relativeFile);
+  const targetPath = path.join(archiveRoot, "2026-08-19T10-00-02-run-residue", relativeFile);
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(sourcePath, "source", "utf8");
+  fs.writeFileSync(targetPath, "existing", "utf8");
+
+  const result = await archiveRuntimeResidue({
+    cwd: workspaceRoot,
+    archiveRoot,
+    ignoredRuntimeFiles: [relativeFile],
+    timestamp: "2026-08-19T10-00-02"
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.conflicts.map((item) => item.reason), ["DESTINATION_CONFLICT"]);
+  assert.equal(fs.readFileSync(sourcePath, "utf8"), "source");
+  assert.equal(fs.readFileSync(targetPath, "utf8"), "existing");
+});
+
+test("archiveRuntimeResidue skips ignored local files even when passed explicitly", async () => {
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "guardian-workspace-"));
+  const archiveRoot = fs.mkdtempSync(path.join(os.tmpdir(), "guardian-archive-"));
+  const localFile = "output/pdf/sample.pdf";
+  const sourcePath = path.join(workspaceRoot, localFile);
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.writeFileSync(sourcePath, "pdf", "utf8");
+
+  const result = await archiveRuntimeResidue({
+    cwd: workspaceRoot,
+    archiveRoot,
+    ignoredRuntimeFiles: [localFile],
+    timestamp: "2026-08-19T10-00-03"
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.skippedFiles, [
+    { file: localFile, reason: "LOCAL_FILE" }
+  ]);
+  assert.equal(fs.existsSync(sourcePath), true);
 });

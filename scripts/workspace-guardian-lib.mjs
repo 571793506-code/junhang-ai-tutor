@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -7,7 +8,9 @@ const DEFAULT_RUNTIME_SCAN_PATHS = [
   "storage",
   "apps/api/storage/uploads",
   "logs",
-  "tmp"
+  "tmp",
+  "output/pdf",
+  ".superpowers"
 ];
 
 const PRESERVED_LOCAL_FILE_PATTERNS = [
@@ -19,6 +22,7 @@ const PRESERVED_LOCAL_FILE_PATTERNS = [
 const CLOSEOUT_PATTERNS = [
   /^AGENTS\.md$/i,
   /^SKILLS\.md$/i,
+  /^\.gitignore$/i,
   /^docs\/(?:45-git-traceability-runbook|49-codex-plugin-usage-boundary-and-optimization|51-project-pitfall-review|52-workspace-guardian)\.md$/i,
   /^scripts\/workspace-guardian(?:-lib|\.test)?\.mjs$/i,
   /^scripts\/workspace-archive-residue\.mjs$/i
@@ -32,6 +36,8 @@ const CAUTION_PATTERNS = [
 ];
 
 const LOCAL_PATTERNS = [
+  /^output\/pdf(?:\/|$)/i,
+  /^\.superpowers\/brainstorm(?:\/|$)/i,
   /^exports\//i,
   /^storage\//i,
   /^apps\/api\/storage\/uploads\//i,
@@ -43,6 +49,10 @@ const LOCAL_PATTERNS = [
   /(?:^|\/)console\.log/i,
   /(?:^|\/)\{console\.error/i
 ];
+
+const GENERATED_OUTPUT_PATTERN = /^output\/pdf(?:\/|$)/i;
+const SESSION_ARTIFACT_PATTERN = /^\.superpowers\/brainstorm(?:\/|$)/i;
+const RUNTIME_STATE_PATTERN = /^\.superpowers\/brainstorm\/.+\/state\/(?:server\.pid|server-stopped|server\.log)$/i;
 
 const TASK_REVIEW_BUCKETS = [
   ["closeout", "收口提交"],
@@ -97,7 +107,12 @@ export async function buildWorkspaceGuardianReport(options = {}) {
     .filter((line) => line.startsWith("!! "))
     .map(statusPath);
   const ignoredPreservedLocalFiles = ignoredFiles.filter(isPreservedLocalFile);
-  const ignoredRuntimeFiles = ignoredFiles.filter((filePath) => !isPreservedLocalFile(filePath));
+  const ignoredLocalFiles = ignoredFiles.filter((filePath) => (
+    !isPreservedLocalFile(filePath) && isIgnoredLocalFile(filePath)
+  ));
+  const ignoredRuntimeFiles = ignoredFiles.filter((filePath) => (
+    !isPreservedLocalFile(filePath) && !isIgnoredLocalFile(filePath)
+  ));
   const taskReview = buildTaskReview(status);
   const stageReview = buildTaskReview({
     stagedFiles: [],
@@ -116,7 +131,19 @@ export async function buildWorkspaceGuardianReport(options = {}) {
     clean,
     ...status,
     ignoredRuntimeFiles,
+    ignoredLocalFiles,
     ignoredPreservedLocalFiles,
+    ignored: {
+      runtime: ignoredRuntimeFiles,
+      local: ignoredLocalFiles,
+      preserved: ignoredPreservedLocalFiles
+    },
+    risk: riskReview.level,
+    branch: {
+      line: status.branchLine,
+      push: pushStatus
+    },
+    visible: taskReview,
     taskReview,
     riskReview,
     pushStatus,
@@ -129,28 +156,36 @@ export async function buildWorkspaceGuardianReport(options = {}) {
 
 export function classifyWorkspaceFile(filePath = "") {
   const normalized = normalizeRelativePath(filePath);
+  if (isRuntimeStateFile(normalized)) {
+    return { bucket: "runtime", label: "运行残留", reason: "runtime-state" };
+  }
   if (CLOSEOUT_PATTERNS.some((pattern) => pattern.test(normalized))) {
-    return { bucket: "closeout", label: "收口提交" };
+    return { bucket: "closeout", label: "收口提交", reason: "guardian-rule" };
   }
   if (LOCAL_PATTERNS.some((pattern) => pattern.test(normalized))) {
-    return { bucket: "local", label: "本地保存" };
+    return {
+      bucket: "local",
+      label: "本地保存",
+      reason: localReason(normalized)
+    };
   }
   if (CAUTION_PATTERNS.some((pattern) => pattern.test(normalized))) {
-    return { bucket: "caution", label: "谨慎处理" };
+    return { bucket: "caution", label: "谨慎处理", reason: "multi-end-boundary" };
   }
-  return { bucket: "track", label: "继续跟踪" };
+  return { bucket: "track", label: "继续跟踪", reason: "project-content" };
 }
 
 export async function archiveRuntimeResidue(options = {}) {
   const cwd = path.resolve(options.cwd || process.cwd());
   const ignoredRuntimeFiles = options.ignoredRuntimeFiles || [];
+  const dryRun = Boolean(options.dryRun);
   const timestamp = options.timestamp || timestampForArchive(new Date());
   const archiveRoot = path.resolve(options.archiveRoot || path.join(cwd, "..", `${path.basename(cwd)}-local-archive`));
   const archiveDir = path.join(archiveRoot, `${timestamp}-run-residue`);
   const movedFiles = [];
+  const plannedFiles = [];
   const skippedFiles = [];
-
-  await fs.mkdir(archiveDir, { recursive: true });
+  const conflicts = [];
 
   for (const relativeFile of ignoredRuntimeFiles) {
     const safeRelativePath = normalizeRelativePath(relativeFile);
@@ -162,18 +197,48 @@ export async function archiveRuntimeResidue(options = {}) {
       skippedFiles.push({ file: safeRelativePath, reason: "PRESERVED_LOCAL_FILE" });
       continue;
     }
+    if (isIgnoredLocalFile(safeRelativePath)) {
+      skippedFiles.push({ file: safeRelativePath, reason: "LOCAL_FILE" });
+      continue;
+    }
 
     const sourcePath = path.resolve(cwd, safeRelativePath);
-    if (!sourcePath.startsWith(cwd + path.sep)) {
+    if (!isWithin(cwd, sourcePath)) {
       skippedFiles.push({ file: relativeFile, reason: "OUTSIDE_WORKSPACE" });
       continue;
     }
 
     const targetPath = path.resolve(archiveDir, safeRelativePath);
-    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    if (!isWithin(archiveDir, targetPath)) {
+      skippedFiles.push({ file: safeRelativePath, reason: "OUTSIDE_ARCHIVE" });
+      continue;
+    }
+
     try {
-      await fs.rename(sourcePath, targetPath);
-      movedFiles.push({ file: safeRelativePath, target: targetPath });
+      const stat = await fs.stat(sourcePath);
+      if (!stat.isFile()) {
+        skippedFiles.push({ file: safeRelativePath, reason: "NOT_FILE" });
+        continue;
+      }
+      const sha256 = await sha256File(sourcePath);
+      if (await pathExists(targetPath)) {
+        const conflict = {
+          file: safeRelativePath,
+          target: targetPath,
+          reason: "DESTINATION_CONFLICT"
+        };
+        skippedFiles.push(conflict);
+        conflicts.push(conflict);
+        continue;
+      }
+      plannedFiles.push({
+        file: safeRelativePath,
+        target: targetPath,
+        size: stat.size,
+        mtime: stat.mtime.toISOString(),
+        sha256,
+        reason: ignoredRuntimeReason(safeRelativePath)
+      });
     } catch (error) {
       skippedFiles.push({
         file: safeRelativePath,
@@ -182,11 +247,81 @@ export async function archiveRuntimeResidue(options = {}) {
     }
   }
 
+  if (dryRun || !plannedFiles.length) {
+    return {
+      ok: skippedFiles.length === 0,
+      dryRun,
+      archiveDir,
+      manifestPath: null,
+      plannedFiles,
+      movedFiles,
+      skippedFiles,
+      conflicts
+    };
+  }
+
+  await fs.mkdir(archiveDir, { recursive: true });
+  const manifestPath = path.join(archiveDir, "manifest.json");
+  try {
+    await fs.writeFile(
+      manifestPath,
+      JSON.stringify({
+        version: "workspace-archive-manifest-v1",
+        createdAt: new Date().toISOString(),
+        files: plannedFiles.map((item) => ({
+          file: item.file,
+          target: path.relative(archiveDir, item.target).replace(/\\/g, "/"),
+          size: item.size,
+          mtime: item.mtime,
+          sha256: item.sha256,
+          reason: item.reason
+        }))
+      }, null, 2) + "\n",
+      { encoding: "utf8", flag: "wx" }
+    );
+  } catch (error) {
+    const manifestConflict = {
+      file: "manifest.json",
+      target: manifestPath,
+      reason: error?.code === "EEXIST" ? "ARCHIVE_MANIFEST_CONFLICT" : error?.code || "MANIFEST_WRITE_FAILED"
+    };
+    skippedFiles.push(manifestConflict);
+    if (manifestConflict.reason === "ARCHIVE_MANIFEST_CONFLICT") conflicts.push(manifestConflict);
+    return {
+      ok: false,
+      dryRun,
+      archiveDir,
+      manifestPath: null,
+      plannedFiles,
+      movedFiles,
+      skippedFiles,
+      conflicts
+    };
+  }
+
+  for (const plannedFile of plannedFiles) {
+    await fs.mkdir(path.dirname(plannedFile.target), { recursive: true });
+    try {
+      await fs.rename(path.join(cwd, plannedFile.file), plannedFile.target);
+      movedFiles.push(plannedFile);
+    } catch (error) {
+      skippedFiles.push({
+        file: plannedFile.file,
+        target: plannedFile.target,
+        reason: error?.code || "MOVE_FAILED"
+      });
+    }
+  }
+
   return {
     ok: skippedFiles.length === 0,
+    dryRun,
     archiveDir,
+    manifestPath,
+    plannedFiles,
     movedFiles,
-    skippedFiles
+    skippedFiles,
+    conflicts
   };
 }
 
@@ -233,6 +368,8 @@ export function formatWorkspaceGuardianReport(report) {
     ...formatItems(report.untrackedFiles),
     `- 被忽略运行残留：${report.ignoredRuntimeFiles.length}`,
     ...formatItems(report.ignoredRuntimeFiles),
+    `- 被忽略本地生成/会话文件：${report.ignoredLocalFiles?.length || 0}`,
+    ...formatItems(report.ignoredLocalFiles || []),
     `- 被忽略本地保留：${report.ignoredPreservedLocalFiles?.length || 0}`,
     ...formatItems(report.ignoredPreservedLocalFiles || []),
     "- 任务审查：",
@@ -406,6 +543,46 @@ function normalizeRelativePath(filePath = "") {
   return normalized;
 }
 
+function isRuntimeStateFile(filePath = "") {
+  return RUNTIME_STATE_PATTERN.test(normalizeRelativePath(filePath));
+}
+
+function isIgnoredLocalFile(filePath = "") {
+  const normalized = normalizeRelativePath(filePath);
+  return !isRuntimeStateFile(normalized) && (
+    GENERATED_OUTPUT_PATTERN.test(normalized) || SESSION_ARTIFACT_PATTERN.test(normalized)
+  );
+}
+
+function localReason(filePath = "") {
+  if (GENERATED_OUTPUT_PATTERN.test(filePath)) return "generated-output";
+  if (SESSION_ARTIFACT_PATTERN.test(filePath)) return "session-artifact";
+  return "local-artifact";
+}
+
+function ignoredRuntimeReason(filePath = "") {
+  return isRuntimeStateFile(filePath) ? "runtime-state" : "runtime-residue";
+}
+
+function isWithin(parentPath, childPath) {
+  const relative = path.relative(parentPath, childPath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function pathExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function sha256File(filePath) {
+  const content = await fs.readFile(filePath);
+  return createHash("sha256").update(content).digest("hex");
+}
+
 function buildTaskReview(status) {
   const review = Object.fromEntries(TASK_REVIEW_BUCKETS.map(([bucket]) => [bucket, []]));
   const visibleFiles = [
@@ -415,6 +592,7 @@ function buildTaskReview(status) {
   ];
   for (const filePath of visibleFiles) {
     const { bucket } = classifyWorkspaceFile(filePath);
+    if (!review[bucket]) continue;
     if (!review[bucket].includes(filePath)) {
       review[bucket].push(filePath);
     }
