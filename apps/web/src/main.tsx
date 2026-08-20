@@ -412,134 +412,7 @@ const generationModes: Array<{
     defaultRequirement: "按正式考试结构生成试卷，学生卷不出现答案，解析卷包含步骤和易错提醒。"
   }
 ];
-const idleSync: SyncState = { busy: false, ok: null, message: "本地演示待同步" };
-
-const demoStudents: StudentProfile[] = [
-  {
-    id: "demo-student",
-    displayName: "李子越",
-    grade: "六年级",
-    school: "君航课堂",
-    className: "六年级 1 班",
-    textbookVersion: "贵州遵义教材基准",
-    guardianName: "李女士",
-    guardianPhone: "13900005678",
-    responsibleTeacherId: "demo-teacher",
-    responsibleTeacherName: "君航老师",
-    accessCode: "LZY6P9",
-    enrollmentStatus: "在读",
-    loginEnabled: true,
-    canReceiveNewWork: true,
-    registeredAt: "2026-05-26",
-    focus: "英语词形变化、数学应用题数量关系",
-    weeklyScore: 82,
-    streak: 6,
-    mastery: { 语文: 76, 数学: 68, 英语: 84 } as Record<SubjectLabel, number>,
-    strengths: ["英语词汇复习较稳定", "愿意主动提问"],
-    risks: ["数学应用题审题不够稳定", "语文阅读答题缺少证据句"],
-    tone: "近期状态稳定"
-  }
-];
-
-const demoTeachers: TeacherProfile[] = [
-  {
-    id: "demo-teacher",
-    displayName: "君航老师",
-    phone: "13800000001",
-    role: "主讲老师",
-    accessCode: "T8JH21",
-    status: "已开通"
-  }
-];
-
-const demoDevices: ClassroomDevice[] = [
-  {
-    id: "demo-device",
-    label: "六年级课堂平板",
-    bindingCode: "PAD6JH",
-    grade: "六年级",
-    className: "六年级 1 班",
-    teacherId: "demo-teacher",
-    teacherName: "君航老师",
-    status: "已绑定"
-  }
-];
-
-const demoTasks: LearningTaskCard[] = [
-  {
-    id: "demo-task-1",
-    studentId: "demo-student",
-    studentName: "李子越",
-    title: "英语 Unit 4 词汇听写与订正",
-    subject: "英语" as SubjectLabel,
-    status: "待完成",
-    minutes: 12,
-    dueLabel: "今日",
-    source: "教师端生成",
-    knowledgePoints: ["carry", "bright", "过去式"]
-  }
-];
-
-const demoAssignments: AssignmentCard[] = [
-  {
-    id: "demo-assignment-1",
-    studentId: "demo-student",
-    studentName: "李子越",
-    targetScope: "student",
-    targetGrade: null,
-    kind: "小测",
-    title: "六年级英语一般过去时小测",
-    subject: "英语" as SubjectLabel,
-    status: "待完成",
-    difficulty: "基础",
-    minutes: 20,
-    layoutTemplate: "英语小测A4打印模板-2页-1栏-mixed-lines",
-    printProfile: {
-      paper: "A4",
-      pages: 2,
-      columns: 1,
-      answerSpace: "词汇与句型题保留短答横线",
-      headerFields: ["姓名", "日期", "用时", "得分"],
-      optimizationNotes: ["AI生成", "教师复核后打印"]
-    },
-    specialRequirements: "两页 A4，适合打印作答",
-    submissionImageNames: [],
-    score: null,
-    totalScore: 100,
-    items: ["写出 carry 的过去式", "用 went 造句"],
-    grading: null
-  }
-];
-
-const demoCorrections: CorrectionRecord[] = [
-  {
-    id: "demo-correction-1",
-    subject: "数学" as SubjectLabel,
-    point: "应用题数量关系",
-    prompt: "把总量和份数关系写反，导致列式错误。",
-    studentAnswer: "36 ÷ 4",
-    correctAnswer: "36 × 4",
-    cause: "没有先标出单位量和总量。",
-    state: "待订正",
-    knowledgePoint: "数量关系"
-  }
-];
-
-const demoLogs: LearningLog[] = [
-  { id: "demo-log-1", time: "18:30", feature: "今日任务", action: "完成英语词汇订正", result: "等待教师复核", actorType: "student" }
-];
-
-const demoReports: StudentReportCard[] = [
-  {
-    id: "demo-report-1",
-    period: "本周",
-    title: "本周学习反馈",
-    summary: "英语词汇复习稳定，数学应用题仍需要加强审题和数量关系标注。",
-    highlights: ["能按时完成词汇订正", "愿意追问不懂的题"],
-    concerns: ["应用题列式前缺少关系标注"],
-    nextActions: ["每天补 2 道同类应用题", "错题订正后说出解题思路"]
-  }
-];
+const idleSync: SyncState = { busy: false, ok: null, message: "请登录后同步业务数据" };
 
 function App() {
   const [role, setRole] = useState<Role>("teacher");
@@ -551,17 +424,17 @@ function App() {
   const [auth, setAuth] = useState({ studentId: "", teacherId: "", deviceId: "" });
   const [sync, setSync] = useState<SyncState>(idleSync);
   const [ai, setAi] = useState<AiSnapshot | null>(null);
-  const [teachers, setTeachers] = useState<TeacherProfile[]>(demoTeachers);
-  const [students, setStudents] = useState<StudentProfile[]>(demoStudents);
-  const [tasks, setTasks] = useState<LearningTaskCard[]>(demoTasks);
-  const [assignments, setAssignments] = useState<AssignmentCard[]>(demoAssignments);
-  const [devices, setDevices] = useState<ClassroomDevice[]>(demoDevices);
+  const [teachers, setTeachers] = useState<TeacherProfile[]>([]);
+  const [students, setStudents] = useState<StudentProfile[]>([]);
+  const [tasks, setTasks] = useState<LearningTaskCard[]>([]);
+  const [assignments, setAssignments] = useState<AssignmentCard[]>([]);
+  const [devices, setDevices] = useState<ClassroomDevice[]>([]);
   const [classroomBroadcasts, setClassroomBroadcasts] = useState<ClassroomBroadcast[]>([]);
   const [dictationTasks, setDictationTasks] = useState<DictationTask[]>([]);
   const [readingTasks, setReadingTasks] = useState<ReadingTask[]>([]);
-  const [corrections, setCorrections] = useState<CorrectionRecord[]>(demoCorrections);
-  const [logs, setLogs] = useState<LearningLog[]>(demoLogs);
-  const [reports, setReports] = useState<StudentReportCard[]>(demoReports);
+  const [corrections, setCorrections] = useState<CorrectionRecord[]>([]);
+  const [logs, setLogs] = useState<LearningLog[]>([]);
+  const [reports, setReports] = useState<StudentReportCard[]>([]);
   const [reviewSubmissions, setReviewSubmissions] = useState<ReviewSubmission[]>([]);
   const [gradingWorkbenches, setGradingWorkbenches] = useState<GradingWorkbench[]>([]);
   const [audit, setAudit] = useState<AdminAudit | null>(null);
@@ -580,9 +453,9 @@ function App() {
   const [qaBusy, setQaBusy] = useState(false);
   const [teacherPhone, setTeacherPhone] = useState("13800000001");
   const [teacherCode, setTeacherCode] = useState("T8JH21");
-  const [studentName, setStudentName] = useState("李子越");
-  const [guardianPhone, setGuardianPhone] = useState("13900005678");
-  const [studentCode, setStudentCode] = useState("LZY6P9");
+  const [studentName, setStudentName] = useState("肖心妍");
+  const [guardianPhone, setGuardianPhone] = useState("18285281120");
+  const [studentCode, setStudentCode] = useState("XFSJHA");
   const [deviceCode, setDeviceCode] = useState("PAD6JH");
 
   const currentTeacher = teachers.find((item) => item.id === auth.teacherId) || teachers[0];
@@ -619,8 +492,8 @@ function App() {
 
   async function applyBootstrap() {
     const data = await getBootstrapData();
-    if (data.teachers.length) setTeachers(data.teachers);
-    if (data.students.length) setStudents(data.students);
+    setTeachers(data.teachers);
+    setStudents(data.students);
     setTasks(data.tasks);
     setAssignments(data.assignments);
     setLatestAssessmentDraft((current) => {
@@ -634,7 +507,7 @@ function App() {
         .filter((draft): draft is AssessmentDraftRef => Boolean(draft));
       return recoverable.find((draft) => draft.reviewStatus === "pending") || recoverable[0] || null;
     });
-    if (data.classroomDevices.length) setDevices(data.classroomDevices);
+    setDevices(data.classroomDevices);
     setClassroomBroadcasts(data.classroomBroadcasts);
     setDictationTasks(data.dictationTasks);
     setReadingTasks(data.readingTasks);
@@ -694,11 +567,11 @@ function App() {
     try {
       const response = await loginTeacher({ name: "", phone: teacherPhone, accessCode: teacherCode });
       setSessionToken(response.sessionToken);
-      setAuth({ studentId: "", teacherId: response.teacher.id, deviceId: "" });
       await applyBootstrap();
       await refreshTeacherOps();
       const status = await getApiStatus();
       setAi(status.ai);
+      setAuth({ studentId: "", teacherId: response.teacher.id, deviceId: "" });
       setRole("teacher");
       setSync({ busy: false, ok: true, message: `教师端已登录：${response.teacher.displayName}` });
     } catch (error) {
@@ -711,8 +584,8 @@ function App() {
     try {
       const response = await loginStudent({ displayName: studentName, guardianPhone, accessCode: studentCode });
       setSessionToken(response.sessionToken);
-      setAuth({ studentId: response.student.id, teacherId: "", deviceId: "" });
       await applyBootstrap();
+      setAuth({ studentId: response.student.id, teacherId: "", deviceId: "" });
       setRole("student");
       setSync({ busy: false, ok: true, message: `学生端已登录：${response.student.displayName}` });
     } catch (error) {
@@ -725,8 +598,8 @@ function App() {
     try {
       const response = await loginClassroom({ bindingCode: deviceCode });
       setSessionToken(response.sessionToken);
-      setAuth({ studentId: "", teacherId: "", deviceId: response.device.id });
       await applyBootstrap();
+      setAuth({ studentId: "", teacherId: "", deviceId: response.device.id });
       setRole("classroom");
       setSync({ busy: false, ok: true, message: `课堂平板已绑定：${response.device.label}` });
     } catch (error) {
@@ -739,7 +612,6 @@ function App() {
     const subject = input?.subject || "英语";
     const title = input?.title || `${student.displayName} 今日${subject}订正与巩固`;
     const requirement = input?.requirement || title;
-    setTasks((items) => [{ ...demoTasks[0], id: `local-task-${Date.now()}`, studentId: student.id, studentName: student.displayName, title, subject, minutes: input?.minutes || 12, summary: requirement, description: requirement, knowledgePoints: input?.requirement ? [subject, "教师布置"] : demoTasks[0].knowledgePoints }, ...items]);
     try {
       const response = await draftTeacherTask({ studentId: student.id, studentName: student.displayName, subject, title, requirement, minutes: input?.minutes || 12 });
       setSync({ busy: false, ok: response.result.available, message: response.result.available ? "今日任务已生成并写入记录" : "任务已本地生成，AI暂不可用" });
@@ -826,7 +698,8 @@ function App() {
   }
 
   function selectAssessmentGenerationJob(job: AssessmentGenerationJob) {
-    const draft = assessmentDraftRefFromJob(job);
+    const assignment = job.assignmentId ? assignments.find((item) => item.id === job.assignmentId) : undefined;
+    const draft = assignment ? assessmentDraftRefFromAssignment(assignment) : assessmentDraftRefFromJob(job);
     if (!draft) return;
     setLatestAssessmentDraft(draft);
     setPrintAssets([]);
@@ -1288,7 +1161,7 @@ function App() {
       </aside>
       <main className="main">
         <header className="topbar"><div><p className="eyebrow">{roleLabel(role)}</p><h1>{role === "teacher" ? `教师端 · ${currentModule}` : role === "student" ? `学生端 · ${currentModule}` : `课堂平板 · ${currentModule}`}</h1></div><ApiSyncStatus state={syncForRole(sync, role)} /></header>
-        {role === "teacher" ? <TeacherWorkspace activeModule={currentModule} ai={ai} assessmentJobs={assessmentJobs} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentCancel={cancelAssessmentGeneration} onAssessmentJobSelect={selectAssessmentGenerationJob} onAssessmentRecovery={recoverAssessmentGeneration} onAssessmentDraftSelect={(assignment) => {
+        {role === "teacher" && auth.teacherId ? <TeacherWorkspace activeModule={currentModule} ai={ai} assessmentJobs={assessmentJobs} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentCancel={cancelAssessmentGeneration} onAssessmentJobSelect={selectAssessmentGenerationJob} onAssessmentRecovery={recoverAssessmentGeneration} onAssessmentDraftSelect={(assignment) => {
           const draft = assessmentDraftRefFromAssignment(assignment);
           if (draft) {
             setLatestAssessmentDraft(draft);
@@ -1322,9 +1195,11 @@ function App() {
           await setClassroomDeviceLock(currentDevice.id, unlocked);
           setSync({ busy: false, ok: true, message: unlocked ? "平板已解锁" : "平板已锁定" });
         }} gradingWorkbenches={gradingWorkbenches} onUploadReview={uploadForReview} printAssets={printAssets} profileDraft={profileDraft} reports={reports} reviewSubmissions={reviewSubmissions} selectedTextbookContext={selectedTextbookContext} students={students} sync={sync} tasks={tasks} teacher={currentTeacher} termReportDraft={termReportDraft} textbooks={textbooks} /> : null}
-        {role === "student" ? <StudentWorkspace activeModule={currentModule} answer={answer} assignments={assignments} corrections={corrections} isLoggedIn={Boolean(auth.studentId)} logs={logs} onAsk={askQa} onLogin={handleStudentLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, student: module }))} onUploadReview={uploadStudentSubmission} qaBusy={qaBusy} question={question} reports={reports} setGuardianPhone={setGuardianPhone} setQuestion={setQuestion} setStudentCode={setStudentCode} setStudentName={setStudentName} student={currentStudent} tasks={tasks} /> : null}
-        {role === "classroom" ? <ClassroomWorkspace activeModule={currentModule} classroomBroadcasts={classroomBroadcasts} device={currentDevice} devices={devices} dictationTasks={dictationTasks} onAsk={askClassroomQa} onLogin={handleClassroomLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, classroom: module }))} onTaskComplete={completeTaskFromTablet} readingTasks={readingTasks} setDeviceCode={setDeviceCode} students={students} tasks={tasks} /> : null}
+        {role === "student" && auth.studentId ? <StudentWorkspace activeModule={currentModule} answer={answer} assignments={assignments} corrections={corrections} isLoggedIn logs={logs} onAsk={askQa} onLogin={handleStudentLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, student: module }))} onUploadReview={uploadStudentSubmission} qaBusy={qaBusy} question={question} reports={reports} setGuardianPhone={setGuardianPhone} setQuestion={setQuestion} setStudentCode={setStudentCode} setStudentName={setStudentName} student={currentStudent} tasks={tasks} /> : null}
+        {role === "classroom" && auth.deviceId ? <ClassroomWorkspace activeModule={currentModule} classroomBroadcasts={classroomBroadcasts} device={currentDevice} devices={devices} dictationTasks={dictationTasks} onAsk={askClassroomQa} onLogin={handleClassroomLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, classroom: module }))} onTaskComplete={completeTaskFromTablet} readingTasks={readingTasks} setDeviceCode={setDeviceCode} students={students} tasks={tasks} /> : null}
         {role === "teacher" && !auth.teacherId ? <LoginPanel code={teacherCode} onCode={setTeacherCode} onLogin={handleTeacherLogin} onPhone={setTeacherPhone} phone={teacherPhone} title="教师端登录" /> : null}
+        {role === "student" && !auth.studentId ? <StudentLoginPanel onCode={setStudentCode} onLogin={handleStudentLogin} onName={setStudentName} onPhone={setGuardianPhone} /> : null}
+        {role === "classroom" && !auth.deviceId ? <ClassroomLoginPanel code={deviceCode} onCode={setDeviceCode} onLogin={handleClassroomLogin} /> : null}
       </main>
     </div>
   );
@@ -1753,6 +1628,7 @@ function TeacherWorkspace({
   const generationFeedbackVisible = activeAssessmentJobs.length > 0 || sync.message.includes("生成任务") || sync.message.startsWith("生成失败");
   const generationFeedbackMessage = activeAssessmentJobs[0]?.message || sync.message;
   const generationFeedbackStatus = activeAssessmentJobs.length ? "pending" : sync.ok === false ? "blocked" : sync.ok ? "ready" : "pending";
+  const finalExportCompleted = Boolean(latestAssessmentDraft?.finalExportAssets?.studentPaper || latestAssessmentDraft?.finalExportAssets?.answerAnalysis);
   const copyTermReportMessage = async () => {
     const message = selectedTermReport?.wechatMessage || "您好，老师已将阶段成长报告发送给您，请查收。";
     try {
@@ -1944,7 +1820,7 @@ function TeacherWorkspace({
               }}><option value="">请选择匹配的贵州遵义教材基准</option>{generationTextbookAssets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title} · {asset.volume}</option>)}</select></label>
               : null}
             {generationMode === "quiz" && generationTextbookContext && !generationTextbookChapters.length ? <div className="context-note blocked"><span>当前教材暂无章节索引；请先补齐目录草案并核对后再按章节生成。</span><button className="secondary-button" disabled={!chapterDraftsForTextbookAsset(generationTextbookContext.asset).length} onClick={() => onSaveTextbookChapters(generationTextbookContext.asset.id, chapterDraftsForTextbookAsset(generationTextbookContext.asset))} type="button"><FileText size={16} />建立章节草案</button></div> : null}
-            <label className="wide-field">知识点 / 考查范围<input value={generationMode === "quiz" ? textbookHint || assessmentKnowledgeRange : assessmentKnowledgeRange} onChange={(event) => setAssessmentKnowledgeRange(event.target.value)} /></label>
+          <label className="wide-field">知识点 / 考查范围<input value={assessmentKnowledgeRange} placeholder={generationMode === "quiz" ? textbookHint || "可补充知识点或考查范围" : "可填写知识点或考查范围"} onChange={(event) => setAssessmentKnowledgeRange(event.target.value)} /></label>
           </div>
           <div className="generation-section-box">
             <strong>{generationMode === "exam" ? "题型与分值结构" : generationMode === "practice" ? "训练结构" : "题型组成"}</strong>
@@ -1972,7 +1848,7 @@ function TeacherWorkspace({
             <button className="primary-button" disabled={Boolean(assessmentGenerationBlockReason)} onClick={submitAssessmentDraft}><Printer size={17} />生成 PDF 草稿</button>
             {latestAssessmentDraft?.draftAsset ? <a className="draft-pdf-link" href={latestAssessmentDraft.draftAsset.url} target="_blank" rel="noreferrer"><FileText size={17} />打开审查 PDF</a> : <button className="secondary-button" disabled type="button"><FileText size={17} />打开审查 PDF</button>}
             {latestAssessmentDraft?.layoutValidation?.ok === false || (latestAssessmentDraft && !latestAssessmentDraft.layoutValidation) ? <p className="context-note blocked"><ShieldCheck size={15} />排版校验未通过：{latestAssessmentDraft.layoutValidation?.issues.join("；") || "缺少有效的页数和题目坐标校验，请重新导出草稿。"}</p> : null}
-            <button className="primary-button" disabled={!latestAssessmentDraft || latestAssessmentDraft.layoutValidation?.ok !== true} onClick={() => latestAssessmentDraft && onExportPrint(latestAssessmentDraft.assignmentId)}><CheckCircle2 size={17} />确认正式导出</button>
+            <button className="primary-button" disabled={finalExportCompleted || !latestAssessmentDraft || latestAssessmentDraft.layoutValidation?.ok !== true} onClick={() => latestAssessmentDraft && onExportPrint(latestAssessmentDraft.assignmentId)}><CheckCircle2 size={17} />确认正式导出</button>
             <button className="secondary-button danger-button" disabled={!latestAssessmentDraft || latestAssessmentDraft.reviewStatus !== "pending"} onClick={() => latestAssessmentDraft && onAssessmentReject(latestAssessmentDraft.assignmentId)} type="button"><CircleX size={17} />否决草稿</button>
             <button className="secondary-button" disabled={!latestAssessmentDraft || latestAssessmentDraft.reviewStatus !== "rejected"} onClick={() => latestAssessmentDraft && onAssessmentRegenerate(latestAssessmentDraft.assignmentId)} type="button"><RefreshCw size={17} />重新生成</button>
             {latestAssessmentDraft?.finalExportAssets?.studentPaper || latestAssessmentDraft?.finalExportAssets?.answerAnalysis ? <div className="generation-final-assets"><strong>本任务正式导出</strong>{latestAssessmentDraft?.finalExportAssets?.studentPaper ? <a className="draft-pdf-link" href={latestAssessmentDraft.finalExportAssets.studentPaper.url} target="_blank" rel="noreferrer"><FileText size={17} />学生卷 PDF</a> : null}{latestAssessmentDraft?.finalExportAssets?.answerAnalysis ? <a className="draft-pdf-link" href={latestAssessmentDraft.finalExportAssets.answerAnalysis.url} target="_blank" rel="noreferrer"><FileText size={17} />答案解析 PDF</a> : null}</div> : null}
@@ -2358,15 +2234,14 @@ function ClassroomWorkspace({
   tasks: LearningTaskCard[];
 }) {
   const moduleClass = (module: string, className: string) => `${className} ${activeModule === module ? "" : "module-hidden"}`;
-  const fallbackStudents = students.length ? students : demoStudents;
   const [qaStudentId, setQaStudentId] = useState("");
   const [qaQuestion, setQaQuestion] = useState("");
   const [qaAnswer, setQaAnswer] = useState("");
   const [qaBusy, setQaBusy] = useState(false);
-  const selectedStudentId = qaStudentId || fallbackStudents[0]?.id || "";
-  const selectedStudent = fallbackStudents.find((item) => item.id === selectedStudentId) || fallbackStudents[0];
+  const selectedStudentId = qaStudentId || students[0]?.id || "";
+  const selectedStudent = students.find((item) => item.id === selectedStudentId) || students[0];
   const deviceBroadcasts = classroomBroadcasts.filter((item) => !item.deviceId || item.deviceId === device.id);
-  const classroomTasks = tasks.filter((task) => fallbackStudents.some((student) => student.id === task.studentId || student.displayName === task.studentName));
+  const classroomTasks = tasks.filter((task) => students.some((student) => student.id === task.studentId || student.displayName === task.studentName));
 
   async function submitClassroomQa() {
     if (!selectedStudentId || !qaQuestion.trim()) return;
@@ -2404,7 +2279,7 @@ function ClassroomWorkspace({
         <article className="classroom-action-card full-width-card">
           <strong>AI问答可用</strong>
           <div className="availability-light"><i className="green" /><strong>课堂平板问答</strong><span>学生可以直接输入问题，回答会绑定当前使用学生。</span></div>
-          <div className="template-controls"><label>当前使用学生<select value={selectedStudentId} onChange={(event) => setQaStudentId(event.target.value)}>{fallbackStudents.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label></div>
+          <div className="template-controls"><label>当前使用学生<select disabled={!students.length} value={selectedStudentId} onChange={(event) => setQaStudentId(event.target.value)}>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label></div>
           <textarea className="wide-textarea compact-textarea" value={qaQuestion} onChange={(event) => setQaQuestion(event.target.value)} placeholder="学生输入语文、数学、英语或其他学习问题。题目类问题会优先做思路引导。" />
           <div className="button-row">
             <button className="primary-button" disabled={qaBusy || !selectedStudent} onClick={() => void submitClassroomQa()}><Send size={17} />{qaBusy ? "正在回答" : "发送问题"}</button>
@@ -2436,36 +2311,22 @@ function ClassroomWorkspace({
 }
 
 function ClassroomDictationPanel({ device, dictationTasks }: { device: ClassroomDevice; dictationTasks: DictationTask[] }) {
-  const fallbackDictations: DictationTask[] = [{
-    id: "demo-dictation",
-    deviceId: device.id || "demo-device",
-    grade: device.grade || "六年级",
-    className: device.className || "课堂平板",
-    subject: "英语",
-    title: "Unit 2 单词听写",
-    items: ["carry", "bright", "finish", "careful"],
-    currentIndex: 0,
-    difficulty: "基础",
-    repeats: 2,
-    intervalSeconds: 10,
-    status: "待开始",
-    createdByTeacherId: device.teacherId || ""
-  }];
-  const options = dictationTasks.filter((item) => !item.deviceId || item.deviceId === device.id);
-  const usableTasks = options.length ? options : fallbackDictations;
+  const usableTasks = dictationTasks.filter((item) => !item.deviceId || item.deviceId === device.id);
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [index, setIndex] = useState(0);
   const [running, setRunning] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const task = usableTasks.find((item) => item.id === selectedTaskId) || usableTasks[0];
-  const currentIndex = Math.min(index, Math.max(task.items.length - 1, 0));
-  const currentItem = task.items[currentIndex] || "";
 
   useEffect(() => {
     setIndex(0);
     setRunning(false);
     setRevealed(false);
   }, [selectedTaskId]);
+
+  if (!task) return <p className="review-empty">暂无教师端发布的听写任务。</p>;
+  const currentIndex = Math.min(index, Math.max(task.items.length - 1, 0));
+  const currentItem = task.items[currentIndex] || "";
 
   return <div className="classroom-action-grid">
     <article className="classroom-action-card">
@@ -2492,21 +2353,7 @@ function ClassroomDictationPanel({ device, dictationTasks }: { device: Classroom
 }
 
 function ClassroomReadingPanel({ broadcasts, device, readingTasks }: { broadcasts: ClassroomBroadcast[]; device: ClassroomDevice; readingTasks: ReadingTask[] }) {
-  const fallbackReadings: ReadingTask[] = [{
-    id: "demo-reading",
-    deviceId: device.id || "demo-device",
-    grade: device.grade || "六年级",
-    className: device.className || "课堂平板",
-    subject: "语文",
-    title: "课文预习跟读",
-    passage: "明天学习的课文先读两遍，遇到不认识的字词先圈出来，再跟老师一起确认意思。",
-    focusItems: ["难字词", "停顿节奏", "主要内容"],
-    supportNote: "先跟读，再说出自己不理解的地方。",
-    status: "待跟读",
-    createdByTeacherId: device.teacherId || ""
-  }];
-  const options = readingTasks.filter((item) => !item.deviceId || item.deviceId === device.id);
-  const usableReadings = options.length ? options : fallbackReadings;
+  const usableReadings = readingTasks.filter((item) => !item.deviceId || item.deviceId === device.id);
   const [selectedReadingId, setSelectedReadingId] = useState("");
   const [started, setStarted] = useState(false);
   const [completed, setCompleted] = useState(false);
@@ -2517,6 +2364,8 @@ function ClassroomReadingPanel({ broadcasts, device, readingTasks }: { broadcast
     setStarted(false);
     setCompleted(false);
   }, [selectedReadingId]);
+
+  if (!reading) return <p className="review-empty">暂无教师端发布的跟读任务。</p>;
 
   return <div className="classroom-action-grid">
     <article className="classroom-action-card">
@@ -2538,13 +2387,12 @@ function ClassroomReadingPanel({ broadcasts, device, readingTasks }: { broadcast
 }
 
 function ClassroomPublicScreen({ device, onOpenModule, students, tasks }: { device: ClassroomDevice; onOpenModule?: (module: string) => void; students: StudentProfile[]; tasks: LearningTaskCard[] }) {
-  const fallbackStudents = students.length ? students : demoStudents;
   const [activeStudentId, setActiveStudentId] = useState("");
   const [draggingStudentId, setDraggingStudentId] = useState("");
-  const activeStudent = fallbackStudents.find((item) => item.id === activeStudentId) || null;
+  const activeStudent = students.find((item) => item.id === activeStudentId) || null;
   const pendingTasks = tasks.filter((item) => item.status !== "已完成").length;
   const completedTasks = tasks.filter((item) => item.status === "已完成").length;
-  const rails = splitAvatarRails(fallbackStudents);
+  const rails = splitAvatarRails(students);
 
   function unlock(studentId: string) {
     setActiveStudentId(studentId);
@@ -2658,8 +2506,16 @@ function LoginPanel({ code, onCode, onLogin, onPhone, phone, title }: { code: st
   return <section className="panel full"><PanelTitle icon={UserRound} title={title} /><div className="template-controls"><label>电话<input value={phone} onChange={(event) => onPhone(event.target.value)} /></label><label>专属码<input value={code} onChange={(event) => onCode(event.target.value)} /></label><button className="primary-button" onClick={onLogin}><CheckCircle2 size={17} />登录同步真实数据</button></div></section>;
 }
 
+function StudentLoginPanel({ onCode, onLogin, onName, onPhone }: { onCode: (v: string) => void; onLogin: () => void; onName: (v: string) => void; onPhone: (v: string) => void }) {
+  return <section className="panel full"><PanelTitle icon={UserRound} title="学生端登录" /><LoginFields onCode={onCode} onName={onName} onPhone={onPhone} onSubmit={onLogin} /></section>;
+}
+
+function ClassroomLoginPanel({ code, onCode, onLogin }: { code: string; onCode: (v: string) => void; onLogin: () => void }) {
+  return <section className="panel full"><PanelTitle icon={TerminalSquare} title="课堂平板绑定" /><div className="template-controls"><label>设备绑定码<input value={code} onChange={(event) => onCode(event.target.value)} /></label><button className="primary-button" onClick={onLogin}><CheckCircle2 size={17} />绑定并同步课堂数据</button></div></section>;
+}
+
 function LoginFields({ onCode, onName, onPhone, onSubmit }: { onCode: (v: string) => void; onName: (v: string) => void; onPhone: (v: string) => void; onSubmit: () => void }) {
-  return <div className="template-controls"><label>学生姓名<input defaultValue="李子越" onChange={(event) => onName(event.target.value)} /></label><label>家长电话<input defaultValue="13900005678" onChange={(event) => onPhone(event.target.value)} /></label><label>学生专属码<input defaultValue="LZY6P9" onChange={(event) => onCode(event.target.value)} /></label><button className="primary-button" onClick={onSubmit}><CheckCircle2 size={17} />登录学生端</button></div>;
+  return <div className="template-controls"><label>学生姓名<input defaultValue="肖心妍" onChange={(event) => onName(event.target.value)} /></label><label>家长电话<input defaultValue="18285281120" onChange={(event) => onPhone(event.target.value)} /></label><label>学生专属码<input defaultValue="XFSJHA" onChange={(event) => onCode(event.target.value)} /></label><button className="primary-button" onClick={onSubmit}><CheckCircle2 size={17} />登录学生端</button></div>;
 }
 
 function FlowCard({ hint, icon: Icon, index, label, state, value }: { hint: string; icon: React.ComponentType<{ size?: number }>; index: number; label: string; state: ProviderStatus; value: string; }) {
@@ -2704,6 +2560,10 @@ function reviewedQuestionScore(questions: GradingWorkbench["questions"]) {
   return Number(questions.reduce((sum, question) => sum + Number(question.score || 0), 0).toFixed(2));
 }
 
+function gradingWorkbenchNeedsReview(item: GradingWorkbench) {
+  return !allQuestionsReviewed(item.questions) || item.quality?.lowConfidence === true || item.archiveEligible === false || item.needsTeacherReview === true;
+}
+
 function questionMaxScoreTotal(questions: GradingWorkbench["questions"]) {
   if (!questions.length) return null;
   const values: number[] = [];
@@ -2718,6 +2578,14 @@ function questionMaxScoreTotal(questions: GradingWorkbench["questions"]) {
 
 function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, reviewSubmissions, workbenches }: { onMarkReviewed: (submissionId: string, input?: Record<string, unknown>) => void; onQuestionReview: (submissionId: string, questionId: string, input: Record<string, unknown>) => void; onRecognize: (submissionId: string) => void; reviewSubmissions: ReviewSubmission[]; workbenches: GradingWorkbench[] }) {
   const [activeId, setActiveId] = useState(workbenches[0]?.submissionId || "");
+  const [queueFilter, setQueueFilter] = useState<"all" | "pending" | "low_confidence" | "ready">("all");
+  const [showQueueFilter, setShowQueueFilter] = useState(false);
+  const visibleWorkbenches = workbenches.filter((item) => {
+    if (queueFilter === "pending") return item.pendingQuestionCount > 0 || !allQuestionsReviewed(item.questions);
+    if (queueFilter === "low_confidence") return item.quality?.lowConfidence === true || item.archiveEligible === false || item.needsTeacherReview === true;
+    if (queueFilter === "ready") return allQuestionsReviewed(item.questions);
+    return true;
+  });
   const active = workbenches.find((item) => item.submissionId === activeId) || workbenches[0];
   const [activePage, setActivePage] = useState(1);
   const [activeQuestionId, setActiveQuestionId] = useState(active?.questions[0]?.id || "");
@@ -2733,6 +2601,9 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
   useEffect(() => {
     if (!workbenches.some((item) => item.submissionId === activeId)) setActiveId(workbenches[0]?.submissionId || "");
   }, [activeId, workbenches]);
+  useEffect(() => {
+    if (!visibleWorkbenches.some((item) => item.submissionId === activeId)) setActiveId(visibleWorkbenches[0]?.submissionId || "");
+  }, [activeId, queueFilter, workbenches]);
   useEffect(() => {
     setActivePage(1);
     setActiveQuestionId(active?.questions[0]?.id || "");
@@ -2769,14 +2640,15 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
       <aside className="grading-review-queue">
         <div className="grading-queue-head">
           <div><strong>复核队列</strong><span>等待生成结构化批改批次</span></div>
-          <button className="secondary-button" disabled type="button"><Search size={15} />筛选</button>
+          <button className="secondary-button" onClick={() => setShowQueueFilter((value) => !value)} type="button"><Search size={15} />筛选</button>
+          {showQueueFilter ? <select aria-label="批改队列筛选" value={queueFilter} onChange={(event) => setQueueFilter(event.target.value as typeof queueFilter)}><option value="all">全部批次</option><option value="pending">待确认</option><option value="low_confidence">低置信</option><option value="ready">可归档</option></select> : null}
         </div>
         <div className="grading-batch-list">
-          {batches.length ? batches.map((batch) => <button disabled key={batch.id}>
+          {batches.length ? batches.map((batch) => <div className="grading-batch-placeholder" key={batch.id}>
             <div className="grading-batch-title"><strong>{batch.studentName} · {batch.kind}</strong><StatusDot status="pending" /></div>
             <span>{batch.subject} · {batch.imageTotal}页 · 等待工作台生成</span>
             <small>{new Date(batch.submittedAt).toLocaleString("zh-CN")}</small>
-          </button>) : <p className="review-empty">暂无批改批次。上传照片后会显示在这里。</p>}
+          </div>) : <p className="review-empty">暂无批改批次。上传照片后会显示在这里。</p>}
         </div>
       </aside>
       <main className="grading-stage-shell">
@@ -2907,18 +2779,19 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
     <aside className="grading-review-queue">
       <div className="grading-queue-head">
         <div><strong>复核队列</strong><span>优先处理低置信和待确认批次</span></div>
-        <button className="secondary-button" type="button"><Search size={15} />筛选</button>
+        <button className="secondary-button" onClick={() => setShowQueueFilter((value) => !value)} type="button"><Search size={15} />筛选</button>
+        {showQueueFilter ? <select aria-label="批改队列筛选" value={queueFilter} onChange={(event) => setQueueFilter(event.target.value as typeof queueFilter)}><option value="all">全部批次</option><option value="pending">待确认</option><option value="low_confidence">低置信</option><option value="ready">可归档</option></select> : null}
       </div>
       <div className="grading-batch-list">
-        {workbenches.map((item) => {
+        {visibleWorkbenches.length ? visibleWorkbenches.map((item) => {
           const isActive = item.submissionId === active?.submissionId;
-          const itemRisk = !allQuestionsReviewed(item.questions) || item.quality?.lowConfidence || item.archiveEligible === false;
+          const itemRisk = gradingWorkbenchNeedsReview(item);
           return <button className={isActive ? "active" : ""} key={item.submissionId} onClick={() => setActiveId(item.submissionId)}>
             <div className="grading-batch-title"><strong>{item.studentName} · {item.kind}</strong><StatusDot status={itemRisk ? "pending" : "ready"} /></div>
             <span>{item.subject} · {item.questionCount || 0}题 · {item.ocrStatusLabel}</span>
             <small>{item.pendingQuestionCount ? `${item.pendingQuestionCount}题待确认` : `已确认 ${item.reviewedQuestionCount || item.questions.length}/${item.questionCount || item.questions.length}`}</small>
           </button>;
-        })}
+        }) : <p className="review-empty">当前筛选条件下没有批改批次。</p>}
       </div>
     </aside>
     <main className="grading-stage-shell">
@@ -3884,11 +3757,10 @@ function formatLearningLog(log: DisplayLogLike) {
   };
   const item = mapped[key];
   if (item) return item;
-  const actionText = [action, result].filter(Boolean).join("，");
   const featureKey: string = feature || "";
   return {
-    title: fallbackFeature[featureKey] || featureKey || "学习记录",
-    detail: actionText || "已记录一条学习行为。"
+    title: fallbackFeature[featureKey] || "学习记录",
+    detail: fallbackFeature[featureKey] ? "已记录一条相关学习行为。" : "该学习事件暂无可展示详情。"
   };
 }
 

@@ -35,7 +35,7 @@ test("only textbook quizzes submit textbook evidence and expose scope confirmati
 });
 
 test("personalized practice keeps its student basis independent from textbook selection", () => {
-  assert.match(source, /value=\{generationMode === "quiz" \? textbookHint \|\| assessmentKnowledgeRange : assessmentKnowledgeRange\}/);
+  assert.match(source, /value=\{assessmentKnowledgeRange\}/);
   assert.match(source, /generationMode === "practice" \? <div className="generation-source-card"><strong>学生学习记录/);
 });
 
@@ -171,7 +171,7 @@ test("knowledge source review binds only the selected real textbook asset", () =
 test("generation workbench displays layout risk and blocks draft confirmation", () => {
   assert.match(source, /layoutValidation\?:/);
   assert.match(source, /latestAssessmentDraft\?\.layoutValidation\?\.ok === false/);
-  assert.match(source, /disabled=\{!latestAssessmentDraft \|\| latestAssessmentDraft\.layoutValidation\?\.ok !== true\}/);
+  assert.match(source, /disabled=\{finalExportCompleted \|\| !latestAssessmentDraft \|\| latestAssessmentDraft\.layoutValidation\?\.ok !== true\}/);
   assert.match(source, /排版校验未通过/);
 });
 
@@ -207,6 +207,21 @@ test("generation review exposes the selected draft's student and answer PDFs", (
   assert.match(source, /答案解析 PDF/);
   assert.match(source, /latestAssessmentDraft\?\.finalExportAssets\?\.studentPaper/);
   assert.match(source, /latestAssessmentDraft\?\.finalExportAssets\?\.answerAnalysis/);
+});
+
+test("selecting a generation job restores the assignment review state when available", () => {
+  assert.match(source, /const assignment = job\.assignmentId \? assignments\.find\(\(item\) => item\.id === job\.assignmentId\) : undefined/);
+  assert.match(source, /const draft = assignment \? assessmentDraftRefFromAssignment\(assignment\) : assessmentDraftRefFromJob\(job\)/);
+});
+
+test("generation final export becomes non-repeatable after final assets exist", () => {
+  assert.match(source, /const finalExportCompleted = Boolean\(latestAssessmentDraft\?\.finalExportAssets\?\.studentPaper \|\| latestAssessmentDraft\?\.finalExportAssets\?\.answerAnalysis\)/);
+  assert.match(source, /disabled=\{finalExportCompleted \|\| !latestAssessmentDraft \|\| latestAssessmentDraft\.layoutValidation\?\.ok !== true\}/);
+});
+
+test("quiz knowledge range remains editable after textbook selection", () => {
+  assert.match(source, /<label className="wide-field">知识点 \/ 考查范围<input value=\{assessmentKnowledgeRange\}/);
+  assert.match(source, /placeholder=\{generationMode === "quiz" \? textbookHint \|\| "可补充知识点或考查范围" : "可填写知识点或考查范围"\}/);
 });
 
 test("teacher target selectors use the API availability contract", () => {

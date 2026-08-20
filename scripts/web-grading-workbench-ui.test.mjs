@@ -28,3 +28,20 @@ test("grading workbench collects mistake archive evidence per reviewed question"
   assert.match(source, /setQuestionErrorStep\(activeQuestionForForm\?\.errorStep \|\| activeQuestionForForm\?\.explanation \|\| ""\)/);
   assert.match(source, /if \(status === "correct"\) \{\s*setQuestionScore\(String\(max\)\);\s*setQuestionErrorStep\(""\);\s*setQuestionSuggestedPractice\(""\);\s*\}/);
 });
+
+test("grading workbench filter button exposes actionable queue filters", () => {
+  assert.match(source, /queueFilter/);
+  assert.match(source, /showQueueFilter/);
+  assert.match(source, /visibleWorkbenches/);
+  assert.match(source, /待确认/);
+  assert.match(source, /低置信/);
+  assert.match(source, /可归档/);
+  assert.match(source, /setShowQueueFilter\(\(value\) => !value\)/);
+  assert.match(source, /visibleWorkbenches\.some\(\(item\) => item\.submissionId === activeId\)/);
+  assert.doesNotMatch(source, /<button className="secondary-button" disabled type="button"><Search size=\{15\} \/>筛选<\/button>/);
+});
+
+test("grading queue placeholders are status-only when no structured workbench exists", () => {
+  assert.match(source, /className="grading-batch-placeholder"/);
+  assert.doesNotMatch(source, /<button disabled key=\{batch\.id\}>/);
+});

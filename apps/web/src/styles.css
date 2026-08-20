@@ -1895,7 +1895,8 @@ button:disabled {
   padding-right: 2px;
 }
 
-.grading-batch-list > button {
+.grading-batch-list > button,
+.grading-batch-list > .grading-batch-placeholder {
   display: grid;
   gap: 7px;
   width: 100%;
@@ -1906,6 +1907,10 @@ button:disabled {
   background: rgba(255, 255, 255, 0.86);
   color: var(--text);
   text-align: left;
+}
+
+.grading-batch-list > .grading-batch-placeholder {
+  opacity: 0.78;
 }
 
 .grading-batch-list > button.active {
@@ -1922,7 +1927,9 @@ button:disabled {
 }
 
 .grading-batch-list button span,
-.grading-batch-list button small {
+.grading-batch-list button small,
+.grading-batch-list .grading-batch-placeholder span,
+.grading-batch-list .grading-batch-placeholder small {
   color: var(--muted);
   font-size: 12px;
 }
