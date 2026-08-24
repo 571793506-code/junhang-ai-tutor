@@ -2039,6 +2039,28 @@ button:disabled {
   background: #ffffff;
 }
 
+.external-answer-source-panel,
+.external-review-summary {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: 8px;
+  background: #f7fbfd;
+}
+
+.external-answer-source-panel > label,
+.external-review-summary > label {
+  display: grid;
+  gap: 6px;
+}
+
+.external-review-summary > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .question-review-status {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

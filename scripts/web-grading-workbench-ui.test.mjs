@@ -46,6 +46,28 @@ test("grading queue placeholders are status-only when no structured workbench ex
   assert.doesNotMatch(source, /<button disabled key=\{batch\.id\}>/);
 });
 
+test("external workbook upload exposes ordered iPad photo and answer-source controls", () => {
+  assert.match(source, /外部练习册/);
+  assert.match(source, /iPad/);
+  assert.match(source, /answerSourceMode/);
+  assert.match(source, /teacher_confirmed/);
+  assert.match(source, /teacher_selected_reference/);
+  assert.match(source, /model_draft/);
+  assert.match(source, /missing/);
+  assert.match(source, /referenceSourceId/);
+  assert.match(source, /multiple/);
+  assert.match(source, /accept="image\/\*"/);
+});
+
+test("external workbench displays original recognition evidence and blocks archive", () => {
+  assert.match(source, /recognitionPacket/);
+  assert.match(source, /archiveBlockers/);
+  assert.match(source, /原始识别/);
+  assert.match(source, /答案来源/);
+  assert.match(source, /确认答案来源/);
+  assert.match(source, /archiveDisabled.*archiveBlockers/);
+});
+
 test("grading queue exposes server-backed student, subject, kind, exception, and pagination controls", () => {
   assert.match(source, /onQueryGradingWorkbenches/);
   assert.match(source, /gradingStudentFilter/);

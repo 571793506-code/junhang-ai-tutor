@@ -47,6 +47,7 @@ import {
   type AssessmentGenerationJob,
   type AssessmentLayoutValidation,
   completeLearningTask,
+  confirmGradingAnswerSource,
   type ContentIndexSummary,
   type StudentDictionaryEntry,
   draftStudentTermReport,
@@ -763,7 +764,7 @@ function App() {
     await createAssessment(draft.request);
   }
 
-  async function uploadForReview(input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[]; assignmentId?: string }) {
+  async function uploadForReview(input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[]; assignmentId?: string; materialType?: "external_workbook" | "generated_assessment"; answerSourceMode?: "teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing"; answerKeyText?: string; referenceSourceId?: string }) {
     if (!input.images.length) {
       setSync({ busy: false, ok: false, message: "请先选择需要批改的照片，可一次上传多张" });
       return;
@@ -772,6 +773,10 @@ function App() {
       const response = await uploadSubmission({
         studentId: input.studentId,
         assignmentId: input.assignmentId,
+        materialType: input.materialType,
+        answerSourceMode: input.answerSourceMode,
+        answerKeyText: input.answerKeyText,
+        referenceSourceId: input.referenceSourceId,
         subject: input.subject,
         kind: input.kind,
         title: input.title,
@@ -849,6 +854,16 @@ function App() {
       setSync({ busy: false, ok: true, message: "已确认当前题，系统将按逐题得分汇总总分" });
     } catch (error) {
       setSync({ busy: false, ok: false, message: `题目复核失败：${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
+  async function confirmAnswerSource(submissionId: string, input: { mode: "teacher_confirmed" | "teacher_selected_reference"; answerKeyText?: string; referenceSourceId?: string }) {
+    try {
+      const response = await confirmGradingAnswerSource(submissionId, input);
+      setGradingWorkbenches((items) => items.map((item) => (item.submissionId === submissionId ? response.workbench : item)));
+      setSync({ busy: false, ok: true, message: "答案来源已由教师明确确认，仍需逐题复核后归档" });
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `答案来源确认失败：${error instanceof Error ? error.message : String(error)}` });
     }
   }
 
@@ -1226,7 +1241,7 @@ function App() {
           if (!currentDevice?.id) return;
           await setClassroomDeviceLock(currentDevice.id, unlocked);
           setSync({ busy: false, ok: true, message: unlocked ? "平板已解锁" : "平板已锁定" });
-        }} gradingWorkbenchPage={gradingWorkbenchPage} gradingWorkbenches={gradingWorkbenches} onQueryGradingWorkbenches={queryGradingWorkbenches} onUploadReview={uploadForReview} printAssets={printAssets} profileDraft={profileDraft} reports={reports} reviewSubmissions={reviewSubmissions} selectedTextbookContext={selectedTextbookContext} students={students} sync={sync} tasks={tasks} teacher={currentTeacher} termReportDraft={termReportDraft} textbooks={textbooks} /> : null}
+        }} gradingWorkbenchPage={gradingWorkbenchPage} gradingWorkbenches={gradingWorkbenches} onConfirmAnswerSource={confirmAnswerSource} onQueryGradingWorkbenches={queryGradingWorkbenches} onUploadReview={uploadForReview} printAssets={printAssets} profileDraft={profileDraft} reports={reports} reviewSubmissions={reviewSubmissions} selectedTextbookContext={selectedTextbookContext} students={students} sync={sync} tasks={tasks} teacher={currentTeacher} termReportDraft={termReportDraft} textbooks={textbooks} /> : null}
         {role === "student" && auth.studentId && currentStudent ? <StudentWorkspace activeModule={currentModule} answer={answer} assignments={assignments} corrections={corrections} isLoggedIn logs={logs} onAsk={askQa} onLogin={handleStudentLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, student: module }))} onUploadReview={uploadStudentSubmission} qaBusy={qaBusy} question={question} reports={reports} setGuardianPhone={setGuardianPhone} setQuestion={setQuestion} setStudentCode={setStudentCode} setStudentName={setStudentName} student={currentStudent} tasks={tasks} /> : null}
         {role === "classroom" && auth.deviceId && currentDevice ? <ClassroomWorkspace activeModule={currentModule} classroomBroadcasts={classroomBroadcasts} device={currentDevice} devices={devices} dictationTasks={dictationTasks} onAsk={askClassroomQa} onLogin={handleClassroomLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, classroom: module }))} onTaskComplete={completeTaskFromTablet} readingTasks={readingTasks} setDeviceCode={setDeviceCode} students={students} tasks={tasks} /> : null}
         {role === "teacher" && !auth.teacherId ? <LoginPanel code={teacherCode} onCode={setTeacherCode} onLogin={handleTeacherLogin} onPhone={setTeacherPhone} phone={teacherPhone} title="教师端登录" /> : null}
@@ -1285,6 +1300,7 @@ function TeacherWorkspace({
   onAssessmentRegenerate,
   onAssessmentReject,
   onConfirmTextbookGenerationScope,
+  onConfirmAnswerSource,
   onContentIndexRebuild,
   onContentUpload,
   onExportPrint,
@@ -1353,6 +1369,7 @@ function TeacherWorkspace({
   onAssessmentReject: (assignmentId: string) => void;
   onConfirmTextbookGenerationScope: (assetId: string, chapterIds: string[]) => Promise<void>;
   onContentIndexRebuild: () => void;
+  onConfirmAnswerSource: (submissionId: string, input: { mode: "teacher_confirmed" | "teacher_selected_reference"; answerKeyText?: string; referenceSourceId?: string }) => void;
   onContentUpload: (files: File[]) => void;
   onExportPrint: (assignmentId: string) => void;
   onKnowledgeRefresh: () => void;
@@ -1385,7 +1402,7 @@ function TeacherWorkspace({
   onTabletReading: (input: Record<string, unknown>) => void;
   onTask: (input: { studentId?: string; subject?: SubjectLabel; title?: string; requirement?: string; minutes?: number }) => void;
   onUnlock: (unlocked: boolean) => void;
-  onUploadReview: (input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[] }) => Promise<Awaited<ReturnType<typeof uploadSubmission>> | undefined>;
+  onUploadReview: (input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[]; materialType?: "external_workbook" | "generated_assessment"; answerSourceMode?: "teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing"; answerKeyText?: string; referenceSourceId?: string }) => Promise<Awaited<ReturnType<typeof uploadSubmission>> | undefined>;
   printAssets: PrintAssetLink[];
   profileDraft: ProfileDraft | null;
   reports: StudentReportCard[];
@@ -1426,6 +1443,10 @@ function TeacherWorkspace({
   const [uploadKind, setUploadKind] = useState("作业");
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [uploadMaterialType, setUploadMaterialType] = useState<"external_workbook" | "generated_assessment">("external_workbook");
+  const [uploadAnswerSourceMode, setUploadAnswerSourceMode] = useState<"teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing">("missing");
+  const [uploadAnswerKeyText, setUploadAnswerKeyText] = useState("");
+  const [uploadReferenceSourceId, setUploadReferenceSourceId] = useState("");
   const [reviewUploadStatus, setReviewUploadStatus] = useState<ReviewUploadStatus | null>(null);
   const [taskEvidenceFiles, setTaskEvidenceFiles] = useState<File[]>([]);
   const [taskEvidenceTitle, setTaskEvidenceTitle] = useState("");
@@ -1728,7 +1749,7 @@ function TeacherWorkspace({
   const scheduleReviewRefresh = () => {
     [1200, 5000, 15000, 30000].forEach((delay) => window.setTimeout(() => onRefreshOps(), delay));
   };
-  const submitReviewUpload = async (source: ReviewUploadSource, input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[] }) => {
+  const submitReviewUpload = async (source: ReviewUploadSource, input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[]; materialType?: "external_workbook" | "generated_assessment"; answerSourceMode?: "teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing"; answerKeyText?: string; referenceSourceId?: string }) => {
     if (!input.images.length) {
       setReviewUploadStatus({ source, state: "failed", message: "请先选择照片", detail: "可一次上传多张图片，上传数量不设上限。" });
       return;
@@ -1961,8 +1982,8 @@ function TeacherWorkspace({
         {visiblePrintAssets.length ? <div className="print-asset-list">{visiblePrintAssets.map((asset) => <a key={asset.id} href={asset.url} target="_blank" rel="noreferrer"><FileText size={16} />{asset.title}</a>)}</div> : null}
       </section>
     </section>
-    <section className={moduleClass("批改复核", "panel span-6")}><PanelTitle badge="AI生成" icon={Upload} title="拍照上传批改" /><div className="template-controls"><label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{selectableStudents.map((student) => <option key={student.id} value={student.id}>{student.displayName}</option>)}</select></label><label>类型<select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option>作业</option><option>小测</option><option>试卷</option><option>听写</option></select></label><label>科目<select value={uploadSubject} onChange={(event) => setUploadSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label></div><label className="field-label">记录标题<input value={uploadTitle} placeholder="例如：三角形单元试卷批改、英语Unit 1听写批改" onChange={(event) => setUploadTitle(event.target.value)} /></label><ReviewImagePicker files={uploadFiles} setFiles={setUploadFiles} testId="teacher-grading-image-picker" /><p className="muted-line">批改记录绑定所选学生，教师复核确认后才进入学生档案、错题和学习分析。</p><div className="review-upload-action"><button className="primary-button" disabled={!selectedStudent || !uploadFiles.length || isReviewUploading("grading")} onClick={() => selectedStudent && submitReviewUpload("grading", { studentId: selectedStudent.id, subject: uploadSubject, kind: uploadKind, title: uploadTitle.trim() || `${selectedStudent.displayName}${uploadKind}批改`, images: uploadFiles })}><Upload size={17} />上传并批改</button>{renderReviewUploadStatus("grading")}</div></section>
-    <section className={moduleClass("批改复核", "panel full")}><PanelTitle icon={ListChecks} title="批改工作台" /><div className="button-row"><button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新工作台</button></div><GradingWorkbenchPanel pageData={gradingWorkbenchPage} onMarkReviewed={onMarkReviewed} onQueryGradingWorkbenches={onQueryGradingWorkbenches} onQuestionReview={onQuestionReview} onRecognize={onRecognize} reviewSubmissions={reviewSubmissions} students={students} workbenches={gradingWorkbenches} /></section>
+    <section className={moduleClass("批改复核", "panel span-6")}><PanelTitle badge="AI生成" icon={Upload} title="拍照上传批改" /><div className="template-controls"><label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{selectableStudents.map((student) => <option key={student.id} value={student.id}>{student.displayName}</option>)}</select></label><label>材料类型<select value={uploadMaterialType} onChange={(event) => setUploadMaterialType(event.target.value as typeof uploadMaterialType)}><option value="external_workbook">外部练习册</option><option value="generated_assessment">系统生成材料</option></select></label><label>类型<select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option>作业</option><option>小测</option><option>试卷</option><option>听写</option></select></label><label>科目<select value={uploadSubject} onChange={(event) => setUploadSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label></div><label className="field-label">记录标题<input value={uploadTitle} placeholder="例如：三角形单元试卷批改、英语Unit 1听写批改" onChange={(event) => setUploadTitle(event.target.value)} /></label><ReviewImagePicker files={uploadFiles} setFiles={setUploadFiles} testId="teacher-grading-image-picker" /><p className="muted-line">外部练习册建议使用 iPad 连续拍摄多页清晰照片，按页序加入；系统只生成可追溯的识别/批改草稿，教师确认后才归档。</p>{uploadMaterialType === "external_workbook" ? <div className="external-answer-source-panel"><label>答案来源<select value={uploadAnswerSourceMode} onChange={(event) => setUploadAnswerSourceMode(event.target.value as typeof uploadAnswerSourceMode)}><option value="missing">暂未提供答案</option><option value="teacher_confirmed">教师已确认答案</option><option value="teacher_selected_reference">教师选择参考答案</option><option value="model_draft">系统生成参考答案草稿</option></select></label><label className="field-label">教师答案（可选）<textarea value={uploadAnswerKeyText} onChange={(event) => setUploadAnswerKeyText(event.target.value)} placeholder="例如：1.A 2.4 3.小数乘法" /></label><label className="field-label">参考资料 ID（可选）<input value={uploadReferenceSourceId} onChange={(event) => setUploadReferenceSourceId(event.target.value)} placeholder="教师确认的教材/练习册答案来源 ID" /></label></div> : null}<div className="review-upload-action"><button className="primary-button" disabled={!selectedStudent || !uploadFiles.length || isReviewUploading("grading")} onClick={() => selectedStudent && submitReviewUpload("grading", { studentId: selectedStudent.id, subject: uploadSubject, kind: uploadKind, title: uploadTitle.trim() || `${selectedStudent.displayName}${uploadKind}批改`, images: uploadFiles, materialType: uploadMaterialType, answerSourceMode: uploadAnswerSourceMode, answerKeyText: uploadAnswerKeyText, referenceSourceId: uploadReferenceSourceId })}><Upload size={17} />上传并批改</button>{renderReviewUploadStatus("grading")}</div></section>
+    <section className={moduleClass("批改复核", "panel full")}><PanelTitle icon={ListChecks} title="批改工作台" /><div className="button-row"><button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新工作台</button></div><GradingWorkbenchPanel pageData={gradingWorkbenchPage} onConfirmAnswerSource={onConfirmAnswerSource} onMarkReviewed={onMarkReviewed} onQueryGradingWorkbenches={onQueryGradingWorkbenches} onQuestionReview={onQuestionReview} onRecognize={onRecognize} reviewSubmissions={reviewSubmissions} students={students} workbenches={gradingWorkbenches} /></section>
     <section className={moduleClass("电视动态屏", "tv-display-shell full")}>
       <TvParentDisplay ai={ai} assignments={assignments} audit={audit} corrections={corrections} logs={logs} reports={reports} reviewSubmissions={reviewSubmissions} students={students} tasks={tasks} />
     </section>
@@ -2663,7 +2684,8 @@ function questionMaxScoreTotal(questions: GradingWorkbench["questions"]) {
   return Number(values.reduce((sum, value) => sum + Number(value), 0).toFixed(2));
 }
 
-function GradingWorkbenchPanel({ onMarkReviewed, onQueryGradingWorkbenches, onQuestionReview, onRecognize, pageData, reviewSubmissions, students, workbenches }: {
+function GradingWorkbenchPanel({ onConfirmAnswerSource, onMarkReviewed, onQueryGradingWorkbenches, onQuestionReview, onRecognize, pageData, reviewSubmissions, students, workbenches }: {
+  onConfirmAnswerSource: (submissionId: string, input: { mode: "teacher_confirmed" | "teacher_selected_reference"; answerKeyText?: string; referenceSourceId?: string }) => void;
   onMarkReviewed: (submissionId: string, input?: Record<string, unknown>) => void;
   onQueryGradingWorkbenches: (filters: GradingWorkbenchFilters) => Promise<Awaited<ReturnType<typeof listGradingWorkbenches>> | null>;
   onQuestionReview: (submissionId: string, questionId: string, input: Record<string, unknown>) => void;
@@ -2704,12 +2726,16 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQueryGradingWorkbenches, onQu
   const [questionStatus, setQuestionStatus] = useState<"correct" | "wrong" | "partial" | "uncertain">("uncertain");
   const [questionScore, setQuestionScore] = useState("");
   const [questionMaxScore, setQuestionMaxScore] = useState("");
+  const [questionPrompt, setQuestionPrompt] = useState("");
+  const [questionStudentAnswer, setQuestionStudentAnswer] = useState("");
   const [questionCorrectAnswer, setQuestionCorrectAnswer] = useState("");
   const [questionKnowledgePoint, setQuestionKnowledgePoint] = useState("");
   const [questionErrorStep, setQuestionErrorStep] = useState("");
   const [questionSuggestedPractice, setQuestionSuggestedPractice] = useState("");
   const [questionNote, setQuestionNote] = useState("");
   const [reviewNote, setReviewNote] = useState("");
+  const [answerKeyDraft, setAnswerKeyDraft] = useState("");
+  const [referenceSourceDraft, setReferenceSourceDraft] = useState("");
   useEffect(() => {
     if (!workbenches.some((item) => item.submissionId === activeId)) setActiveId(workbenches[0]?.submissionId || "");
   }, [activeId, workbenches]);
@@ -2720,6 +2746,8 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQueryGradingWorkbenches, onQu
     setActivePage(1);
     setActiveQuestionId(active?.questions[0]?.id || "");
     setReviewNote("");
+    setAnswerKeyDraft("");
+    setReferenceSourceDraft("");
   }, [active?.submissionId]);
   const activeQuestions = active?.questions || [];
   const activeQuestionForForm = activeQuestions.find((item) => item.id === activeQuestionId) || activeQuestions[0];
@@ -2727,12 +2755,14 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQueryGradingWorkbenches, onQu
     setQuestionStatus(activeQuestionForForm?.status || "uncertain");
     setQuestionScore(activeQuestionForForm?.score != null ? String(activeQuestionForForm.score) : "");
     setQuestionMaxScore(activeQuestionForForm?.maxScore != null ? String(activeQuestionForForm.maxScore) : "");
+    setQuestionPrompt(activeQuestionForForm?.prompt || "");
+    setQuestionStudentAnswer(activeQuestionForForm?.studentAnswer || "");
     setQuestionCorrectAnswer(activeQuestionForForm?.correctAnswer || "");
     setQuestionKnowledgePoint(activeQuestionForForm?.knowledgePoint || "");
     setQuestionErrorStep(activeQuestionForForm?.errorStep || activeQuestionForForm?.explanation || "");
     setQuestionSuggestedPractice(activeQuestionForForm?.suggestedPractice || "");
     setQuestionNote(activeQuestionForForm?.teacherNote || "");
-  }, [activeQuestionForForm?.id, activeQuestionForForm?.score, activeQuestionForForm?.maxScore, activeQuestionForForm?.status, activeQuestionForForm?.correctAnswer, activeQuestionForForm?.knowledgePoint, activeQuestionForForm?.errorStep, activeQuestionForForm?.explanation, activeQuestionForForm?.suggestedPractice, activeQuestionForForm?.teacherNote]);
+  }, [activeQuestionForForm?.id, activeQuestionForForm?.score, activeQuestionForForm?.maxScore, activeQuestionForForm?.status, activeQuestionForForm?.prompt, activeQuestionForForm?.studentAnswer, activeQuestionForForm?.correctAnswer, activeQuestionForForm?.knowledgePoint, activeQuestionForForm?.errorStep, activeQuestionForForm?.explanation, activeQuestionForForm?.suggestedPractice, activeQuestionForForm?.teacherNote]);
   if (!workbenches.length) {
     const batches = groupReviewSubmissions(reviewSubmissions).slice(0, 6);
     const pendingSubmissions = reviewSubmissions.filter((item) => item.needsReview || item.status !== "已复核").length;
@@ -2841,7 +2871,8 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQueryGradingWorkbenches, onQu
   const reviewedScoreTotal = reviewedQuestionScore(activeQuestions);
   const maxScoreTotal = questionMaxScoreTotal(activeQuestions);
   const questionConfirmDisabled = !active || !question || questionStatus === "uncertain" || !questionScoreWithinMax || !questionMistakeEvidenceReady;
-  const archiveDisabled = !active || !allQuestionsReviewedForArchive;
+  const archiveBlockers = active?.archiveBlockers || [];
+  const archiveDisabled = !active || !allQuestionsReviewedForArchive || archiveBlockers.length > 0;
   const archiveScoreLabel = reviewedScoreTotal != null
     ? `${reviewedScoreTotal}${maxScoreTotal != null ? `/${maxScoreTotal}` : ""} 分`
     : `待逐题确认 ${unresolvedQuestions.length} 题`;
@@ -2868,6 +2899,8 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQueryGradingWorkbenches, onQu
       status: questionStatus,
       score: questionScoreNumber,
       maxScore: questionMaxScoreNumber,
+      prompt: questionPrompt.trim(),
+      studentAnswer: questionStudentAnswer.trim(),
       correctAnswer: questionCorrectAnswer.trim(),
       knowledgePoint: questionKnowledgePoint.trim(),
       errorStep: questionErrorStep.trim(),
@@ -2921,6 +2954,7 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQueryGradingWorkbenches, onQu
         <span>{archiveScoreLabel}</span>
       </div>
       <p className={`context-note ${allQuestionsReviewedForArchive ? "" : "blocked"}`}><ShieldCheck size={15} />逐题确认完成后自动汇总总分；仍为“无法识别”的题目不会进入正式归档。</p>
+      {active?.materialType === "external_workbook" ? <div className="external-review-summary"><strong>外部练习册证据复核</strong><span>答案来源：{active.answerSource?.mode || "missing"} · {active.answerSource?.status === "confirmed" ? "已确认" : "待教师确认"}</span>{archiveBlockers.length ? <p className="context-note blocked">归档阻断：{archiveBlockers.join("、")}</p> : <p className="context-note">页序、图片质量和逐题识别均已满足当前门禁。</p>}<div className="review-field-row"><label className="field-label">教师确认答案（可选）<textarea value={answerKeyDraft} onChange={(event) => setAnswerKeyDraft(event.target.value)} placeholder="例如：1.A 2.4 3.小数乘法" /></label><label className="field-label">参考资料 ID<input value={referenceSourceDraft} onChange={(event) => setReferenceSourceDraft(event.target.value)} placeholder="教师确认的参考答案来源 ID" /></label></div><div className="button-row"><button className="secondary-button" disabled={!active} onClick={() => active && onConfirmAnswerSource(active.submissionId, { mode: "teacher_confirmed", answerKeyText: answerKeyDraft, referenceSourceId: referenceSourceDraft })} type="button">确认答案来源</button><button className="secondary-button" disabled={!active} onClick={() => active && onConfirmAnswerSource(active.submissionId, { mode: "teacher_selected_reference", answerKeyText: answerKeyDraft, referenceSourceId: referenceSourceDraft })} type="button">选择参考答案</button></div></div> : null}
       <div className="review-image-tabs">{active?.pages.map((item) => <button className={item.pageNumber === page?.pageNumber ? "active" : ""} key={item.id} onClick={() => selectPage(item.pageNumber)}>第 {item.pageNumber} 页</button>)}</div>
       {page ? <p className={`context-note ${page.qualityStatus === "ready" ? "" : "blocked"}`}><ShieldCheck size={15} />{pageQualityText}{page.qualityScore != null ? ` · 质量分 ${Math.round(page.qualityScore * 100)}%` : ""}{pageQualityIssues.length ? ` · ${pageQualityIssues.slice(0, 2).join("；")}` : ""}</p> : null}
       <div className="grading-image-stage">
@@ -2945,8 +2979,10 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQueryGradingWorkbenches, onQu
           <StatusPill label={reviewedQuestionReady(question) ? "已确认" : statusText(question.status)} status={reviewedQuestionReady(question) ? "ready" : question.status === "wrong" ? "blocked" : "pending"} />
         </div>
         <p className="grading-confidence">{question.confidence != null ? `识别置信度 ${Math.round(question.confidence * 100)}%` : "识别置信度待补，建议教师确认。"}</p>
-        <DetailLine label="题干" value={question.prompt || "题干未完整识别，请结合原图确认。"} />
-        <DetailLine label="学生作答" value={question.studentAnswer || "未识别到明确作答"} />
+           <DetailLine label="当前题干" value={question.prompt || "题干未完整识别，请结合原图确认。"} />
+           {active?.recognitionPacket?.pages.flatMap((item) => item.questions).find((item) => item.questionNo === question.questionNo)?.recognition?.originalPrintedPrompt ? <DetailLine label="原始识别题干" value={active.recognitionPacket.pages.flatMap((item) => item.questions).find((item) => item.questionNo === question.questionNo)?.recognition.originalPrintedPrompt || ""} /> : null}
+           <DetailLine label="当前学生作答" value={question.studentAnswer || "未识别到明确作答"} />
+           {active?.recognitionPacket?.pages.flatMap((item) => item.questions).find((item) => item.questionNo === question.questionNo)?.recognition?.originalStudentAnswer ? <DetailLine label="原始识别作答" value={active.recognitionPacket.pages.flatMap((item) => item.questions).find((item) => item.questionNo === question.questionNo)?.recognition.originalStudentAnswer || ""} /> : null}
         <DetailLine label="参考答案" value={question.correctAnswer || "待教师确认参考答案"} />
         <DetailLine label="过程/解析" value={(question.studentProcess || []).join("；") || question.explanation || "暂无过程解析"} />
         <DetailLine label="错因定位" value={question.errorStep || (question.status === "correct" ? "未发现明显错误" : "等待教师复核")} />
@@ -2963,6 +2999,8 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQueryGradingWorkbenches, onQu
           <label className="field-label">本题得分<input min="0" step="0.5" type="number" value={questionScore} onChange={(event) => setQuestionScore(event.target.value)} placeholder="本题得分" /></label>
           <label className="field-label">本题满分<input min="0.5" step="0.5" type="number" value={questionMaxScore} onChange={(event) => setQuestionMaxScore(event.target.value)} placeholder="满分" /></label>
         </div>
+        <label className="field-label">当前题干<textarea value={questionPrompt} onChange={(event) => setQuestionPrompt(event.target.value)} placeholder="对照原图修正 OCR 识别的题干。" /></label>
+        <label className="field-label">当前学生作答<textarea value={questionStudentAnswer} onChange={(event) => setQuestionStudentAnswer(event.target.value)} placeholder="对照原图修正学生手写或填写内容。" /></label>
         <label className="field-label">正确答案<input value={questionCorrectAnswer} onChange={(event) => setQuestionCorrectAnswer(event.target.value)} placeholder="AI未给出时由教师补充，可结合原图和题干填写。" /></label>
         <label className="field-label">知识点<input value={questionKnowledgePoint} onChange={(event) => setQuestionKnowledgePoint(event.target.value)} placeholder="如：分数加减、方程求解" /></label>
         <label className="field-label">错因定位<textarea value={questionErrorStep} onChange={(event) => setQuestionErrorStep(event.target.value)} placeholder="错/半对题必填：写明具体错在审题、步骤、计算还是表达。" /></label>
