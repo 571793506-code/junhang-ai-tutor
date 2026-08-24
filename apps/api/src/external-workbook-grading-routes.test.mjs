@@ -40,3 +40,11 @@ test("generated assignment grading keeps source package path separate from exter
   assert.match(source, /materialType.*external_workbook/);
   assert.match(source, /assignmentId/);
 });
+
+test("external workbench exposes packet blockers and supports explicit answer source confirmation", () => {
+  const patchRoute = routeSource('patch("/api/grading/workbench/:submissionId/questions/:questionId"');
+  assert.match(source, /recognitionPacket/);
+  assert.match(source, /archiveBlockers/);
+  assert.match(patchRoute, /mergeExternalQuestionTeacherReview/);
+  assert.match(source, /\/api\/grading\/workbench\/:submissionId\/answer-source/);
+});

@@ -4,6 +4,8 @@ function optionalNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+import { externalRecognitionArchiveBlockers } from "./external-grading-recognition.js";
+
 function questionNo(question, index) {
   return String(question?.questionNo || question?.no || index + 1);
 }
@@ -62,7 +64,7 @@ export function gradingQuestionReviewState(questions = []) {
   };
 }
 
-export function requireAllQuestionsReviewedForArchive(result = {}) {
+export function requireAllQuestionsReviewedForArchive(result = {}, externalPacket = null) {
   const state = gradingQuestionReviewState(result.questionResults);
   if (!state.readyForArchive) {
     return {
@@ -73,6 +75,18 @@ export function requireAllQuestionsReviewedForArchive(result = {}) {
         : "当前批改结果缺少逐题结果，请重新识别或补录题目后再归档。",
       state
     };
+  }
+  if (externalPacket) {
+    const archiveBlockers = externalRecognitionArchiveBlockers(externalPacket);
+    if (archiveBlockers.length) {
+      return {
+        ok: false,
+        error: "EXTERNAL_RECOGNITION_REVIEW_REQUIRED",
+        message: "外部练习册仍有答案来源、图片质量或逐题证据未确认，暂不能归档。",
+        state,
+        archiveBlockers
+      };
+    }
   }
   return { ok: true, state };
 }

@@ -495,6 +495,10 @@ export async function completeLearningTask(taskId: string, input: Record<string,
 
 export async function uploadSubmission(input: {
   assignmentId?: string;
+  materialType?: "external_workbook" | "generated_assessment";
+  answerSourceMode?: "teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing";
+  answerKeyText?: string;
+  referenceSourceId?: string;
   studentId: string;
   subject: string;
   title?: string;
@@ -512,6 +516,10 @@ export async function uploadSubmission(input: {
 }) {
   const form = new FormData();
   if (input.assignmentId) form.set("assignmentId", input.assignmentId);
+  if (input.materialType) form.set("materialType", input.materialType);
+  if (input.answerSourceMode) form.set("answerSourceMode", input.answerSourceMode);
+  if (input.answerKeyText) form.set("answerKeyText", input.answerKeyText);
+  if (input.referenceSourceId) form.set("referenceSourceId", input.referenceSourceId);
   form.set("studentId", input.studentId);
   form.set("subject", input.subject);
   form.set("title", input.title || "图片提交");
@@ -708,6 +716,38 @@ export async function listReviewSubmissions() {
   }>(response);
 }
 
+export type ExternalGradingAnswerSource = {
+  mode: "teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing";
+  status: "confirmed" | "needs_teacher_review" | "missing";
+  answers: Record<string, string>;
+};
+
+export type ExternalGradingRecognitionPacket = {
+  schemaVersion: "external-grading-recognition-v1";
+  materialType: "external_workbook";
+  gradingStatus: "needs_teacher_review" | "teacher_confirmed";
+  archiveEligible: boolean;
+  archiveBlockers: string[];
+  answerSource: ExternalGradingAnswerSource;
+  pages: Array<{
+    pageNumber: number;
+    fileName: string;
+    imageUrl: string | null;
+    quality: { status: string; score: number | null; issues: string[]; warnings: string[] };
+    questions: Array<{
+      id: string;
+      questionNo: string;
+      printedPrompt: string;
+      studentAnswer: string;
+      correctAnswer: string;
+      recognitionConfidence: number | null;
+      recognitionStatus: "confirmed" | "needs_teacher_review" | "unreadable";
+      recognition: { originalPrintedPrompt: string; originalStudentAnswer: string };
+      review: { reviewedByTeacher: boolean; reviewedAt: string | null; teacherNote: string };
+    }>;
+  }>;
+};
+
 export type GradingWorkbench = {
   id: string;
   submissionId: string;
@@ -717,11 +757,15 @@ export type GradingWorkbench = {
   studentName: string;
   subject: string;
   kind: string;
+  materialType: "external_workbook" | "generated_assessment";
   status: string;
   score: number | null;
   provisionalScore?: number | null;
   needsTeacherReview: boolean;
   archiveEligible: boolean;
+  archiveBlockers: string[];
+  answerSource?: ExternalGradingAnswerSource | null;
+  recognitionPacket?: ExternalGradingRecognitionPacket | null;
   ocrStatusLabel: string;
   quality?: {
     lowConfidence?: boolean;
@@ -831,6 +875,19 @@ export async function patchGradingWorkbenchQuestion(submissionId: string, questi
   return readJson<{ ok: boolean; workbench: GradingWorkbench }>(response);
 }
 
+export async function confirmGradingAnswerSource(submissionId: string, input: {
+  mode: "teacher_confirmed" | "teacher_selected_reference";
+  answerKeyText?: string;
+  referenceSourceId?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/api/grading/workbench/${submissionId}/answer-source`, {
+    method: "PATCH",
+    headers: jsonHeaders(),
+    body: JSON.stringify(input)
+  });
+  return readJson<{ ok: boolean; workbench: GradingWorkbench }>(response);
+}
+
 export async function archiveGradingWorkbench(submissionId: string, input: Record<string, unknown> = {}) {
   const response = await fetch(`${API_BASE_URL}/api/grading/workbench/${submissionId}/archive`, {
     method: "POST",
@@ -858,7 +915,16 @@ export async function recognizeReviewSubmission(submissionId: string) {
   return readJson<{
     ok: boolean;
     available: boolean;
-    recognition: { status: string; reason?: string; text?: string | null };
+    recognition: {
+      status: string;
+      reason?: string;
+      text?: string | null;
+      pages?: ExternalGradingRecognitionPacket["pages"];
+      answerSource?: GradingWorkbench["answerSource"];
+      archiveEligible?: boolean;
+      archiveBlockers?: string[];
+    };
+    externalGradingRecognition?: GradingWorkbench["recognitionPacket"];
     submission: Awaited<ReturnType<typeof listReviewSubmissions>>["submissions"][number];
   }>(response);
 }

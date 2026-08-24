@@ -88,7 +88,7 @@ export function externalRecognitionArchiveBlockers(packet = {}) {
   const blockers = new Set();
   if (packet.answerSource?.status !== "confirmed") blockers.add("ANSWER_SOURCE_NOT_CONFIRMED");
   for (const page of packet.pages || []) {
-    if (["needs_review", "unusable"].includes(page.quality?.status)) blockers.add("PAGE_QUALITY_REVIEW_REQUIRED");
+    if (["needs_review", "poor", "unusable", "unavailable"].includes(page.quality?.status)) blockers.add("PAGE_QUALITY_REVIEW_REQUIRED");
     for (const question of page.questions || []) {
       if (question.recognitionStatus !== "confirmed") {
         blockers.add("QUESTION_RECOGNITION_REVIEW_REQUIRED");

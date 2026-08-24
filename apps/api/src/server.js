@@ -67,7 +67,8 @@ import { hydrateQuestionDraftsFromOcr } from "./grading-workbench-question-draft
 import {
   EXTERNAL_GRADING_RECOGNITION_SCHEMA_VERSION,
   buildExternalGradingRecognitionPacket,
-  externalRecognitionArchiveBlockers
+  externalRecognitionArchiveBlockers,
+  mergeExternalQuestionTeacherReview
 } from "./external-grading-recognition.js";
 import { resolveKnowledgeSourceId } from "./knowledge-source-id.js";
 import { buildKnowledgeSourceTextbookBinding, preserveKnowledgeSourceTextbookBinding } from "./knowledge-source-textbook-scope.js";
@@ -3048,6 +3049,7 @@ function mapReviewSubmission(submission) {
   const assignmentMetadata = safeJson(submission.assignment?.metadata, {});
   const content = safeJson(submission.content, {});
   const rawResult = safeJson(submission.grading?.result, {});
+  const externalGradingRecognition = safeJson(content.externalGradingRecognition, null);
   const { result, score } = normalizeReviewResultForDisplay(rawResult, submission.grading?.score ?? null);
   const kind = readableKind(assignmentMetadata.kind, "图片批改");
   const subject = readableText(submission.assignment?.subject?.name || assignmentMetadata.subject || content.subject, "未标科目");
@@ -3110,7 +3112,8 @@ function mapReviewSubmission(submission) {
       archiveEligible: Boolean(result.archiveEligible),
       referenceAnswerMode: result.referenceAnswerMode || "",
       questionLayoutManifest: result.questionLayoutManifest || content.questionLayoutManifest || null,
-      quality: result.quality || null
+      quality: result.quality || null,
+      externalGradingRecognition
     },
     submittedAt: submission.submittedAt.toISOString()
   };
@@ -3165,6 +3168,8 @@ function normalizeQuestionReviewPatch(body = {}, currentQuestion = {}) {
     next.status = status;
   }
   for (const [field, value] of Object.entries({
+    prompt: body.prompt,
+    printedPrompt: body.printedPrompt,
     studentAnswer: body.studentAnswer,
     correctAnswer: body.correctAnswer,
     errorStep: body.errorStep,
@@ -3230,6 +3235,8 @@ function syncAnnotationMarkersForQuestion(markers = [], question = {}) {
 function mapGradingWorkbench(submission) {
   const review = mapReviewSubmission(submission);
   const grading = review.structuredGrading || {};
+  const recognitionPacket = grading.externalGradingRecognition || null;
+  const archiveBlockers = recognitionPacket ? externalRecognitionArchiveBlockers(recognitionPacket) : [];
   const markers = Array.isArray(grading.annotationMarkers) ? grading.annotationMarkers : [];
   const imageFiles = review.imageFiles || [];
   const imageQuality = review.ocr?.imageQuality || null;
@@ -3276,11 +3283,15 @@ function mapGradingWorkbench(submission) {
     studentName: review.studentName,
     subject: review.subject,
     kind: review.kind,
+    materialType: recognitionPacket?.materialType || "generated_assessment",
     status: review.needsReview ? "reviewing" : "archived",
     score: grading.score ?? review.score ?? null,
     provisionalScore: grading.provisionalScore ?? null,
     needsTeacherReview: Boolean(grading.needsTeacherReview || review.needsReview),
-    archiveEligible: Boolean(grading.archiveEligible),
+    archiveEligible: Boolean(grading.archiveEligible) && archiveBlockers.length === 0,
+    archiveBlockers,
+    answerSource: recognitionPacket?.answerSource || null,
+    recognitionPacket,
     ocrStatusLabel: review.ocrStatusLabel || "",
     quality: grading.quality || null,
     referenceAnswerMode: grading.referenceAnswerMode || "",
@@ -4639,6 +4650,8 @@ app.patch("/api/grading/workbench/:submissionId/questions/:questionId", requireD
 
   const body = getBody(req);
   const currentResult = safeJson(submission.grading.result, {});
+  const content = safeJson(submission.content, {});
+  const recognitionPacket = safeJson(content.externalGradingRecognition, null);
   const questions = Array.isArray(currentResult.questionResults) ? currentResult.questionResults : [];
   const questionIndex = questions.findIndex((item, index) =>
     String(item.id || "") === String(req.params.questionId) ||
@@ -4671,11 +4684,25 @@ app.patch("/api/grading/workbench/:submissionId/questions/:questionId", requireD
     teacherReviewUpdatedAt: new Date().toISOString(),
     teacherReviewUpdatedBy: req.session.teacherId
   };
+  const nextRecognitionPacket = recognitionPacket
+    ? mergeExternalQuestionTeacherReview(recognitionPacket, req.params.questionId, {
+        printedPrompt: body.printedPrompt ?? body.prompt ?? patch.question.prompt,
+        studentAnswer: patch.question.studentAnswer,
+        correctAnswer: patch.question.correctAnswer,
+        score: patch.question.score,
+        maxScore: patch.question.maxScore,
+        status: patch.question.status,
+        teacherNote: patch.question.teacherNote
+      })
+    : null;
 
   const updated = await prisma.submission.update({
     where: { id: submission.id },
     data: {
       status: "NEEDS_REVIEW",
+      content: nextRecognitionPacket
+        ? { ...content, externalGradingRecognition: nextRecognitionPacket }
+        : content,
       grading: {
         update: {
           score: null,
@@ -4704,6 +4731,57 @@ app.patch("/api/grading/workbench/:submissionId/questions/:questionId", requireD
     }
   });
 
+  res.json({ ok: true, workbench: mapGradingWorkbench(updated) });
+}));
+
+app.patch("/api/grading/workbench/:submissionId/answer-source", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  const submission = await prisma.submission.findUnique({
+    where: { id: req.params.submissionId },
+    include: { student: true, grading: true, assignment: { include: { subject: true } } }
+  });
+  if (!submission?.grading) {
+    return res.status(404).json({ ok: false, error: "WORKBENCH_NOT_FOUND", message: "未找到批改工作台记录。" });
+  }
+  if (!(await assertTeacherStudentScope(req, res, submission.studentId))) return;
+  const content = safeJson(submission.content, {});
+  const currentPacket = safeJson(content.externalGradingRecognition, null);
+  if (!currentPacket) {
+    return res.status(400).json({ ok: false, error: "EXTERNAL_RECOGNITION_REQUIRED", message: "当前记录不是外部练习册批改。" });
+  }
+  const body = getBody(req);
+  const mode = optionalText(body.mode);
+  if (!["teacher_confirmed", "teacher_selected_reference"].includes(mode)) {
+    return res.status(400).json({ ok: false, error: "INVALID_ANSWER_SOURCE_MODE", message: "请明确选择教师确认答案或已选参考资料。" });
+  }
+  const answers = {
+    ...(currentPacket.answerSource?.answers || {}),
+    ...parseTeacherAnswerKeyText(body.answerKeyText || content.answerKeyText)
+  };
+  const nextPacket = buildExternalGradingRecognitionPacket({
+    pages: currentPacket.pages,
+    answerSourceMode: mode,
+    answerSource: { answers }
+  });
+  const updated = await prisma.submission.update({
+    where: { id: submission.id },
+    data: {
+      status: "NEEDS_REVIEW",
+      content: {
+        ...content,
+        answerSourceMode: mode,
+        answerKeyText: optionalText(body.answerKeyText) || content.answerKeyText || null,
+        referenceSourceId: optionalText(body.referenceSourceId) || content.referenceSourceId || null,
+        externalGradingRecognition: nextPacket
+      }
+    },
+    include: { student: true, grading: true, assignment: { include: { subject: true } } }
+  });
+  await auditEvent(req, {
+    studentId: updated.studentId,
+    feature: "grading-workbench",
+    action: "confirm-answer-source",
+    metadata: { submissionId: updated.id, mode }
+  });
   res.json({ ok: true, workbench: mapGradingWorkbench(updated) });
 }));
 
@@ -4815,13 +4893,16 @@ app.patch("/api/review/submissions/:submissionId/ocr", requireDatabase, requireS
 
 async function archiveSubmissionReview(req, res, submission, body = {}, action = "mark-submission-reviewed") {
   const currentResult = safeJson(submission.grading?.result, {});
-  const questionArchiveGate = requireAllQuestionsReviewedForArchive(currentResult);
+  const content = safeJson(submission.content, {});
+  const recognitionPacket = safeJson(content.externalGradingRecognition, null);
+  const questionArchiveGate = requireAllQuestionsReviewedForArchive(currentResult, recognitionPacket);
   if (!questionArchiveGate.ok) {
     res.status(400).json({
       ok: false,
       error: questionArchiveGate.error,
       message: questionArchiveGate.message,
-      state: questionArchiveGate.state
+      state: questionArchiveGate.state,
+      archiveBlockers: questionArchiveGate.archiveBlockers || []
     });
     return null;
   }
@@ -4866,7 +4947,7 @@ async function archiveSubmissionReview(req, res, submission, body = {}, action =
     data: {
       status: "GRADED",
       content: {
-        ...safeJson(submission.content, {}),
+        ...content,
         ocr: {
           ...safeJson(safeJson(submission.content, {}).ocr, {}),
           reviewed: true,

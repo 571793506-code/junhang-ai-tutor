@@ -5,6 +5,7 @@ import {
   gradingQuestionReviewState,
   requireAllQuestionsReviewedForArchive
 } from "./grading-review-gates.js";
+import { buildExternalGradingRecognitionPacket } from "./external-grading-recognition.js";
 
 test("grading archive gate blocks unreviewed question results", () => {
   const gate = requireAllQuestionsReviewedForArchive({
@@ -63,4 +64,38 @@ test("grading archive gate accepts all teacher-reviewed scored questions and ret
   const gate = requireAllQuestionsReviewedForArchive({ questionResults: state.questions });
   assert.equal(gate.ok, true);
   assert.equal(gate.state.score, 7.5);
+});
+
+test("grading archive gate blocks an unconfirmed external answer source", () => {
+  const externalGradingRecognition = buildExternalGradingRecognitionPacket({
+    pages: [{
+      pageNumber: 1,
+      questions: [{
+        questionNo: "1",
+        recognitionConfidence: 0.98,
+        recognitionStatus: "confirmed",
+        correctAnswer: "4",
+        score: 1,
+        maxScore: 1,
+        status: "correct",
+        review: { reviewedByTeacher: true }
+      }]
+    }],
+    answerSourceMode: "model_draft"
+  });
+  const gate = requireAllQuestionsReviewedForArchive({
+    questionResults: [{ questionNo: "1", status: "correct", score: 1, maxScore: 1, reviewedByTeacher: true }]
+  }, externalGradingRecognition);
+
+  assert.equal(gate.ok, false);
+  assert.equal(gate.error, "EXTERNAL_RECOGNITION_REVIEW_REQUIRED");
+  assert.deepEqual(gate.archiveBlockers, ["ANSWER_SOURCE_NOT_CONFIRMED"]);
+});
+
+test("grading archive gate preserves generated-assessment behavior without an external packet", () => {
+  const gate = requireAllQuestionsReviewedForArchive({
+    questionResults: [{ questionNo: "1", status: "correct", score: 2, maxScore: 2, reviewedByTeacher: true }]
+  });
+  assert.equal(gate.ok, true);
+  assert.equal(gate.state.score, 2);
 });

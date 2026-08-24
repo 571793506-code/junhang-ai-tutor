@@ -39,3 +39,26 @@ test("missing answer and low-confidence questions block archive", () => {
   });
   assert.deepEqual(externalRecognitionArchiveBlockers(packet).sort(), ["ANSWER_SOURCE_NOT_CONFIRMED", "QUESTION_RECOGNITION_REVIEW_REQUIRED"]);
 });
+
+test("poor page quality blocks archive even after question review", () => {
+  const packet = buildExternalGradingRecognitionPacket({
+    pages: [{
+      pageNumber: 1,
+      quality: { status: "poor" },
+      questions: [{
+        questionNo: "1",
+        printedPrompt: "1+1=?",
+        studentAnswer: "2",
+        recognitionConfidence: 0.98,
+        recognitionStatus: "confirmed",
+        correctAnswer: "2",
+        status: "correct",
+        score: 1,
+        maxScore: 1,
+        review: { reviewedByTeacher: true }
+      }]
+    }],
+    answerSourceMode: "teacher_confirmed"
+  });
+  assert.deepEqual(externalRecognitionArchiveBlockers(packet), ["PAGE_QUALITY_REVIEW_REQUIRED"]);
+});
