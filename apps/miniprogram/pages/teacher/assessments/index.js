@@ -250,12 +250,17 @@ Page({
       await api.reviewAssessmentDraft(assignmentId, { decision: "accept" });
       const exported = await api.exportAssessmentPrint(assignmentId);
       const finalAssets = exported.assets || [exported.asset, exported.analysisAsset].filter(Boolean);
+      const existingAssignment = this.data.assignments.find((item) => item.id === assignmentId);
+      const exportedAssignment = {
+        ...(existingAssignment || {}),
+        id: assignmentId,
+        draftReviewStatus: "accepted",
+        finalExportAssets: { studentPaper: exported.asset, answerAnalysis: exported.analysisAsset || null }
+      };
       this.setData({
-        assignments: this.data.assignments.map((item) => item.id === assignmentId ? {
-          ...item,
-          draftReviewStatus: "accepted",
-          finalExportAssets: { studentPaper: exported.asset, answerAnalysis: exported.analysisAsset || null }
-        } : item),
+        assignments: existingAssignment
+          ? this.data.assignments.map((item) => item.id === assignmentId ? exportedAssignment : item)
+          : [exportedAssignment, ...this.data.assignments],
         finalAssets,
         draftAsset: null,
         latestAssignmentId: ""
@@ -269,9 +274,22 @@ Page({
   },
   async rejectDraft() {
     if (!this.data.latestAssignmentId) return;
+    const assignmentId = this.data.latestAssignmentId;
     try {
-      await api.reviewAssessmentDraft(this.data.latestAssignmentId, { decision: "reject" });
-      this.setData({ latestAssignmentId: "", draftAsset: null });
+      await api.reviewAssessmentDraft(assignmentId, { decision: "reject" });
+      const existingAssignment = this.data.assignments.find((item) => item.id === assignmentId);
+      const rejectedAssignment = {
+        ...(existingAssignment || {}),
+        id: assignmentId,
+        draftReviewStatus: "rejected"
+      };
+      this.setData({
+        assignments: existingAssignment
+          ? this.data.assignments.map((item) => item.id === assignmentId ? rejectedAssignment : item)
+          : [rejectedAssignment, ...this.data.assignments],
+        latestAssignmentId: "",
+        draftAsset: null
+      });
       wx.showToast({ title: "草稿已退回", icon: "none" });
     } catch (error) {
       wx.showToast({ title: error.message || "退回失败", icon: "none" });
