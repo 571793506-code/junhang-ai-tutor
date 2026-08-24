@@ -59,18 +59,22 @@ checks.push(assertCheck("teacher can see provider ops", teacherAi?.ok && (teache
 
 const firstStudent = teacherBootstrap?.body.students?.[0];
 const demoStudentCredentials = {
-  displayName: env.SMOKE_STUDENT_NAME || "李子越",
-  guardianPhone: env.SMOKE_STUDENT_PHONE || "13900005678",
-  accessCode: env.SMOKE_STUDENT_CODE || "LZY6P9"
+  displayName: env.SMOKE_STUDENT_NAME || "肖心妍",
+  guardianPhone: env.SMOKE_STUDENT_PHONE || "18285281120",
+  accessCode: env.SMOKE_STUDENT_CODE || "XFSJHA"
 };
 const studentLogin = await request("/api/student-login", {
   method: "POST",
   body: demoStudentCredentials
 });
 const studentToken = studentLogin?.body.sessionToken;
+const smokeStudent = teacherBootstrap?.body.students?.find((item) => item.displayName === demoStudentCredentials.displayName);
 checks.push(assertCheck("student login by name phone code", studentLogin?.ok && studentToken, {
   student: demoStudentCredentials.displayName,
-  status: studentLogin?.status
+  status: studentLogin?.status,
+  error: studentLogin?.body?.error || null,
+  canReceiveNewWork: smokeStudent?.canReceiveNewWork ?? null,
+  enrollmentStatus: smokeStudent?.enrollmentStatus || null
 }));
 
 const studentBootstrap = studentToken ? await request("/api/bootstrap", { token: studentToken }) : null;

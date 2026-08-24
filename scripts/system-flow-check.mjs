@@ -165,9 +165,9 @@ checks.push(skipAi
 const studentLogin = await request("/api/student-login", {
   method: "POST",
   body: {
-    displayName: env.SMOKE_STUDENT_NAME || "李子越",
-    guardianPhone: env.SMOKE_STUDENT_PHONE || "13900005678",
-    accessCode: env.SMOKE_STUDENT_CODE || "LZY6P9"
+    displayName: env.SMOKE_STUDENT_NAME || "肖心妍",
+    guardianPhone: env.SMOKE_STUDENT_PHONE || "18285281120",
+    accessCode: env.SMOKE_STUDENT_CODE || "XFSJHA"
   }
 });
 const studentToken = studentLogin.body.sessionToken;
