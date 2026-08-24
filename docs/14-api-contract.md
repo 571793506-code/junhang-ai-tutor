@@ -274,6 +274,8 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 - `POST /api/submissions/grade`
   - 支持 `multipart/form-data`，图片字段名为 `images`，不限制上传张数。
+  - 未传 `assignmentId` 时按 `materialType=external_workbook` 初始化外部练习册识别包；教师端可同时传 `answerSourceMode`、`answerKeyText` 和 `referenceSourceId`。上传后的 `externalGradingRecognition` 使用 `external-grading-recognition-v1`，保留页序、原图地址、页质量和逐题识别证据。
+  - 外部答案来源分为 `teacher_confirmed`、`teacher_selected_reference`、`model_draft`、`missing`；后两者在教师显式确认前只能作为草稿，不能正式计分、归档或写入错题/学生档案。
   - 关键字段：`assignmentId`, `studentId`, `subject`, `kind`, `title`, `uploadedBy`。
   - 上传后先返回 `queued=true`，后台执行混合 OCR、参考答案准备、客观题确定性比较和 GPT-5.6 主观题批改。
   - 默认 OCR 链路为 `OCR_ENGINE=vision`：MiniMax 视觉最多 2 路并发识别学生作答、印刷题干、题目区域和批改痕迹，并保持页序稳定。
@@ -291,7 +293,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 - `GET /api/grading/workbench`
   - 教师端批改工作台列表。
-  - 返回 `workbenches[]`，每条包含 `pages`, `questions`, `markers`, `quality`, `summary`, `score`, `provisionalScore`, `needsTeacherReview`；有关联生成卷时可包含 `questionLayoutManifest`，仅供教师复核和图片标注对齐使用。
+  - 返回 `workbenches[]`，每条包含 `pages`, `questions`, `markers`, `quality`, `summary`, `score`, `provisionalScore`, `needsTeacherReview`；外部材料额外返回 `materialType=external_workbook`、`answerSource`、`recognitionPacket` 和 `archiveBlockers`。有关联生成卷时可包含 `questionLayoutManifest`，仅供教师复核和图片标注对齐使用。
   - Web、小程序只负责展示和教师操作；识别、批改、审查和归档仍在 API/服务层完成。
 
 - `GET /api/grading/workbench/:submissionId`
@@ -302,6 +304,11 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 - `PATCH /api/grading/workbench/:submissionId/questions/:questionId`
   - 教师端逐题修正批改结果，小程序和 Web 共用。
+  - 外部材料的题干和学生作答修正写入当前字段，原始 OCR 值保存在 `recognition.originalPrintedPrompt` / `recognition.originalStudentAnswer`，不会被覆盖。
+
+- `PATCH /api/grading/workbench/:submissionId/answer-source`
+  - 教师显式确认外部练习册答案来源，`mode` 只能是 `teacher_confirmed` 或 `teacher_selected_reference`；可同时补充 `answerKeyText`、`referenceSourceId`。
+  - 确认答案来源不会替代逐题复核；页质量、识别置信度、题目状态和分值仍须通过归档门禁。
   - 可提交字段：`status`, `score`, `maxScore`, `studentAnswer`, `correctAnswer`, `studentProcess`, `errorStep`, `explanation`, `knowledgePoint`, `suggestedPractice`, `teacherNote`, `bbox`。
   - API 会同步 `questionResults` 和 `annotationMarkers`，并把结果转回 `teacher_question_reviewing`，等待教师最终归档。
 
@@ -314,6 +321,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 - `POST /api/grading/workbench/:submissionId/archive`
   - 批改工作台专用归档入口，与 `mark-reviewed` 复用同一套校验和归档逻辑。
   - 返回 `workbench` 和 `submission`，方便小程序归档后直接刷新教师工作台。
+  - 外部材料命中 `ANSWER_SOURCE_NOT_CONFIRMED`、`PAGE_QUALITY_REVIEW_REQUIRED`、`QUESTION_RECOGNITION_REVIEW_REQUIRED` 或其他 `archiveBlockers` 时返回 `EXTERNAL_RECOGNITION_REVIEW_REQUIRED`，不会写入错题和学生档案。
 
 ## 课堂平板
 

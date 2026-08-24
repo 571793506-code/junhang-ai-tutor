@@ -67,6 +67,8 @@
 - `reviewing`：等待教师逐题复核。
 - `archived`：已归档。
 - `failed`：识别或批改失败。
+- 外部练习册使用 `external-grading-recognition-v1` 包：保存上传页序、原图地址、页级质量、印刷题干、学生作答、识别置信度、原始值与教师当前修正值。
+- 外部答案来源按 `teacher_confirmed`、`teacher_selected_reference`、`model_draft`、`missing` 分层；`model_draft` 和 `missing` 只能进入教师复核，必须经 `PATCH /api/grading/workbench/:submissionId/answer-source` 明确确认后才有资格继续归档门禁。
 
 低置信、漏页、题目缺失、学生作答缺失、参考答案不可靠、风险审查不通过时，不生成最终分，不入档。没有教师确认金标评测前，不宣称批改正确率已达到生产标准。
 
@@ -80,6 +82,9 @@
 - `POST /api/grading/batches/:batchId/recognize`
 - `POST /api/grading/batches/:batchId/grade`
 - `PATCH /api/grading/questions/:questionId/review`
+- `PATCH /api/grading/workbench/:submissionId/answer-source`
 - `POST /api/grading/batches/:batchId/archive`
 
 当前已先用兼容方式落地 `GET /api/grading/workbench` 和 `GET /api/grading/workbench/:submissionId`，把现有 `Submission` 规范化为工作台数据。现有 `POST /api/submissions/grade` 保持兼容，内部逐步迁移到正式 `GradingBatch` 表结构。
+
+Web 的外部练习册入口支持 iPad 连续多页照片上传和答案来源选择，但 Web 不执行 OCR、评分或归档判断；小程序、课堂平板后续复用同一识别包和答案来源接口。没有教师确认金标数据前，不把 OCR 或模型输出宣传为生产级自动批改准确率。
