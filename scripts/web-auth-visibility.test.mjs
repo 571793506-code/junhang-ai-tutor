@@ -23,6 +23,15 @@ test("role login bootstraps data before exposing the authenticated workspace", (
   }
 });
 
+test("web shows a sync state instead of rendering an authenticated workspace without its role data", () => {
+  assert.match(source, /auth\.teacherId && currentTeacher/);
+  assert.match(source, /auth\.studentId && currentStudent/);
+  assert.match(source, /auth\.deviceId && currentDevice/);
+  assert.match(source, /正在同步教师数据/);
+  assert.match(source, /正在同步学生数据/);
+  assert.match(source, /正在同步课堂设备/);
+});
+
 test("student learning log fallback never exposes raw internal feature or action", () => {
   const start = source.indexOf("function formatLearningLog");
   const end = source.indexOf("function studentSummaryPreview", start);

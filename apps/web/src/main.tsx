@@ -1161,7 +1161,7 @@ function App() {
       </aside>
       <main className="main">
         <header className="topbar"><div><p className="eyebrow">{roleLabel(role)}</p><h1>{role === "teacher" ? `教师端 · ${currentModule}` : role === "student" ? `学生端 · ${currentModule}` : `课堂平板 · ${currentModule}`}</h1></div><ApiSyncStatus state={syncForRole(sync, role)} /></header>
-        {role === "teacher" && auth.teacherId ? <TeacherWorkspace activeModule={currentModule} ai={ai} assessmentJobs={assessmentJobs} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentCancel={cancelAssessmentGeneration} onAssessmentJobSelect={selectAssessmentGenerationJob} onAssessmentRecovery={recoverAssessmentGeneration} onAssessmentDraftSelect={(assignment) => {
+        {role === "teacher" && auth.teacherId && currentTeacher ? <TeacherWorkspace activeModule={currentModule} ai={ai} assessmentJobs={assessmentJobs} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentCancel={cancelAssessmentGeneration} onAssessmentJobSelect={selectAssessmentGenerationJob} onAssessmentRecovery={recoverAssessmentGeneration} onAssessmentDraftSelect={(assignment) => {
           const draft = assessmentDraftRefFromAssignment(assignment);
           if (draft) {
             setLatestAssessmentDraft(draft);
@@ -1195,11 +1195,14 @@ function App() {
           await setClassroomDeviceLock(currentDevice.id, unlocked);
           setSync({ busy: false, ok: true, message: unlocked ? "平板已解锁" : "平板已锁定" });
         }} gradingWorkbenches={gradingWorkbenches} onUploadReview={uploadForReview} printAssets={printAssets} profileDraft={profileDraft} reports={reports} reviewSubmissions={reviewSubmissions} selectedTextbookContext={selectedTextbookContext} students={students} sync={sync} tasks={tasks} teacher={currentTeacher} termReportDraft={termReportDraft} textbooks={textbooks} /> : null}
-        {role === "student" && auth.studentId ? <StudentWorkspace activeModule={currentModule} answer={answer} assignments={assignments} corrections={corrections} isLoggedIn logs={logs} onAsk={askQa} onLogin={handleStudentLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, student: module }))} onUploadReview={uploadStudentSubmission} qaBusy={qaBusy} question={question} reports={reports} setGuardianPhone={setGuardianPhone} setQuestion={setQuestion} setStudentCode={setStudentCode} setStudentName={setStudentName} student={currentStudent} tasks={tasks} /> : null}
-        {role === "classroom" && auth.deviceId ? <ClassroomWorkspace activeModule={currentModule} classroomBroadcasts={classroomBroadcasts} device={currentDevice} devices={devices} dictationTasks={dictationTasks} onAsk={askClassroomQa} onLogin={handleClassroomLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, classroom: module }))} onTaskComplete={completeTaskFromTablet} readingTasks={readingTasks} setDeviceCode={setDeviceCode} students={students} tasks={tasks} /> : null}
+        {role === "student" && auth.studentId && currentStudent ? <StudentWorkspace activeModule={currentModule} answer={answer} assignments={assignments} corrections={corrections} isLoggedIn logs={logs} onAsk={askQa} onLogin={handleStudentLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, student: module }))} onUploadReview={uploadStudentSubmission} qaBusy={qaBusy} question={question} reports={reports} setGuardianPhone={setGuardianPhone} setQuestion={setQuestion} setStudentCode={setStudentCode} setStudentName={setStudentName} student={currentStudent} tasks={tasks} /> : null}
+        {role === "classroom" && auth.deviceId && currentDevice ? <ClassroomWorkspace activeModule={currentModule} classroomBroadcasts={classroomBroadcasts} device={currentDevice} devices={devices} dictationTasks={dictationTasks} onAsk={askClassroomQa} onLogin={handleClassroomLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, classroom: module }))} onTaskComplete={completeTaskFromTablet} readingTasks={readingTasks} setDeviceCode={setDeviceCode} students={students} tasks={tasks} /> : null}
         {role === "teacher" && !auth.teacherId ? <LoginPanel code={teacherCode} onCode={setTeacherCode} onLogin={handleTeacherLogin} onPhone={setTeacherPhone} phone={teacherPhone} title="教师端登录" /> : null}
+        {role === "teacher" && auth.teacherId && !currentTeacher ? <SessionLoadingPanel label="正在同步教师数据..." /> : null}
         {role === "student" && !auth.studentId ? <StudentLoginPanel onCode={setStudentCode} onLogin={handleStudentLogin} onName={setStudentName} onPhone={setGuardianPhone} /> : null}
+        {role === "student" && auth.studentId && !currentStudent ? <SessionLoadingPanel label="正在同步学生数据..." /> : null}
         {role === "classroom" && !auth.deviceId ? <ClassroomLoginPanel code={deviceCode} onCode={setDeviceCode} onLogin={handleClassroomLogin} /> : null}
+        {role === "classroom" && auth.deviceId && !currentDevice ? <SessionLoadingPanel label="正在同步课堂设备..." /> : null}
       </main>
     </div>
   );
@@ -2504,6 +2507,10 @@ function masteryTrendLabel(value: number) {
 
 function LoginPanel({ code, onCode, onLogin, onPhone, phone, title }: { code: string; onCode: (v: string) => void; onLogin: () => void; onPhone: (v: string) => void; phone: string; title: string }) {
   return <section className="panel full"><PanelTitle icon={UserRound} title={title} /><div className="template-controls"><label>电话<input value={phone} onChange={(event) => onPhone(event.target.value)} /></label><label>专属码<input value={code} onChange={(event) => onCode(event.target.value)} /></label><button className="primary-button" onClick={onLogin}><CheckCircle2 size={17} />登录同步真实数据</button></div></section>;
+}
+
+function SessionLoadingPanel({ label }: { label: string }) {
+  return <section className="panel full"><PanelTitle icon={RefreshCw} title="正在同步" /><p className="muted-line">{label}</p></section>;
 }
 
 function StudentLoginPanel({ onCode, onLogin, onName, onPhone }: { onCode: (v: string) => void; onLogin: () => void; onName: (v: string) => void; onPhone: (v: string) => void }) {
