@@ -64,6 +64,11 @@ import { loadRuntimeConfig, publicConfigSummary } from "./env.js";
 import { gradingQuestionReviewState, requireAllQuestionsReviewedForArchive } from "./grading-review-gates.js";
 import { filterNewReviewedMistakes } from "./grading-mistake-archive.js";
 import { hydrateQuestionDraftsFromOcr } from "./grading-workbench-question-drafts.js";
+import {
+  EXTERNAL_GRADING_RECOGNITION_SCHEMA_VERSION,
+  buildExternalGradingRecognitionPacket,
+  externalRecognitionArchiveBlockers
+} from "./external-grading-recognition.js";
 import { resolveKnowledgeSourceId } from "./knowledge-source-id.js";
 import { buildKnowledgeSourceTextbookBinding, preserveKnowledgeSourceTextbookBinding } from "./knowledge-source-textbook-scope.js";
 import { buildTeacherConfirmedTextbookScope, mergeTeacherConfirmedTextbookScopeChapterIds, TEACHER_CONFIRMED_TEXTBOOK_SCOPE } from "./textbook-generation-scope.js";
@@ -268,6 +273,58 @@ async function analyzeSubmissionImageQuality(imageFiles = []) {
   }
 }
 
+function parseTeacherAnswerKeyText(value) {
+  const text = optionalText(value);
+  if (!text) return {};
+  const answers = {};
+  for (const match of text.matchAll(/(?:^|\s|[,，;；])([0-9]+)\s*[.、:：)）-]?\s*([^\s,，;；]+)/g)) {
+    answers[String(match[1])] = String(match[2]).trim();
+  }
+  return answers;
+}
+
+function externalRecognitionPagesFromRecognition({ content = {}, recognition = {}, imageQuality = null } = {}) {
+  const files = Array.isArray(content.imageFiles) ? content.imageFiles : [];
+  const sourcePages = Array.isArray(recognition.pages) ? recognition.pages : [];
+  const sourceQuestions = Array.isArray(recognition.questions) ? recognition.questions : [];
+  const pageCount = Math.max(files.length, sourcePages.length, imageQuality?.pageCount || 0, 1);
+  return Array.from({ length: pageCount }, (_, index) => {
+    const pageNumber = index + 1;
+    const sourcePage = sourcePages.find((page) => Number(page?.page || page?.pageNumber || 0) === pageNumber) || sourcePages[index] || {};
+    const qualityPage = Array.isArray(imageQuality?.pages) ? imageQuality.pages[index] : null;
+    const questions = Array.isArray(sourcePage.questions)
+      ? sourcePage.questions
+      : sourceQuestions.filter((question) => Number(question?.page || question?.pageNumber || 1) === pageNumber);
+    const file = files[index] || {};
+    return {
+      pageNumber,
+      fileName: file.fileName || file.originalName || sourcePage.fileName || qualityPage?.fileName || `page-${String(pageNumber).padStart(2, "0")}`,
+      imageUrl: file.url || (file.relativePath ? publicUploadUrl(file.relativePath, null) : null),
+      quality: {
+        status: qualityPage?.qualityStatus || (imageQuality ? imageQuality.status : "needs_review"),
+        score: qualityPage?.score ?? null,
+        issues: qualityPage?.issues || [],
+        warnings: qualityPage?.warnings || []
+      },
+      questions
+    };
+  });
+}
+
+function buildExternalRecognitionPacketFromRecognition(content, recognition, imageQuality, existingPacket = null) {
+  const packet = buildExternalGradingRecognitionPacket({
+    pages: externalRecognitionPagesFromRecognition({ content, recognition, imageQuality }),
+    answerSourceMode: existingPacket?.answerSource?.mode || content.answerSourceMode,
+    answerSource: existingPacket?.answerSource || {
+      answers: parseTeacherAnswerKeyText(content.answerKeyText)
+    }
+  });
+  return {
+    ...packet,
+    answerSource: existingPacket?.answerSource || packet.answerSource
+  };
+}
+
 async function buildSubmissionGradeInputFromRecord(submission, recognition = null) {
   const content = safeJson(submission.content, {});
   const assignment = submission.assignment || {};
@@ -383,6 +440,22 @@ function queuedSubmissionResult(input = {}, submission = null) {
 
 async function createQueuedPhotoSubmission(input = {}) {
   const imageCount = input.imageNames?.length || input.uploadedFiles?.length || 0;
+  const materialType = input.assignmentId ? "generated_assessment" : "external_workbook";
+  const externalGradingRecognition = materialType === "external_workbook"
+    ? buildExternalGradingRecognitionPacket({
+        pages: Array.from({ length: Math.max(input.uploadedFiles?.length || 0, input.imageNames?.length || 0) }, (_, index) => {
+          const file = input.uploadedFiles?.[index] || {};
+          return {
+            pageNumber: index + 1,
+            fileName: file.fileName || file.originalName || input.imageNames?.[index] || `page-${String(index + 1).padStart(2, "0")}`,
+            imageUrl: file.url || null,
+            quality: { status: "needs_review", score: null, issues: [], warnings: [] }
+          };
+        }),
+        answerSourceMode: input.answerSourceMode,
+        answerSource: { answers: parseTeacherAnswerKeyText(input.answerKeyText) }
+      })
+    : null;
   const assignment = input.assignmentId
     ? await prisma.assignment.findUnique({ where: { id: input.assignmentId } })
     : await createAssignmentDraft({
@@ -393,6 +466,7 @@ async function createQueuedPhotoSubmission(input = {}) {
         metadata: {
           kind: input.kind || "图片批改",
           source: "photo-upload",
+          materialType,
           uploadedBy: input.uploadedBy || "teacher",
           imageNames: input.imageNames || [],
           expectedImageCount: imageCount,
@@ -420,6 +494,11 @@ async function createQueuedPhotoSubmission(input = {}) {
       content: {
         subject: input.subject || null,
         kind: input.kind || null,
+        materialType,
+        answerSourceMode: input.answerSourceMode || null,
+        answerKeyText: optionalText(input.answerKeyText),
+        referenceSourceId: optionalText(input.referenceSourceId),
+        externalGradingRecognition,
         ocrText: null,
         studentAnswerText: null,
         printedText: null,
@@ -525,6 +604,15 @@ async function recognizeAndGradeSubmissionRecord(submissionId, { force = false }
         imageQuality
       });
   if (!recognition.imageQuality) recognition.imageQuality = imageQuality;
+  const materialType = content.materialType || (submission.assignmentId ? "generated_assessment" : "external_workbook");
+  const externalGradingRecognition = materialType === "external_workbook"
+    ? buildExternalRecognitionPacketFromRecognition(
+        content,
+        recognition,
+        recognition.imageQuality,
+        safeJson(content.externalGradingRecognition, null)
+      )
+    : null;
   const nextOcr = {
     ...currentOcr,
     status: recognition.status,
@@ -565,6 +653,9 @@ async function recognizeAndGradeSubmissionRecord(submissionId, { force = false }
         printedText: nextOcr.printedText,
         ocrQuestions: nextOcr.questions,
         imageQuality: recognition.imageQuality,
+        ...(externalGradingRecognition
+          ? { externalGradingRecognition }
+          : {}),
         ocr: nextOcr
       },
       grading: submission.grading ? { update: gradingData } : { create: gradingData }
@@ -4056,8 +4147,13 @@ app.post(
   requireSession(config, ["student", "teacher"]),
   submissionImageUpload.array("images"),
   asyncRoute(async (req, res) => {
+    const body = getBody(req);
     const input = {
-      ...getBody(req),
+      ...body,
+      materialType: optionalText(body.materialType),
+      answerSourceMode: optionalText(body.answerSourceMode),
+      answerKeyText: optionalText(body.answerKeyText),
+      referenceSourceId: optionalText(body.referenceSourceId),
       uploadedFiles: uploadedFileMeta(req.files || [])
     };
     input.uploadedFiles = input.uploadedFiles.map((file) => ({
@@ -4639,10 +4735,24 @@ app.post("/api/review/submissions/:submissionId/recognize", requireDatabase, req
     }
   });
 
+  const externalGradingRecognition = safeJson(processed.updated.content, {}).externalGradingRecognition || null;
+  const archiveBlockers = externalGradingRecognition
+    ? externalRecognitionArchiveBlockers(externalGradingRecognition)
+    : [];
   res.json({
     ok: true,
     available: processed.recognition.available,
-    recognition: processed.recognition,
+    recognition: externalGradingRecognition
+      ? {
+          ...processed.recognition,
+          schemaVersion: EXTERNAL_GRADING_RECOGNITION_SCHEMA_VERSION,
+          pages: externalGradingRecognition.pages,
+          answerSource: externalGradingRecognition.answerSource,
+          archiveEligible: archiveBlockers.length === 0,
+          archiveBlockers
+        }
+      : processed.recognition,
+    externalGradingRecognition,
     submission: mapReviewSubmission(processed.updated)
   });
 }));
