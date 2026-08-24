@@ -51,9 +51,6 @@ Page({
   goGrading() {
     wx.navigateTo({ url: "/pages/teacher/grading/index" });
   },
-  goReview() {
-    wx.navigateTo({ url: "/pages/teacher/review/index" });
-  },
   goAssessments() {
     wx.navigateTo({ url: "/pages/teacher/assessments/index" });
   },

@@ -98,7 +98,7 @@ Page({
         questions: (workbench.questions || []).map(normalizeQuestion),
         summary: {
           title: workbench.title || `${workbench.subject || "批改"} · ${workbench.studentName || "学生"}`,
-          statusText: workbench.needsTeacherReview ? "需要教师确认" : "可复核归档",
+          statusText: workbench.status === "archived" ? "已归档" : workbench.needsTeacherReview ? "需要教师确认" : "可复核归档",
           scoreText: workbench.score != null ? String(workbench.score) : workbench.provisionalScore != null ? `${workbench.provisionalScore}（暂定）` : "待确认",
           qualityText: workbench.quality && workbench.quality.status ? workbench.quality.status : "待检查",
           pendingText: `${workbench.pendingQuestionCount || 0}题待确认`
@@ -218,7 +218,7 @@ Page({
         },
         summary: {
           title: workbench.title || `${workbench.subject || "批改"} · ${workbench.studentName || "学生"}`,
-          statusText: workbench.needsTeacherReview ? "需要教师确认" : "可复核归档",
+          statusText: workbench.status === "archived" ? "已归档" : workbench.needsTeacherReview ? "需要教师确认" : "可复核归档",
           scoreText: workbench.score != null ? String(workbench.score) : workbench.provisionalScore != null ? `${workbench.provisionalScore}（暂定）` : "待确认",
           qualityText: workbench.quality && workbench.quality.status ? workbench.quality.status : "待检查",
           pendingText: `${workbench.pendingQuestionCount || 0}题待确认`
@@ -264,7 +264,7 @@ Page({
           questions: (workbench.questions || []).map(normalizeQuestion),
           summary: {
             title: workbench.title || `${workbench.subject || "批改"} · ${workbench.studentName || "学生"}`,
-            statusText: workbench.needsTeacherReview ? "需要教师确认" : "已归档",
+            statusText: workbench.status === "archived" ? "已归档" : workbench.needsTeacherReview ? "需要教师确认" : "可复核归档",
             scoreText: workbench.score != null ? String(workbench.score) : "待确认",
             qualityText: workbench.quality && workbench.quality.status ? workbench.quality.status : "待检查",
             pendingText: `${workbench.pendingQuestionCount || 0}题待确认`

@@ -3,7 +3,7 @@
     <view>
       <text class="console-kicker">{{teacher.displayName || '教师端'}}</text>
       <text class="console-title">教师工作台</text>
-      <text class="console-subtitle">按学生权限、今日任务、生成打印、批改复核、学生档案、教材资料、课堂设备、电视动态屏和系统状态组织教师端。</text>
+      <text class="console-subtitle">按学生权限、今日任务、生成打印、批改工作台、学生档案、教材资料、课堂设备、电视动态屏和系统状态组织教师端。</text>
     </view>
     <view class="service-badge {{aiReady ? 'ready' : ''}}">
       <view class="service-dot"></view>
@@ -86,13 +86,8 @@
       </view>
       <view class="teacher-module" bindtap="goGrading">
         <text class="module-icon">拍</text>
-        <text class="module-title">批改上传</text>
-        <text class="module-note">批改复核的拍照入口</text>
-      </view>
-      <view class="teacher-module" bindtap="goReview">
-        <text class="module-icon">复</text>
-        <text class="module-title">批改复核</text>
-        <text class="module-note">老师确认后再发布</text>
+        <text class="module-title">批改工作台</text>
+        <text class="module-note">拍照上传、逐题复核和确认归档</text>
       </view>
       <view class="teacher-module" bindtap="goAssessments">
         <text class="module-icon">卷</text>

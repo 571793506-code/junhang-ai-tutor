@@ -123,6 +123,15 @@ module.exports = {
   draftAssessment(input) {
     return request("/api/assessments/draft", { method: "POST", data: input });
   },
+  createAssessmentGenerationJob(input) {
+    return request("/api/assessments/generation-jobs", { method: "POST", data: input });
+  },
+  listAssessmentGenerationJobs() {
+    return request("/api/assessments/generation-jobs");
+  },
+  cancelAssessmentGenerationJob(jobId) {
+    return request(`/api/assessments/generation-jobs/${jobId}/cancel`, { method: "POST", data: {} });
+  },
   exportAssessmentDraft(assignmentId) {
     return request(`/api/assessments/${assignmentId}/draft-export`, { method: "POST", data: {} });
   },
@@ -182,6 +191,13 @@ module.exports = {
   },
   getContentIndex() {
     return request("/api/content/index");
+  },
+  listTextbooks(input = {}) {
+    const query = Object.keys(input)
+      .filter((key) => input[key])
+      .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(input[key])}`)
+      .join("&");
+    return request(`/api/textbooks${query ? `?${query}` : ""}`);
   },
   rebuildContentIndex(input) {
     return request("/api/content/index/rebuild", { method: "POST", data: input || {} });

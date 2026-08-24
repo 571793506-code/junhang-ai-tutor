@@ -1,46 +1,74 @@
 <view class="page teacher-page">
   <view class="hero">
-    <text class="eyebrow">生成类模板</text>
-    <text class="title">先确定类型、难度和要求</text>
+    <text class="eyebrow">生成工作台</text>
+    <text class="title">按学生与教学依据创建草稿</text>
     <text class="ai-generated-badge">AI生成</text>
-    <text class="subtitle">小测、练习、试卷使用不同服务层模板；教师要求只作为生成目标进入草稿审查。</text>
+    <text class="subtitle">生成任务在服务端排队执行。小测必须绑定已审核教材章节，练习与试卷按教师目标生成，所有草稿都要由老师审查。</text>
   </view>
 
   <view class="card teacher-card">
     <text class="section-title">生成设置</text>
+    <picker mode="selector" range="{{studentNames}}" value="{{studentIndex}}" bindchange="setStudent">
+      <view class="picker-field">{{studentNames[studentIndex] || '选择在读学生'}}</view>
+    </picker>
     <picker mode="selector" range="{{kinds}}" value="{{kindIndex}}" bindchange="setKind">
       <view class="picker-field">{{kinds[kindIndex]}}</view>
     </picker>
     <picker mode="selector" range="{{subjects}}" value="{{subjectIndex}}" bindchange="setSubject">
       <view class="picker-field">{{subjects[subjectIndex]}}</view>
     </picker>
-    <picker mode="selector" range="{{grades}}" value="{{gradeIndex}}" bindchange="setGrade">
-      <view class="picker-field">{{grades[gradeIndex]}}</view>
-    </picker>
     <picker mode="selector" range="{{difficulties}}" value="{{difficultyIndex}}" bindchange="setDifficulty">
       <view class="picker-field">{{difficulties[difficultyIndex]}}</view>
     </picker>
-    <textarea class="textarea" placeholder="输入生成要求：知识点、题型、是否需要留更多答题空间等。" value="{{requirement}}" bindinput="setRequirement" />
-    <button class="button" loading="{{loading}}" bindtap="submit">生成 PDF 草稿</button>
+    <view wx:if="{{kinds[kindIndex] === '小测'}}" class="generation-evidence">
+      <text class="field-title">教材依据</text>
+      <picker mode="selector" range="{{textbookNames}}" value="{{textbookIndex}}" bindchange="setTextbook">
+        <view class="picker-field">{{textbookNames[textbookIndex] || '当前年级科目暂无可用教材'}}</view>
+      </picker>
+      <text class="field-title">章节范围</text>
+      <picker mode="selector" range="{{chapterNames}}" value="{{chapterIndex}}" bindchange="setChapter">
+        <view class="picker-field">{{chapterNames[chapterIndex] || '所选教材暂无已审核章节'}}</view>
+      </picker>
+    </view>
+    <textarea class="textarea" placeholder="输入生成目标、知识点、题型和答题空间要求。" value="{{requirement}}" bindinput="setRequirement" />
+    <button class="button" loading="{{loading}}" bindtap="submit">加入生成队列</button>
   </view>
 
-  <view wx:if="{{draftAsset}}" class="card teacher-card">
+  <view class="card teacher-card">
+    <view class="row between">
+      <text class="section-title">当前生成任务</text>
+      <button class="small-button" bindtap="refreshJobs">刷新</button>
+    </view>
+    <text wx:if="{{!jobs.length}}" class="muted">暂无生成任务。创建后可离开本页，服务端会继续处理。</text>
+    <block wx:for="{{jobs}}" wx:key="id">
+      <view class="generation-job {{item.id === latestJobId ? 'active' : ''}}" data-id="{{item.id}}" bindtap="selectJob">
+        <view>
+          <text class="job-title">{{item.title}}</text>
+          <text class="job-meta">{{item.targetLabel}} · {{item.subject}} · {{item.statusLabel}}</text>
+          <text wx:if="{{item.message}}" class="job-meta">{{item.message}}</text>
+        </view>
+        <button wx:if="{{item.status === 'queued' || item.status === 'generating' || item.status === 'exporting_draft'}}" class="small-button" data-id="{{item.id}}" catchtap="cancelJob">停止</button>
+      </view>
+    </block>
+  </view>
+
+  <view wx:if="{{draftAsset && !finalAssets.length}}" class="card teacher-card">
     <view class="row between">
       <text class="section-title">PDF 草稿审查</text>
       <text class="ai-generated-badge">AI生成</text>
     </view>
-    <text class="muted">请打开 PDF 草稿审查题目内容、题量和排版。确认后才生成正式题目 PDF 与解析 PDF。</text>
-    <button class="ghost-button" bindtap="openDraft">打开内容审查 PDF 草稿</button>
+    <text class="muted">先打开审查草稿，检查题目、题量、答案和排版。确认后才生成正式学生卷与答案解析。</text>
+    <button class="ghost-button" bindtap="openDraft">打开内容审查 PDF</button>
     <view class="row action-row">
-      <button class="button" loading="{{loading}}" bindtap="acceptDraft">是，生成正式 PDF</button>
-      <button class="ghost-button danger" loading="{{loading}}" bindtap="rejectDraft">否，重新生成草稿</button>
+      <button class="button" loading="{{loading}}" disabled="{{loading}}" bindtap="acceptDraft">确认并导出正式 PDF</button>
+      <button class="ghost-button danger" loading="{{loading}}" disabled="{{loading}}" bindtap="rejectDraft">退回草稿</button>
     </view>
   </view>
 
   <view wx:if="{{finalAssets.length}}" class="card teacher-card">
     <text class="section-title">正式 PDF</text>
     <block wx:for="{{finalAssets}}" wx:key="id">
-      <text class="muted">{{item.title}}</text>
+      <button class="ghost-button" data-url="{{item.url}}" bindtap="openFinalAsset">打开{{item.title}}</button>
     </block>
   </view>
 </view>
