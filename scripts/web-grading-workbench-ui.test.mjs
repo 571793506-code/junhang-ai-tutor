@@ -45,3 +45,14 @@ test("grading queue placeholders are status-only when no structured workbench ex
   assert.match(source, /className="grading-batch-placeholder"/);
   assert.doesNotMatch(source, /<button disabled key=\{batch\.id\}>/);
 });
+
+test("grading queue exposes server-backed student, subject, kind, exception, and pagination controls", () => {
+  assert.match(source, /onQueryGradingWorkbenches/);
+  assert.match(source, /gradingStudentFilter/);
+  assert.match(source, /gradingSubjectFilter/);
+  assert.match(source, /gradingKindFilter/);
+  assert.match(source, /value="exception">异常记录/);
+  assert.match(source, /应用筛选/);
+  assert.match(source, /上一页/);
+  assert.match(source, /下一页/);
+});

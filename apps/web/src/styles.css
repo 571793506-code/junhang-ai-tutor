@@ -2095,6 +2095,61 @@ button:disabled {
   justify-content: center;
 }
 
+.grading-filter-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.grading-filter-panel label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.grading-filter-panel .wide-field,
+.grading-filter-panel button {
+  grid-column: 1 / -1;
+}
+
+.grading-pagination {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.generation-history-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.generation-history-filters label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.generation-history-filters .wide-field {
+  grid-column: 1 / -1;
+}
+
 .grading-inspector .review-confirm-form {
   grid-template-columns: 1fr;
 }
@@ -6248,6 +6303,8 @@ button:disabled {
   .generation-workbench,
   .generation-form-grid,
   .generation-record-grid,
+  .generation-history-filters,
+  .grading-filter-panel,
   .grading-workbench,
   .metric-row,
   .archive-subject-grid,
@@ -6293,6 +6350,16 @@ button:disabled {
 
   .generation-difficulty-switch {
     min-width: 0;
+  }
+
+  .generation-history-filters .wide-field,
+  .grading-filter-panel .wide-field,
+  .grading-filter-panel button {
+    grid-column: auto;
+  }
+
+  .grading-pagination {
+    grid-template-columns: 1fr;
   }
 
   .student-archive-hero,

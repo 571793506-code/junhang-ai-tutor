@@ -120,3 +120,16 @@ test("bootstrap exposes one active-target contract for every client", () => {
 
   assert.match(mapSource, /canReceiveNewWork:\s*student\.loginEnabled && student\.enrollmentStatus !== "WITHDRAWN"/);
 });
+
+test("grading workbench supports server-side student, subject, kind, state, and pagination filters", () => {
+  const workbenchRoute = routeSource('get("/api/grading/workbench"');
+
+  assert.match(workbenchRoute, /gradingWorkbenchQueryFromRequest\(req\)/);
+  assert.match(workbenchRoute, /studentId/);
+  assert.match(workbenchRoute, /subject/);
+  assert.match(workbenchRoute, /kind/);
+  assert.match(workbenchRoute, /queueState/);
+  assert.match(workbenchRoute, /page/);
+  assert.match(workbenchRoute, /total/);
+  assert.match(workbenchRoute, /hasMore/);
+});

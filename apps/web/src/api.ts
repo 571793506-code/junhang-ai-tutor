@@ -785,11 +785,34 @@ export type GradingWorkbench = {
   submittedAt: string;
 };
 
-export async function listGradingWorkbenches() {
-  const response = await fetch(`${API_BASE_URL}/api/grading/workbench`, {
+export type GradingWorkbenchFilters = {
+  page?: number;
+  pageSize?: number;
+  studentId?: string;
+  subject?: string;
+  kind?: string;
+  queueState?: "all" | "pending" | "low_confidence" | "ready" | "exception";
+  search?: string;
+};
+
+export async function listGradingWorkbenches(filters: GradingWorkbenchFilters = {}) {
+  const query = new URLSearchParams();
+  query.set("page", String(filters.page || 1));
+  query.set("pageSize", String(filters.pageSize || 50));
+  if (filters.studentId) query.set("studentId", filters.studentId);
+  if (filters.subject) query.set("subject", filters.subject);
+  if (filters.kind) query.set("kind", filters.kind);
+  if (filters.queueState && filters.queueState !== "all") query.set("queueState", filters.queueState);
+  if (filters.search?.trim()) query.set("search", filters.search.trim());
+  const response = await fetch(`${API_BASE_URL}/api/grading/workbench?${query.toString()}`, {
     headers: authHeaders()
   });
-  return readJson<{ ok: boolean; workbenches: GradingWorkbench[] }>(response);
+  return readJson<{
+    ok: boolean;
+    workbenches: GradingWorkbench[];
+    pagination: { page: number; pageSize: number; total: number; totalPages: number; hasMore: boolean; capped?: boolean };
+    summary: { batches: number; pendingQuestions: number; lowConfidence: number; ready: number; exceptions: number };
+  }>(response);
 }
 
 export async function getGradingWorkbench(submissionId: string) {

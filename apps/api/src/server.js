@@ -4430,10 +4430,44 @@ app.get("/api/review/submissions", requireDatabase, requireSession(config, ["tea
   });
 }));
 
+function gradingWorkbenchQueryFromRequest(req) {
+  const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+  const pageSize = Math.min(50, Math.max(5, Number.parseInt(String(req.query.pageSize || req.query.limit || "20"), 10) || 20));
+  const queueState = ["all", "pending", "low_confidence", "ready", "exception"].includes(String(req.query.queueState || ""))
+    ? String(req.query.queueState)
+    : "all";
+  return {
+    page,
+    pageSize,
+    studentId: optionalText(req.query.studentId),
+    subject: optionalText(req.query.subject),
+    kind: optionalText(req.query.kind),
+    queueState,
+    search: optionalText(req.query.search)
+  };
+}
+
+function gradingWorkbenchMatchesQuery(item, query) {
+  if (query.studentId && item.studentId !== query.studentId) return false;
+  if (query.subject && item.subject !== query.subject) return false;
+  if (query.kind && item.kind !== query.kind) return false;
+  if (query.search) {
+    const text = `${item.studentName || ""} ${item.title || ""}`.toLowerCase();
+    if (!text.includes(query.search.toLowerCase())) return false;
+  }
+  if (query.queueState === "pending") return item.pendingQuestionCount > 0 || item.questionReviewReady !== true;
+  if (query.queueState === "low_confidence") return item.quality?.lowConfidence === true || item.archiveEligible === false || item.needsTeacherReview === true;
+  if (query.queueState === "ready") return item.questionReviewReady === true;
+  if (query.queueState === "exception") return item.questionCount === 0 || /失败|待识别/.test(item.ocrStatusLabel || "");
+  return true;
+}
+
 app.get("/api/grading/workbench", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  const { page, pageSize, studentId, subject, kind, queueState, search } = gradingWorkbenchQueryFromRequest(req);
   const submissions = await prisma.submission.findMany({
     where: {
       grading: { needsReview: true },
+      ...(studentId ? { studentId } : {}),
       student: {
         OR: [
           { responsibleTeacherId: req.session.teacherId },
@@ -4442,7 +4476,7 @@ app.get("/api/grading/workbench", requireDatabase, requireSession(config, ["teac
       }
     },
     orderBy: { submittedAt: "desc" },
-    take: Math.min(Number(req.query.limit || 30), 100),
+    take: 500,
     include: {
       student: true,
       grading: true,
@@ -4450,9 +4484,30 @@ app.get("/api/grading/workbench", requireDatabase, requireSession(config, ["teac
     }
   });
 
+  const query = { page, pageSize, studentId, subject, kind, queueState, search };
+  const filtered = submissions.map(mapGradingWorkbench).filter((item) => gradingWorkbenchMatchesQuery(item, query));
+  const start = (page - 1) * pageSize;
+  const workbenches = filtered.slice(start, start + pageSize);
+  const total = filtered.length;
+
   res.json({
     ok: true,
-    workbenches: submissions.map(mapGradingWorkbench)
+    workbenches,
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      hasMore: start + workbenches.length < total,
+      capped: submissions.length === 500
+    },
+    summary: {
+      batches: total,
+      pendingQuestions: filtered.reduce((sum, item) => sum + item.pendingQuestionCount, 0),
+      lowConfidence: filtered.filter((item) => item.quality?.lowConfidence === true || item.archiveEligible === false || item.needsTeacherReview === true).length,
+      ready: filtered.filter((item) => item.questionReviewReady === true).length,
+      exceptions: filtered.filter((item) => item.questionCount === 0 || /失败|待识别/.test(item.ocrStatusLabel || "")).length
+    }
   });
 }));
 

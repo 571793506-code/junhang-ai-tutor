@@ -61,6 +61,7 @@ import {
   getContentIndex,
   archiveGradingWorkbench,
   listGradingWorkbenches,
+  type GradingWorkbenchFilters,
   listAssessmentGenerationJobs,
   queryStudentDictionary,
   createKnowledgeSource,
@@ -105,6 +106,7 @@ type AiSnapshot = Awaited<ReturnType<typeof getApiStatus>>["ai"];
 type Bootstrap = Awaited<ReturnType<typeof getBootstrapData>>;
 type ReviewSubmission = Awaited<ReturnType<typeof listReviewSubmissions>>["submissions"][number];
 type GradingWorkbench = Awaited<ReturnType<typeof listGradingWorkbenches>>["workbenches"][number];
+type GradingWorkbenchPage = Pick<Awaited<ReturnType<typeof listGradingWorkbenches>>, "pagination" | "summary">;
 type AdminAudit = Awaited<ReturnType<typeof getAdminAudit>>;
 type TextbookAsset = Awaited<ReturnType<typeof listTextbooks>>["assets"][number];
 type TextbookChapter = NonNullable<TextbookAsset["chapters"]>[number];
@@ -203,6 +205,21 @@ function assessmentDraftRefFromJob(job: AssessmentGenerationJob): AssessmentDraf
     layoutValidation: job.layoutValidation || undefined,
     reviewStatus: "pending"
   };
+}
+
+function assessmentDraftMatchesGenerationContext(
+  draft: AssessmentDraftRef | null,
+  context: { targetScope: "student" | "grade"; studentId?: string; targetGrade: string; subject: SubjectLabel; kind: string }
+) {
+  if (!draft) return false;
+  const request = draft.request || {};
+  const targetScope = request.targetScope || (request.studentId ? "student" : "grade");
+  if (targetScope !== context.targetScope) return false;
+  if ((request.subject || draft.subject) !== context.subject) return false;
+  if ((request.kind || draft.kind) !== context.kind) return false;
+  if (context.targetScope === "grade" && (request.targetGrade || "") !== context.targetGrade) return false;
+  if (context.targetScope === "student" && (request.studentId || "") !== (context.studentId || "")) return false;
+  return true;
 }
 
 function assessmentGenerationJobStatus(status: AssessmentGenerationJob["status"]) {
@@ -437,6 +454,7 @@ function App() {
   const [reports, setReports] = useState<StudentReportCard[]>([]);
   const [reviewSubmissions, setReviewSubmissions] = useState<ReviewSubmission[]>([]);
   const [gradingWorkbenches, setGradingWorkbenches] = useState<GradingWorkbench[]>([]);
+  const [gradingWorkbenchPage, setGradingWorkbenchPage] = useState<GradingWorkbenchPage | null>(null);
   const [audit, setAudit] = useState<AdminAudit | null>(null);
   const [textbooks, setTextbooks] = useState<TextbookAsset[]>([]);
   const [contentIndex, setContentIndex] = useState<ContentIndexSummary | null>(null);
@@ -556,6 +574,7 @@ function App() {
     ]);
     setReviewSubmissions(reviewData.submissions);
     setGradingWorkbenches(workbenchData.workbenches);
+    setGradingWorkbenchPage(workbenchData.pagination && workbenchData.summary ? { pagination: workbenchData.pagination, summary: workbenchData.summary } : null);
     setAudit(auditData);
     setTextbooks(textbookData.assets);
     setContentIndex(contentIndexData.index);
@@ -797,6 +816,19 @@ function App() {
       setSync({ busy: false, ok: true, message: "批改队列与审计记录已刷新" });
     } catch (error) {
       setSync({ busy: false, ok: false, message: `刷新失败：${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
+  async function queryGradingWorkbenches(filters: GradingWorkbenchFilters) {
+    try {
+      const response = await listGradingWorkbenches(filters);
+      setGradingWorkbenches(response.workbenches);
+      setGradingWorkbenchPage(response.pagination && response.summary ? { pagination: response.pagination, summary: response.summary } : null);
+      setSync({ busy: false, ok: true, message: `已加载 ${response.pagination?.total ?? response.workbenches.length} 个匹配批改批次` });
+      return response;
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `批改队列筛选失败：${error instanceof Error ? error.message : String(error)}` });
+      return null;
     }
   }
 
@@ -1194,7 +1226,7 @@ function App() {
           if (!currentDevice?.id) return;
           await setClassroomDeviceLock(currentDevice.id, unlocked);
           setSync({ busy: false, ok: true, message: unlocked ? "平板已解锁" : "平板已锁定" });
-        }} gradingWorkbenches={gradingWorkbenches} onUploadReview={uploadForReview} printAssets={printAssets} profileDraft={profileDraft} reports={reports} reviewSubmissions={reviewSubmissions} selectedTextbookContext={selectedTextbookContext} students={students} sync={sync} tasks={tasks} teacher={currentTeacher} termReportDraft={termReportDraft} textbooks={textbooks} /> : null}
+        }} gradingWorkbenchPage={gradingWorkbenchPage} gradingWorkbenches={gradingWorkbenches} onQueryGradingWorkbenches={queryGradingWorkbenches} onUploadReview={uploadForReview} printAssets={printAssets} profileDraft={profileDraft} reports={reports} reviewSubmissions={reviewSubmissions} selectedTextbookContext={selectedTextbookContext} students={students} sync={sync} tasks={tasks} teacher={currentTeacher} termReportDraft={termReportDraft} textbooks={textbooks} /> : null}
         {role === "student" && auth.studentId && currentStudent ? <StudentWorkspace activeModule={currentModule} answer={answer} assignments={assignments} corrections={corrections} isLoggedIn logs={logs} onAsk={askQa} onLogin={handleStudentLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, student: module }))} onUploadReview={uploadStudentSubmission} qaBusy={qaBusy} question={question} reports={reports} setGuardianPhone={setGuardianPhone} setQuestion={setQuestion} setStudentCode={setStudentCode} setStudentName={setStudentName} student={currentStudent} tasks={tasks} /> : null}
         {role === "classroom" && auth.deviceId && currentDevice ? <ClassroomWorkspace activeModule={currentModule} classroomBroadcasts={classroomBroadcasts} device={currentDevice} devices={devices} dictationTasks={dictationTasks} onAsk={askClassroomQa} onLogin={handleClassroomLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, classroom: module }))} onTaskComplete={completeTaskFromTablet} readingTasks={readingTasks} setDeviceCode={setDeviceCode} students={students} tasks={tasks} /> : null}
         {role === "teacher" && !auth.teacherId ? <LoginPanel code={teacherCode} onCode={setTeacherCode} onLogin={handleTeacherLogin} onPhone={setTeacherPhone} phone={teacherPhone} title="教师端登录" /> : null}
@@ -1241,6 +1273,7 @@ function TeacherWorkspace({
   corrections,
   devices,
   gradingWorkbenches,
+  gradingWorkbenchPage,
   knowledgeSources,
   latestAssessmentDraft,
   logs,
@@ -1266,6 +1299,7 @@ function TeacherWorkspace({
   onProfilePrint,
   onProfilePublish,
   onQuestionReview,
+  onQueryGradingWorkbenches,
   onRecognize,
   onRefreshOps,
   onRefreshTextbooks,
@@ -1306,6 +1340,7 @@ function TeacherWorkspace({
   corrections: CorrectionRecord[];
   devices: ClassroomDevice[];
   gradingWorkbenches: GradingWorkbench[];
+  gradingWorkbenchPage: GradingWorkbenchPage | null;
   knowledgeSources: KnowledgeSource[];
   latestAssessmentDraft: AssessmentDraftRef | null;
   logs: LearningLog[];
@@ -1331,6 +1366,7 @@ function TeacherWorkspace({
   onProfilePrint: (studentId: string, snapshot: Record<string, unknown>, text?: string) => Promise<PrintAssetLink | null>;
   onProfilePublish: (input: { studentId: string; text: string }) => Promise<void>;
   onQuestionReview: (submissionId: string, questionId: string, input: Record<string, unknown>) => void;
+  onQueryGradingWorkbenches: (filters: GradingWorkbenchFilters) => Promise<Awaited<ReturnType<typeof listGradingWorkbenches>> | null>;
   onRecognize: (submissionId: string) => void;
   onRefreshOps: () => void;
   onRefreshTextbooks: (filters?: { subject?: string; grade?: string; volume?: string; search?: string }) => void;
@@ -1378,6 +1414,10 @@ function TeacherWorkspace({
   const [assessmentKnowledgeRange, setAssessmentKnowledgeRange] = useState("教材章节重点、课堂已讲知识点、当周易错概念");
   const [assessmentStructure, setAssessmentStructure] = useState("基础默写 / 概念判断 / 简短应用");
   const [assessmentQuestionCount, setAssessmentQuestionCount] = useState("12 题左右");
+  const [generationHistoryStudentId, setGenerationHistoryStudentId] = useState("");
+  const [generationHistorySubject, setGenerationHistorySubject] = useState("");
+  const [generationHistoryState, setGenerationHistoryState] = useState("all");
+  const [generationHistorySearch, setGenerationHistorySearch] = useState("");
   const [assessmentExamType, setAssessmentExamType] = useState("阶段测评");
   const [assessmentTotalScore, setAssessmentTotalScore] = useState("100 分");
   const [assessmentMathBonusQuestion, setAssessmentMathBonusQuestion] = useState(mathBonusQuestionOptions[0]);
@@ -1433,10 +1473,16 @@ function TeacherWorkspace({
   const [readingSupportNote, setReadingSupportNote] = useState("重点理解一般过去时 carried，以及 bright 在句子里的意思。");
 
   const selectableStudents = useMemo(() => students.filter((student) => student.canReceiveNewWork), [students]);
+  const activeArchiveStudents = useMemo(() => students.filter((student) => student.canReceiveNewWork), [students]);
+  const historicalArchiveStudents = useMemo(() => students.filter((student) => !student.canReceiveNewWork), [students]);
 
   useEffect(() => {
+    if (activeModule === "学生档案") {
+      if (!students.some((item) => item.id === selectedStudentId)) setSelectedStudentId(students[0]?.id || "");
+      return;
+    }
     if (!selectableStudents.some((item) => item.id === selectedStudentId)) setSelectedStudentId(selectableStudents[0]?.id || "");
-  }, [selectedStudentId, selectableStudents]);
+  }, [activeModule, selectedStudentId, selectableStudents, students]);
 
   useEffect(() => {
     if (!selectableStudents.some((item) => item.id === generationStudentId)) setGenerationStudentId(selectableStudents[0]?.id || "");
@@ -1456,6 +1502,7 @@ function TeacherWorkspace({
   }, [selectedStudentId, termReportDraft]);
 
   const selectedStudent = useMemo(() => selectableStudents.find((item) => item.id === selectedStudentId) || selectableStudents[0], [selectedStudentId, selectableStudents]);
+  const selectedArchiveStudent = useMemo(() => students.find((item) => item.id === selectedStudentId) || activeArchiveStudents[0], [activeArchiveStudents, selectedStudentId, students]);
   const selectedTermReport = termReportDraft?.report.studentId === selectedStudentId ? termReportDraft.report : reports.find((item) => item.studentId === selectedStudentId && item.reportType);
   const selectedTermReportText = termReportText || selectedTermReport?.teacherEditedText || selectedTermReport?.summary || "";
   const activeGenerationMode = generationModes.find((item) => item.id === generationMode) || generationModes[0];
@@ -1466,6 +1513,13 @@ function TeacherWorkspace({
   const visibleGenerationStudents = generationTargetStudents;
   const generationSelectedStudent = visibleGenerationStudents.find((student) => student.id === generationStudentId) || visibleGenerationStudents[0];
   const generationTargetGrade = generationTargetScope === "student" ? generationSelectedStudent?.grade || targetGrade : targetGrade;
+  const generationDraftContextMatches = assessmentDraftMatchesGenerationContext(latestAssessmentDraft, {
+    targetScope: generationTargetScope,
+    studentId: generationTargetScope === "student" ? generationSelectedStudent?.id : undefined,
+    targetGrade: generationTargetGrade,
+    subject: assessmentSubject,
+    kind: assessmentKind
+  });
   const generationTextbookAssets = useMemo(() => textbooks.filter((asset) => (
     asset.subject === assessmentSubject
       && asset.grade === generationTargetGrade
@@ -1537,10 +1591,29 @@ function TeacherWorkspace({
   const readyProviders = ai?.providers.filter((item) => item.status === "ready").length || 0;
   const providerTotal = Math.max(ai?.providers.length || 0, 1);
   const readyTabletDevices = devices.filter((item) => item.status === "已绑定").length;
-  const recentGenerationAssignments = assignments
-    .filter((item) => ["小测", "练习", "试卷"].includes(item.kind))
-    .slice(0, 6);
-  const recentAssessmentJobs = assessmentJobs.slice(0, 6);
+  const filteredGenerationAssignments = assignments.filter((item) => {
+    if (!["小测", "练习", "试卷"].includes(item.kind)) return false;
+    if (generationHistoryStudentId && item.studentId !== generationHistoryStudentId) return false;
+    if (generationHistorySubject && item.subject !== generationHistorySubject) return false;
+    if (generationHistorySearch && !item.title.toLowerCase().includes(generationHistorySearch.trim().toLowerCase())) return false;
+    if (generationHistoryState === "pending") return item.draftReviewStatus === "pending_teacher_review";
+    if (generationHistoryState === "exported") return Boolean(item.finalExportAssets?.studentPaper || item.finalExportAssets?.answerAnalysis);
+    if (generationHistoryState === "rejected") return item.draftReviewStatus === "rejected";
+    if (generationHistoryState === "processing") return false;
+    return true;
+  }).slice(0, 12);
+  const filteredAssessmentJobs = assessmentJobs.filter((job) => {
+    if (generationHistoryStudentId && job.request.studentId !== generationHistoryStudentId) return false;
+    if (generationHistorySubject && job.subject !== generationHistorySubject) return false;
+    if (generationHistorySearch && !`${job.title} ${job.targetLabel || ""}`.toLowerCase().includes(generationHistorySearch.trim().toLowerCase())) return false;
+    if (generationHistoryState === "pending") return job.status === "ready_for_review";
+    if (generationHistoryState === "processing") return ["queued", "generating", "exporting_draft", "cancelling"].includes(job.status);
+    if (generationHistoryState === "rejected") return ["failed", "cancelled"].includes(job.status);
+    if (generationHistoryState === "exported") return false;
+    return true;
+  }).slice(0, 12);
+  const recentGenerationAssignments = filteredGenerationAssignments;
+  const recentAssessmentJobs = filteredAssessmentJobs;
   const activeAssessmentJobs = assessmentJobs.filter((job) => ["queued", "generating", "exporting_draft", "cancelling"].includes(job.status));
   const recordedPrintAssets = recentGenerationAssignments.flatMap((assignment) => [
     assignment.finalExportAssets?.studentPaper,
@@ -1849,11 +1922,12 @@ function TeacherWorkspace({
           <div className="generation-action-dock">
             {generationMode === "quiz" && generationTextbookContext && !hasApprovedTextbookSource ? <div className="button-row generation-scope-actions">{generationTextbookContext.chapter ? <button className="secondary-button" onClick={confirmCurrentTextbookGenerationScope} type="button"><ShieldCheck size={17} />确认当前章节范围</button> : null}<button className="secondary-button" disabled={!generationTextbookChapters.length} onClick={confirmWholeTextbookGenerationScope} type="button"><ShieldCheck size={17} />确认本册全部章节范围</button></div> : null}
             <button className="primary-button" disabled={Boolean(assessmentGenerationBlockReason)} onClick={submitAssessmentDraft}><Printer size={17} />生成 PDF 草稿</button>
-            {latestAssessmentDraft?.draftAsset ? <a className="draft-pdf-link" href={latestAssessmentDraft.draftAsset.url} target="_blank" rel="noreferrer"><FileText size={17} />打开审查 PDF</a> : <button className="secondary-button" disabled type="button"><FileText size={17} />打开审查 PDF</button>}
+            {latestAssessmentDraft?.draftAsset ? <a className="draft-pdf-link" href={latestAssessmentDraft.draftAsset.url} target="_blank" rel="noreferrer"><FileText size={17} />{generationDraftContextMatches ? "打开审查 PDF" : "打开历史审查 PDF"}</a> : <button className="secondary-button" disabled type="button"><FileText size={17} />打开审查 PDF</button>}
+            {latestAssessmentDraft && !generationDraftContextMatches ? <p className="context-note blocked"><ShieldCheck size={15} />当前表单上下文已变化，该草稿仅作为历史记录。请切回对应学生、年级、科目和生成类型后再复核或正式导出。</p> : null}
             {latestAssessmentDraft?.layoutValidation?.ok === false || (latestAssessmentDraft && !latestAssessmentDraft.layoutValidation) ? <p className="context-note blocked"><ShieldCheck size={15} />排版校验未通过：{latestAssessmentDraft.layoutValidation?.issues.join("；") || "缺少有效的页数和题目坐标校验，请重新导出草稿。"}</p> : null}
-            <button className="primary-button" disabled={finalExportCompleted || !latestAssessmentDraft || latestAssessmentDraft.layoutValidation?.ok !== true} onClick={() => latestAssessmentDraft && onExportPrint(latestAssessmentDraft.assignmentId)}><CheckCircle2 size={17} />确认正式导出</button>
-            <button className="secondary-button danger-button" disabled={!latestAssessmentDraft || latestAssessmentDraft.reviewStatus !== "pending"} onClick={() => latestAssessmentDraft && onAssessmentReject(latestAssessmentDraft.assignmentId)} type="button"><CircleX size={17} />否决草稿</button>
-            <button className="secondary-button" disabled={!latestAssessmentDraft || latestAssessmentDraft.reviewStatus !== "rejected"} onClick={() => latestAssessmentDraft && onAssessmentRegenerate(latestAssessmentDraft.assignmentId)} type="button"><RefreshCw size={17} />重新生成</button>
+            <button className="primary-button" disabled={finalExportCompleted || !latestAssessmentDraft || !generationDraftContextMatches || latestAssessmentDraft.layoutValidation?.ok !== true} onClick={() => latestAssessmentDraft && generationDraftContextMatches && onExportPrint(latestAssessmentDraft.assignmentId)}><CheckCircle2 size={17} />确认正式导出</button>
+            <button className="secondary-button danger-button" disabled={!latestAssessmentDraft || !generationDraftContextMatches || latestAssessmentDraft.reviewStatus !== "pending"} onClick={() => latestAssessmentDraft && generationDraftContextMatches && onAssessmentReject(latestAssessmentDraft.assignmentId)} type="button"><CircleX size={17} />否决草稿</button>
+            <button className="secondary-button" disabled={!latestAssessmentDraft || !generationDraftContextMatches || latestAssessmentDraft.reviewStatus !== "rejected"} onClick={() => latestAssessmentDraft && generationDraftContextMatches && onAssessmentRegenerate(latestAssessmentDraft.assignmentId)} type="button"><RefreshCw size={17} />重新生成</button>
             {latestAssessmentDraft?.finalExportAssets?.studentPaper || latestAssessmentDraft?.finalExportAssets?.answerAnalysis ? <div className="generation-final-assets"><strong>本任务正式导出</strong>{latestAssessmentDraft?.finalExportAssets?.studentPaper ? <a className="draft-pdf-link" href={latestAssessmentDraft.finalExportAssets.studentPaper.url} target="_blank" rel="noreferrer"><FileText size={17} />学生卷 PDF</a> : null}{latestAssessmentDraft?.finalExportAssets?.answerAnalysis ? <a className="draft-pdf-link" href={latestAssessmentDraft.finalExportAssets.answerAnalysis.url} target="_blank" rel="noreferrer"><FileText size={17} />答案解析 PDF</a> : null}</div> : null}
           </div>
           {generationFeedbackVisible ? <div className={`generation-inline-status ${generationFeedbackStatus}`}><StatusDot status={generationFeedbackStatus} /><span>{generationFeedbackMessage}</span></div> : null}
@@ -1862,6 +1936,12 @@ function TeacherWorkspace({
       </div>
       <section className="generation-record-board">
         <div className="generation-panel-head"><strong>草稿与导出记录</strong><span>待审查优先，已确认和正式导出分开管理。</span></div>
+        <div className="generation-history-filters" aria-label="生成记录筛选">
+          <label>学生<select value={generationHistoryStudentId} onChange={(event) => setGenerationHistoryStudentId(event.target.value)}><option value="">全部学生</option>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label>
+          <label>科目<select value={generationHistorySubject} onChange={(event) => setGenerationHistorySubject(event.target.value)}><option value="">全部科目</option>{subjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}</select></label>
+          <label>状态<select value={generationHistoryState} onChange={(event) => setGenerationHistoryState(event.target.value)}><option value="all">全部记录</option><option value="pending">待审查</option><option value="processing">生成中</option><option value="exported">已导出</option><option value="rejected">失败/否决</option></select></label>
+          <label className="wide-field">搜索<input value={generationHistorySearch} onChange={(event) => setGenerationHistorySearch(event.target.value)} placeholder="学生姓名或记录标题" /></label>
+        </div>
         <div className="generation-record-grid">
           {recentAssessmentJobs.map((job) => {
             const jobStatus = assessmentGenerationJobStatus(job.status);
@@ -1882,7 +1962,7 @@ function TeacherWorkspace({
       </section>
     </section>
     <section className={moduleClass("批改复核", "panel span-6")}><PanelTitle badge="AI生成" icon={Upload} title="拍照上传批改" /><div className="template-controls"><label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{selectableStudents.map((student) => <option key={student.id} value={student.id}>{student.displayName}</option>)}</select></label><label>类型<select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option>作业</option><option>小测</option><option>试卷</option><option>听写</option></select></label><label>科目<select value={uploadSubject} onChange={(event) => setUploadSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label></div><label className="field-label">记录标题<input value={uploadTitle} placeholder="例如：三角形单元试卷批改、英语Unit 1听写批改" onChange={(event) => setUploadTitle(event.target.value)} /></label><ReviewImagePicker files={uploadFiles} setFiles={setUploadFiles} testId="teacher-grading-image-picker" /><p className="muted-line">批改记录绑定所选学生，教师复核确认后才进入学生档案、错题和学习分析。</p><div className="review-upload-action"><button className="primary-button" disabled={!selectedStudent || !uploadFiles.length || isReviewUploading("grading")} onClick={() => selectedStudent && submitReviewUpload("grading", { studentId: selectedStudent.id, subject: uploadSubject, kind: uploadKind, title: uploadTitle.trim() || `${selectedStudent.displayName}${uploadKind}批改`, images: uploadFiles })}><Upload size={17} />上传并批改</button>{renderReviewUploadStatus("grading")}</div></section>
-    <section className={moduleClass("批改复核", "panel full")}><PanelTitle icon={ListChecks} title="批改工作台" /><div className="button-row"><button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新工作台</button></div><GradingWorkbenchPanel onMarkReviewed={onMarkReviewed} onQuestionReview={onQuestionReview} onRecognize={onRecognize} reviewSubmissions={reviewSubmissions} workbenches={gradingWorkbenches} /></section>
+    <section className={moduleClass("批改复核", "panel full")}><PanelTitle icon={ListChecks} title="批改工作台" /><div className="button-row"><button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新工作台</button></div><GradingWorkbenchPanel pageData={gradingWorkbenchPage} onMarkReviewed={onMarkReviewed} onQueryGradingWorkbenches={onQueryGradingWorkbenches} onQuestionReview={onQuestionReview} onRecognize={onRecognize} reviewSubmissions={reviewSubmissions} students={students} workbenches={gradingWorkbenches} /></section>
     <section className={moduleClass("电视动态屏", "tv-display-shell full")}>
       <TvParentDisplay ai={ai} assignments={assignments} audit={audit} corrections={corrections} logs={logs} reports={reports} reviewSubmissions={reviewSubmissions} students={students} tasks={tasks} />
     </section>
@@ -1890,7 +1970,7 @@ function TeacherWorkspace({
       <PanelTitle badge="AI生成" icon={FileText} title="学生档案草稿与发布" />
       <p className="muted-line">周/月成长档案经老师复核后发布到学生端；期中、期末阶段报告只在教师端生成 PDF，保存后由老师微信私聊人工发送给家长。</p>
       <div className="template-controls">
-        <label>归档学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label>
+        <label>归档学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}><optgroup label="在读学生">{activeArchiveStudents.length ? activeArchiveStudents.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>) : <option disabled>暂无在读学生</option>}</optgroup><optgroup label="历史/退课档案">{historicalArchiveStudents.length ? historicalArchiveStudents.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>) : <option disabled>暂无历史/退课档案</option>}</optgroup></select></label>
         <button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新归档数据</button>
       </div>
       <div className="student-profile-workspace">
@@ -1904,7 +1984,7 @@ function TeacherWorkspace({
               <button className={profilePeriodType === "weekly" ? "active" : ""} onClick={() => setProfilePeriodType("weekly")} type="button">周档案</button>
               <button className={profilePeriodType === "monthly" ? "active" : ""} onClick={() => setProfilePeriodType("monthly")} type="button">月度综合</button>
             </div>
-            <button className="primary-button" onClick={() => selectedStudent && onProfileDraft(selectedStudent.id, profilePeriodType)}><FileText size={17} />生成{periodTypeLabel(profilePeriodType)}草稿</button>
+            <button className="primary-button" onClick={() => selectedArchiveStudent && onProfileDraft(selectedArchiveStudent.id, profilePeriodType)}><FileText size={17} />生成{periodTypeLabel(profilePeriodType)}草稿</button>
           </div>
           {profileDraft?.studentId === selectedStudentId ? <div className="profile-draft-editor">
             <div className="review-card-head">
@@ -1914,10 +1994,10 @@ function TeacherWorkspace({
             <ProfileDraftStructuredReview snapshot={profileDraft.snapshot} />
             <label className="field-label">档案反馈正文<textarea className="wide-textarea profile-draft-textarea" value={profileDraftText} onChange={(event) => setProfileDraftText(event.target.value)} /></label>
             <div className="button-row">
-              <button className="primary-button" onClick={() => selectedStudent && onProfilePublish({ studentId: selectedStudent.id, text: profileDraftText })}><ShieldCheck size={17} />确认发布至学生端</button>
+              <button className="primary-button" onClick={() => selectedArchiveStudent && onProfilePublish({ studentId: selectedArchiveStudent.id, text: profileDraftText })}><ShieldCheck size={17} />确认发布至学生端</button>
               <button className="secondary-button" onClick={async () => {
-                if (!selectedStudent) return;
-                const asset = await onProfilePrint(selectedStudent.id, profileDraft.snapshot, profileDraftText);
+                if (!selectedArchiveStudent) return;
+                const asset = await onProfilePrint(selectedArchiveStudent.id, profileDraft.snapshot, profileDraftText);
                 if (asset) setProfilePrintAsset(asset);
               }} type="button"><Printer size={17} />生成打印版</button>
               {profilePrintAsset ? <a className="draft-pdf-link" href={profilePrintAsset.url} target="_blank" rel="noreferrer"><FileText size={17} />下载打印版</a> : null}
@@ -1936,22 +2016,22 @@ function TeacherWorkspace({
               <button className={termReportType === "final" ? "active" : ""} onClick={() => setTermReportType("final")} type="button">期末报告</button>
             </div>
             <label>阶段名称<input value={termReportPeriodLabel} onChange={(event) => setTermReportPeriodLabel(event.target.value)} placeholder="例如：2026春季期中" /></label>
-            <button className="primary-button" onClick={() => selectedStudent && onTermReportDraft(selectedStudent.id, termReportType, termReportPeriodLabel)}><FileText size={17} />生成阶段报告草稿</button>
+            <button className="primary-button" onClick={() => selectedArchiveStudent && onTermReportDraft(selectedArchiveStudent.id, termReportType, termReportPeriodLabel)}><FileText size={17} />生成阶段报告草稿</button>
           </div>
           {selectedTermReport ? <div className="term-report-editor">
             <label className="field-label">教师确认正文<textarea className="wide-textarea profile-draft-textarea" value={selectedTermReportText} onChange={(event) => setTermReportText(event.target.value)} /></label>
             <div className="term-report-actions">
-              <button className="primary-button" onClick={() => selectedStudent && onTermReportPdf(selectedStudent.id, selectedTermReport.id, selectedTermReportText)}><Printer size={17} />保存并生成 PDF</button>
+              <button className="primary-button" onClick={() => selectedArchiveStudent && onTermReportPdf(selectedArchiveStudent.id, selectedTermReport.id, selectedTermReportText)}><Printer size={17} />保存并生成 PDF</button>
               {selectedTermReport.pdfUrl ? <a className="draft-pdf-link" href={selectedTermReport.pdfUrl} target="_blank" rel="noreferrer"><FileText size={17} />下载阶段报告</a> : null}
               <button className="secondary-button" onClick={copyTermReportMessage} type="button"><MessageSquareText size={17} />复制微信话术</button>
-              <button className="secondary-button" disabled={!selectedTermReport.pdfUrl || selectedTermReport.status === "已发送"} onClick={() => selectedStudent && onTermReportSent(selectedStudent.id, selectedTermReport.id)} type="button"><CheckCircle2 size={17} />标记已人工发送</button>
+              <button className="secondary-button" disabled={!selectedTermReport.pdfUrl || selectedTermReport.status === "已发送"} onClick={() => selectedArchiveStudent && onTermReportSent(selectedArchiveStudent.id, selectedTermReport.id)} type="button"><CheckCircle2 size={17} />标记已人工发送</button>
             </div>
             {selectedTermReport.wechatMessage ? <p className="context-note">{selectedTermReport.wechatMessage}</p> : null}
             {termReportCopyState ? <p className="muted-line">{termReportCopyState}</p> : null}
           </div> : <p className="review-empty">期中、期末报告不会发布到学生端正文，只在老师标记发送后显示状态。</p>}
         </div>
       </div>
-      {selectedStudent ? <TeacherStudentArchivePanel assignments={assignments} audit={audit} corrections={corrections} logs={logs} reports={reports} student={selectedStudent} tasks={tasks} /> : null}
+      {selectedArchiveStudent ? <TeacherStudentArchivePanel assignments={assignments} audit={audit} corrections={corrections} logs={logs} reports={reports} student={selectedArchiveStudent} tasks={tasks} /> : null}
     </section>
     <section className={moduleClass("系统状态", "panel full")}><PanelTitle icon={Settings2} title="服务状态" /><div className="feature-list">{(ai?.providers || []).map((item) => <div className="feature-row" key={item.id}><div><strong>{item.label}</strong><span>{item.model} · {item.capabilities.join(" / ")}</span></div><StatusPill label={item.status === "ready" ? "可用" : "不可用"} status={item.status} /></div>)}{(ai?.features || []).filter((item) => item.id !== "avatar-dialog").map((item) => <div className="feature-row" key={item.id}><div><strong>{item.label}</strong><span>{item.appSurface}</span></div><StatusPill label={item.status === "ready" ? "可用" : "不可用"} status={item.status} /></div>)}</div></section>
     <section className={moduleClass("系统状态", "panel full")}><PanelTitle icon={Activity} title="归档与审计" /><AuditPanel audit={audit} /></section>
@@ -2583,16 +2663,41 @@ function questionMaxScoreTotal(questions: GradingWorkbench["questions"]) {
   return Number(values.reduce((sum, value) => sum + Number(value), 0).toFixed(2));
 }
 
-function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, reviewSubmissions, workbenches }: { onMarkReviewed: (submissionId: string, input?: Record<string, unknown>) => void; onQuestionReview: (submissionId: string, questionId: string, input: Record<string, unknown>) => void; onRecognize: (submissionId: string) => void; reviewSubmissions: ReviewSubmission[]; workbenches: GradingWorkbench[] }) {
+function GradingWorkbenchPanel({ onMarkReviewed, onQueryGradingWorkbenches, onQuestionReview, onRecognize, pageData, reviewSubmissions, students, workbenches }: {
+  onMarkReviewed: (submissionId: string, input?: Record<string, unknown>) => void;
+  onQueryGradingWorkbenches: (filters: GradingWorkbenchFilters) => Promise<Awaited<ReturnType<typeof listGradingWorkbenches>> | null>;
+  onQuestionReview: (submissionId: string, questionId: string, input: Record<string, unknown>) => void;
+  onRecognize: (submissionId: string) => void;
+  pageData: GradingWorkbenchPage | null;
+  reviewSubmissions: ReviewSubmission[];
+  students: StudentProfile[];
+  workbenches: GradingWorkbench[];
+}) {
   const [activeId, setActiveId] = useState(workbenches[0]?.submissionId || "");
-  const [queueFilter, setQueueFilter] = useState<"all" | "pending" | "low_confidence" | "ready">("all");
+  const [queueFilter, setQueueFilter] = useState<"all" | "pending" | "low_confidence" | "ready" | "exception">("all");
   const [showQueueFilter, setShowQueueFilter] = useState(false);
-  const visibleWorkbenches = workbenches.filter((item) => {
-    if (queueFilter === "pending") return item.pendingQuestionCount > 0 || !allQuestionsReviewed(item.questions);
-    if (queueFilter === "low_confidence") return item.quality?.lowConfidence === true || item.archiveEligible === false || item.needsTeacherReview === true;
-    if (queueFilter === "ready") return allQuestionsReviewed(item.questions);
-    return true;
+  const [gradingStudentFilter, setGradingStudentFilter] = useState("");
+  const [gradingSubjectFilter, setGradingSubjectFilter] = useState("");
+  const [gradingKindFilter, setGradingKindFilter] = useState("");
+  const [gradingSearch, setGradingSearch] = useState("");
+  const visibleWorkbenches = workbenches;
+  const runGradingQuery = (page = 1) => onQueryGradingWorkbenches({
+    page,
+    pageSize: pageData?.pagination?.pageSize || 20,
+    studentId: gradingStudentFilter || undefined,
+    subject: gradingSubjectFilter || undefined,
+    kind: gradingKindFilter || undefined,
+    queueState: queueFilter,
+    search: gradingSearch
   });
+  const gradingFilterControls = showQueueFilter ? <div className="grading-filter-panel">
+    <label>学生<select aria-label="批改学生筛选" value={gradingStudentFilter} onChange={(event) => setGradingStudentFilter(event.target.value)}><option value="">全部学生</option>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.enrollmentStatus}</option>)}</select></label>
+    <label>科目<select aria-label="批改科目筛选" value={gradingSubjectFilter} onChange={(event) => setGradingSubjectFilter(event.target.value)}><option value="">全部科目</option>{subjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}</select></label>
+    <label>类型<select aria-label="批改类型筛选" value={gradingKindFilter} onChange={(event) => setGradingKindFilter(event.target.value)}><option value="">全部类型</option><option>作业</option><option>练习</option><option>小测</option><option>试卷</option><option>听写</option><option>图片批改</option></select></label>
+    <label>状态<select aria-label="批改状态筛选" value={queueFilter} onChange={(event) => setQueueFilter(event.target.value as typeof queueFilter)}><option value="all">全部批次</option><option value="pending">待确认</option><option value="low_confidence">低置信</option><option value="ready">可归档</option><option value="exception">异常记录</option></select></label>
+    <label className="wide-field">搜索<input aria-label="批改队列搜索" value={gradingSearch} onChange={(event) => setGradingSearch(event.target.value)} placeholder="学生姓名或记录标题" /></label>
+    <button className="primary-button" onClick={() => void runGradingQuery(1)} type="button"><Search size={15} />应用筛选</button>
+  </div> : null;
   const active = workbenches.find((item) => item.submissionId === activeId) || workbenches[0];
   const [activePage, setActivePage] = useState(1);
   const [activeQuestionId, setActiveQuestionId] = useState(active?.questions[0]?.id || "");
@@ -2610,7 +2715,7 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
   }, [activeId, workbenches]);
   useEffect(() => {
     if (!visibleWorkbenches.some((item) => item.submissionId === activeId)) setActiveId(visibleWorkbenches[0]?.submissionId || "");
-  }, [activeId, queueFilter, workbenches]);
+  }, [activeId, workbenches]);
   useEffect(() => {
     setActivePage(1);
     setActiveQuestionId(active?.questions[0]?.id || "");
@@ -2648,7 +2753,7 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
         <div className="grading-queue-head">
           <div><strong>复核队列</strong><span>等待生成结构化批改批次</span></div>
           <button className="secondary-button" onClick={() => setShowQueueFilter((value) => !value)} type="button"><Search size={15} />筛选</button>
-          {showQueueFilter ? <select aria-label="批改队列筛选" value={queueFilter} onChange={(event) => setQueueFilter(event.target.value as typeof queueFilter)}><option value="all">全部批次</option><option value="pending">待确认</option><option value="low_confidence">低置信</option><option value="ready">可归档</option></select> : null}
+          {gradingFilterControls}
         </div>
         <div className="grading-batch-list">
           {batches.length ? batches.map((batch) => <div className="grading-batch-placeholder" key={batch.id}>
@@ -2777,17 +2882,17 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
         <span>按“选择批次 → 查看图片 → 逐题确认 → 归档”处理，不对学生和家长展示。</span>
       </div>
       <div className="grading-command-metrics">
-        <Metric label="待复核" value={workbenches.length} suffix="份" tone="amber" />
-        <Metric label="待确认题" value={pendingQuestionTotal} suffix="题" tone="blue" />
-        <Metric label="低置信" value={lowConfidenceTotal} suffix="份" tone="amber" />
-        <Metric label="可归档" value={archiveReadyTotal} suffix="份" tone="green" />
+        <Metric label="待复核" value={pageData?.summary?.batches ?? workbenches.length} suffix="份" tone="amber" />
+        <Metric label="待确认题" value={pageData?.summary?.pendingQuestions ?? pendingQuestionTotal} suffix="题" tone="blue" />
+        <Metric label="低置信" value={pageData?.summary?.lowConfidence ?? lowConfidenceTotal} suffix="份" tone="amber" />
+        <Metric label="可归档" value={pageData?.summary?.ready ?? archiveReadyTotal} suffix="份" tone="green" />
       </div>
     </section>
     <aside className="grading-review-queue">
       <div className="grading-queue-head">
         <div><strong>复核队列</strong><span>优先处理低置信和待确认批次</span></div>
         <button className="secondary-button" onClick={() => setShowQueueFilter((value) => !value)} type="button"><Search size={15} />筛选</button>
-        {showQueueFilter ? <select aria-label="批改队列筛选" value={queueFilter} onChange={(event) => setQueueFilter(event.target.value as typeof queueFilter)}><option value="all">全部批次</option><option value="pending">待确认</option><option value="low_confidence">低置信</option><option value="ready">可归档</option></select> : null}
+        {gradingFilterControls}
       </div>
       <div className="grading-batch-list">
         {visibleWorkbenches.length ? visibleWorkbenches.map((item) => {
@@ -2800,6 +2905,7 @@ function GradingWorkbenchPanel({ onMarkReviewed, onQuestionReview, onRecognize, 
           </button>;
         }) : <p className="review-empty">当前筛选条件下没有批改批次。</p>}
       </div>
+      {pageData?.pagination ? <div className="grading-pagination"><button className="secondary-button" disabled={pageData.pagination.page <= 1} onClick={() => void runGradingQuery(pageData.pagination.page - 1)} type="button"><ArrowLeft size={15} />上一页</button><span>第 {pageData.pagination.page}/{pageData.pagination.totalPages} 页 · 共 {pageData.pagination.total} 份</span><button className="secondary-button" disabled={!pageData.pagination.hasMore} onClick={() => void runGradingQuery(pageData.pagination.page + 1)} type="button">下一页</button></div> : null}
     </aside>
     <main className="grading-stage-shell">
       <div className="grading-stage-head">

@@ -171,7 +171,7 @@ test("knowledge source review binds only the selected real textbook asset", () =
 test("generation workbench displays layout risk and blocks draft confirmation", () => {
   assert.match(source, /layoutValidation\?:/);
   assert.match(source, /latestAssessmentDraft\?\.layoutValidation\?\.ok === false/);
-  assert.match(source, /disabled=\{finalExportCompleted \|\| !latestAssessmentDraft \|\| latestAssessmentDraft\.layoutValidation\?\.ok !== true\}/);
+  assert.match(source, /disabled=\{finalExportCompleted \|\| !latestAssessmentDraft \|\| !generationDraftContextMatches \|\| latestAssessmentDraft\.layoutValidation\?\.ok !== true\}/);
   assert.match(source, /排版校验未通过/);
 });
 
@@ -216,7 +216,15 @@ test("selecting a generation job restores the assignment review state when avail
 
 test("generation final export becomes non-repeatable after final assets exist", () => {
   assert.match(source, /const finalExportCompleted = Boolean\(latestAssessmentDraft\?\.finalExportAssets\?\.studentPaper \|\| latestAssessmentDraft\?\.finalExportAssets\?\.answerAnalysis\)/);
-  assert.match(source, /disabled=\{finalExportCompleted \|\| !latestAssessmentDraft \|\| latestAssessmentDraft\.layoutValidation\?\.ok !== true\}/);
+  assert.match(source, /disabled=\{finalExportCompleted \|\| !latestAssessmentDraft \|\| !generationDraftContextMatches \|\| latestAssessmentDraft\.layoutValidation\?\.ok !== true\}/);
+});
+
+test("generation review disables stale drafts after the form context changes", () => {
+  assert.match(source, /function assessmentDraftMatchesGenerationContext\(/);
+  assert.match(source, /const generationDraftContextMatches = assessmentDraftMatchesGenerationContext\(/);
+  assert.match(source, /disabled=\{finalExportCompleted \|\| !latestAssessmentDraft \|\| !generationDraftContextMatches \|\| latestAssessmentDraft\.layoutValidation\?\.ok !== true\}/);
+  assert.match(source, /当前表单上下文已变化，该草稿仅作为历史记录/);
+  assert.match(source, /disabled=\{!latestAssessmentDraft \|\| !generationDraftContextMatches \|\| latestAssessmentDraft\.reviewStatus !== "pending"\}/);
 });
 
 test("quiz knowledge range remains editable after textbook selection", () => {
@@ -233,4 +241,22 @@ test("teacher target selectors use the API availability contract", () => {
   assert.match(source, /title="生成今日任务"[\s\S]{0,1200}\{selectableStudents\.map\(\(student\) => <option key=\{student\.id\}/);
   assert.match(source, /title="已发布今日任务完成情况"[\s\S]{0,1800}\{selectableStudents\.map\(\(student\) => <option key=\{student\.id\}/);
   assert.match(source, /title="拍照上传批改"[\s\S]{0,800}\{selectableStudents\.map\(\(student\) => <option key=\{student\.id\}/);
+});
+
+test("generation history can be filtered by student, subject, state, and keyword", () => {
+  assert.match(source, /generationHistoryStudentId/);
+  assert.match(source, /generationHistorySubject/);
+  assert.match(source, /generationHistoryState/);
+  assert.match(source, /generationHistorySearch/);
+  assert.match(source, /生成记录筛选/);
+  assert.match(source, /filteredGenerationAssignments/);
+  assert.match(source, /filteredAssessmentJobs/);
+});
+
+test("student archive selector separates active students from historical archives", () => {
+  assert.match(source, /activeArchiveStudents/);
+  assert.match(source, /historicalArchiveStudents/);
+  assert.match(source, /<optgroup label="在读学生">/);
+  assert.match(source, /<optgroup label="历史\/退课档案">/);
+  assert.match(source, /暂无历史\/退课档案/);
 });
