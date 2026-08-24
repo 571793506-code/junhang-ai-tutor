@@ -83,8 +83,8 @@ results.qa = await runStep(
   () => answerStudentQuestionService(
     env,
     {
-      studentId: "stu-wyx",
-      studentName: "王瑶瑶",
+      studentId: "cmrx8gpcd00016ydgu2hqz4dy",
+      studentName: "肖心妍",
       subject: "数学",
       question: "等腰三角形一个角是40度，这道题怎么思考？"
     },
@@ -104,8 +104,8 @@ results.task = await runStep(
   () => draftTeacherTaskService(
     env,
     {
-      studentId: "stu-wyx",
-      studentName: "王瑶瑶",
+      studentId: "cmrx8gpcd00016ydgu2hqz4dy",
+      studentName: "肖心妍",
       subject: "英语",
       requirement: "今天复习一般过去时和 carry 的词形变化。"
     },

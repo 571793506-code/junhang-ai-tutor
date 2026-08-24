@@ -100,7 +100,7 @@ async function seedStudents() {
     );
 
     if (student.guardianName || student.guardianPhone) {
-      const guardianId = `guardian-${student.id}`;
+      const guardianId = student.guardianId || `guardian-${student.id}`;
       await prisma.guardian.upsert({
         where: { id: guardianId },
         create: {
@@ -261,6 +261,7 @@ async function seedLearningContent() {
         metadata: task
       },
       update: {
+        studentId: task.studentId,
         title: task.title,
         status: taskStatus(task.status),
         metadata: task
@@ -302,7 +303,7 @@ async function seedLearningContent() {
         term: entry.term,
         content: entry
       },
-      update: { term: entry.term, content: entry }
+      update: { studentId: demoStudents[0].id, term: entry.term, content: entry }
     });
   }
 }
@@ -352,6 +353,7 @@ async function seedAssignmentsAndGrading() {
           }
         },
         update: {
+          studentId: assignment.studentId,
           status: submissionStatus(assignment.status),
           content: {
             imageNames: assignment.submissionImageNames,
@@ -391,6 +393,7 @@ async function seedAssignmentsAndGrading() {
         metadata: record
       },
       update: {
+        studentId: demoStudents[0].id,
         subject: record.subject,
         prompt: record.prompt,
         studentAnswer: record.studentAnswer,
@@ -417,6 +420,7 @@ async function seedReportsAndLogs() {
         metadata: report
       },
       update: {
+        studentId: demoStudents[0].id,
         type: reportType(report.period),
         periodKey: report.period,
         title: report.title,
@@ -438,6 +442,7 @@ async function seedReportsAndLogs() {
         metadata: log
       },
       update: {
+        studentId: demoStudents[0].id,
         feature: log.feature,
         action: log.action,
         metadata: log
