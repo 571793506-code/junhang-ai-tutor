@@ -160,7 +160,8 @@ export function normalizeRuntimeConfig(config = {}) {
     gpt56ReasoningEffortEnabled: String(config.GPT56_REASONING_EFFORT_ENABLED ?? config.gpt56ReasoningEffortEnabled ?? "false").toLowerCase() === "true",
     gpt56SolFallbackEnabled: String(config.GPT56_SOL_FALLBACK_ENABLED ?? config.gpt56SolFallbackEnabled ?? "false").toLowerCase() === "true",
     gpt56SolModel: config.GPT56_SOL_MODEL || config.gpt56SolModel || "gpt-5.6-sol",
-    gpt56SolFallbackTimeoutMs: Number(config.GPT56_SOL_FALLBACK_TIMEOUT_MS || config.gpt56SolFallbackTimeoutMs || 180000)
+    gpt56SolFallbackTimeoutMs: Number(config.GPT56_SOL_FALLBACK_TIMEOUT_MS || config.gpt56SolFallbackTimeoutMs || 180000),
+    gpt56ReadingDirectSolEnabled: String(config.GPT56_READING_DIRECT_SOL_ENABLED ?? config.gpt56ReadingDirectSolEnabled ?? "false").toLowerCase() === "true"
   };
 }
 
@@ -887,6 +888,13 @@ export async function draftAssessment(config, input = {}, execution = {}) {
     execution.evidenceSufficient !== false &&
     primaryModel !== runtime.gpt56SolModel
   );
+  const directSolReadingEnabled = (
+    runtime.gpt56ReadingDirectSolEnabled === true &&
+    execution.directSolReading !== false &&
+    readingPartitionIndex >= 0 &&
+    primaryModel !== runtime.gpt56SolModel &&
+    solEscalationEnabled(runtime)
+  );
   const attempts = [];
   const recordAttempt = (role, partition, attemptResult, options = {}) => {
     markBudgetFromResult(attemptResult);
@@ -917,7 +925,8 @@ export async function draftAssessment(config, input = {}, execution = {}) {
     model = runtime.gpt56Model,
     reasoningEffort = kind === "试卷" ? "high" : "medium",
     timeoutMs = attemptTimeoutMs(execution.timeoutMs || assessmentTimeoutMs),
-    trigger = null
+    trigger = null,
+    directSol = false
   } = {}) => {
     throwIfCancelled();
     const partitionTokens = partitionTokenBudget(index);
@@ -954,7 +963,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
       maxTokens: partitionTokens,
       trigger
     });
-    return { partition, index, partitionTokens, result };
+    return { partition, index, partitionTokens, result, directSol };
   };
   const primaryCallOptions = {
     role: execution.role,
@@ -971,7 +980,18 @@ export async function draftAssessment(config, input = {}, execution = {}) {
   let partitionResults = await mapWithConcurrency(
     scheduledPartitions,
     2,
-    ({ partition, index }) => callPartition(partition, index, primaryCallOptions)
+    ({ partition, index }) => {
+      const isReading = partition.itemTypes.includes("reading");
+      return callPartition(partition, index, isReading && directSolReadingEnabled
+        ? {
+            ...primaryCallOptions,
+            role: "sol-direct-reading",
+            model: runtime.gpt56SolModel,
+            reasoningEffort: "high",
+            directSol: true
+          }
+        : primaryCallOptions);
+    }
   );
   partitionResults = partitionResults.slice().sort((left, right) => left.index - right.index);
   throwIfCancelled();
@@ -1028,7 +1048,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
   };
   const parsedTerraPartitions = partitionResults.map(parsePartition);
   const eligibleFailures = solGateOpen
-    ? parsedTerraPartitions.filter((entry) => !entry.usable && entry.trigger?.allowed === true)
+    ? parsedTerraPartitions.filter((entry) => !entry.directSol && !entry.usable && entry.trigger?.allowed === true)
     : [];
   const allTerraUnusable = parsedTerraPartitions.every((entry) => !entry.usable);
   const solScenarioBudgetMs = kind === "小测"
@@ -1062,9 +1082,13 @@ export async function draftAssessment(config, input = {}, execution = {}) {
   const solAttempts = attempts.filter((attempt) => attempt.role === "sol-escalation");
   const escalationTriggered = solAttempts.length > 0;
   const usedModelEscalation = escalatedPartitions.some((entry) => entry.usable);
+  const usedDirectSolReading = finalPartitions.some((entry) => entry.directSol && entry.usable);
+  const directSolReadingPartitions = finalPartitions
+    .filter((entry) => entry.directSol)
+    .map((entry) => entry.partition.id);
   const escalationScopes = solAttempts.map((attempt) => attempt.partitionId);
   let usedProvider = "gpt56";
-  let usedModel = usedModelEscalation ? runtime.gpt56SolModel : primaryModel;
+  let usedModel = usedModelEscalation || usedDirectSolReading ? runtime.gpt56SolModel : primaryModel;
   let fallbackProvider = null;
   let fallbackBody = null;
   const emergencyFallbackEnabled = String(config.DEEPSEEK_EMERGENCY_FALLBACK_ENABLED ?? config.deepseekEmergencyFallbackEnabled ?? "false").toLowerCase() === "true";
@@ -1139,6 +1163,9 @@ export async function draftAssessment(config, input = {}, execution = {}) {
         escalationModel: runtime.gpt56SolModel,
         escalationTriggered,
         usedModelEscalation,
+        directSolReadingEnabled,
+        usedDirectSolReading,
+        directSolReadingPartitions,
         usedDynamicFallback: false,
         escalationScopes,
         solFallbackTimeoutMs: runtime.gpt56SolFallbackTimeoutMs,

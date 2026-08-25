@@ -82,6 +82,7 @@ export declare function normalizeRuntimeConfig(config?: RuntimeConfigLike): {
   gpt56SolFallbackEnabled: boolean;
   gpt56SolModel: string;
   gpt56SolFallbackTimeoutMs: number;
+  gpt56ReadingDirectSolEnabled: boolean;
 };
 
 export declare function describeModelError(error?: unknown): {

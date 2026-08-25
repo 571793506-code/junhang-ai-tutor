@@ -92,6 +92,11 @@ test("normalizeRuntimeConfig exposes Sol defaults and explicit overrides", () =>
   assert.equal(overridden.gpt56SolFallbackTimeoutMs, 210000);
 });
 
+test("normalizeRuntimeConfig keeps direct Sol reading routing opt-in", () => {
+  assert.equal(normalizeRuntimeConfig({}).gpt56ReadingDirectSolEnabled, false);
+  assert.equal(normalizeRuntimeConfig({ GPT56_READING_DIRECT_SOL_ENABLED: "true" }).gpt56ReadingDirectSolEnabled, true);
+});
+
 test("buildAiStartupSnapshot assigns Junhang text capabilities to GPT-5.6", () => {
   const snapshot = buildAiStartupSnapshot({
     GPT56_API_KEY: "test-key",

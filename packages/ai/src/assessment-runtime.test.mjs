@@ -392,6 +392,35 @@ test("draftAssessment schedules reading partitions in the first generation wave"
   }
 });
 
+test("draftAssessment can route only reading partitions directly to Sol when explicitly enabled", async () => {
+  const payloads = [];
+  const server = http.createServer(async (req, res) => {
+    const payload = await readJsonRequest(req);
+    payloads.push(payload);
+    sendChatContent(res, validPartitionContent(payload));
+  });
+  const address = await listen(server);
+  try {
+    const result = await draftAssessment(
+      enabledSolConfig(`http://127.0.0.1:${address.port}`, {
+        GPT56_READING_DIRECT_SOL_ENABLED: "true"
+      }),
+      compactAssessmentInput({ subject: "语文", requirement: "阅读直用 Sol 测试" })
+    );
+    const readingPayload = payloads.find((payload) => firstAllowedItemType(payload) === "reading");
+    const nonReadingPayloads = payloads.filter((payload) => firstAllowedItemType(payload) !== "reading");
+    assert.ok(readingPayload);
+    assert.equal(readingPayload.model, "gpt-5.6-sol");
+    assert.equal(readingPayload.reasoning_effort, "high");
+    assert.equal(nonReadingPayloads.length > 0, true);
+    assert.equal(nonReadingPayloads.every((payload) => payload.model === "gpt-5.6-terra"), true);
+    assert.equal(result.modelRun.metadata.directSolReadingEnabled, true);
+    assert.deepEqual(result.modelRun.metadata.directSolReadingPartitions, ["reading"]);
+  } finally {
+    await close(server);
+  }
+});
+
 test("draftAssessment asks reading partitions for compact complete passage output", async () => {
   const payloads = [];
   const server = http.createServer(async (req, res) => {
