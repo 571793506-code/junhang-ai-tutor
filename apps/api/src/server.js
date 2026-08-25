@@ -3651,6 +3651,42 @@ function assessmentDraftInputFromRequest(req) {
   return normalizeAssessmentTargetScope({ ...getBody(req), teacherId: sessionTeacherId(req, req.body?.teacherId) });
 }
 
+function buildAssessmentStudentSignals(student) {
+  if (!student) return [];
+  const signals = [];
+  for (const mistake of (student.mistakes || []).filter((item) => !item.masteryResolved).slice(0, 12)) {
+    signals.push({
+      type: "unresolved_mistake",
+      subject: mistake.subject || null,
+      knowledgePoint: mistake.knowledgePoint?.name || safeJson(mistake.metadata, {}).point || null,
+      prompt: mistake.prompt || null,
+      studentAnswer: mistake.studentAnswer || null,
+      correctAnswer: mistake.correctAnswer || null,
+      cause: mistake.cause || null
+    });
+  }
+  for (const submission of (student.submissions || []).slice(0, 8)) {
+    const grading = safeJson(submission.grading?.result, {});
+    signals.push({
+      type: "recent_grading",
+      subject: submission.assignment?.subject?.name || safeJson(submission.assignment?.metadata, {}).subject || null,
+      title: submission.assignment?.title || null,
+      score: submission.grading?.score ?? grading.score ?? null,
+      summary: grading.summary || grading.gradingText || null
+    });
+  }
+  for (const task of (student.tasks || []).slice(0, 6)) {
+    signals.push({
+      type: "recent_task",
+      subject: task.subject?.name || safeJson(task.metadata, {}).subject || null,
+      title: task.title || null,
+      status: task.status || null,
+      description: task.description || safeJson(task.metadata, {}).draftText || null
+    });
+  }
+  return signals.filter((signal) => Object.values(signal).some((value) => value != null && value !== ""));
+}
+
 function assessmentContentContextFailure(contentContext, contentContextValidation) {
   const textbookAssetRequired = contentContext.reason === "TEXTBOOK_ASSET_REQUIRED"
     || contentContextValidation.error === "TEXTBOOK_ASSET_REQUIRED";
@@ -3675,6 +3711,10 @@ async function prepareAssessmentDraftInput(req) {
   const emergency = prepareTeacherRequirementEmergency(input);
   if (emergency) return emergency;
   const database = await checkDatabaseStatus();
+  if (database.ok && input.studentId) {
+    const studentSources = await loadStudentProfileSources(input.studentId);
+    input.studentSignals = buildAssessmentStudentSignals(studentSources);
+  }
   const contentContext = database.ok
     ? await resolveApprovedAssessmentContentContext(prisma, input)
     : matchApprovedContentContext(input, []);

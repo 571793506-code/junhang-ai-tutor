@@ -454,6 +454,36 @@ test("draftAssessmentService forwards the authoritative textbook baseline in gen
   });
 });
 
+test("draftAssessmentService carries teacher-scoped student signals into generationContext", async () => {
+  let runnerInput = null;
+  await draftAssessmentService(
+    {},
+    {
+      subject: "数学",
+      kind: "练习",
+      grade: "五年级",
+      studentId: "student-1",
+      requirement: "针对近期错题生成补弱练习",
+      studentSignals: [
+        { type: "unresolved_mistake", knowledgePoint: "分数乘法", cause: "约分遗漏" },
+        { type: "recent_grading", score: 62, summary: "计算题失分较多" }
+      ]
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async (_config, input) => {
+        runnerInput = input;
+        return fakeAssessmentResult();
+      }
+    }
+  );
+
+  assert.deepEqual(runnerInput.generationContext.studentSignals, [
+    { type: "unresolved_mistake", knowledgePoint: "分数乘法", cause: "约分遗漏" },
+    { type: "recent_grading", score: 62, summary: "计算题失分较多" }
+  ]);
+});
+
 test("draftAssessmentService keeps teacher-requirement emergency quizzes free of textbook claims", async () => {
   let runnerInput = null;
   await draftAssessmentService(

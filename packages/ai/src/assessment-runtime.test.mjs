@@ -199,7 +199,7 @@ test("draftAssessment splits request-level max token budget across project parti
     assert.equal(requestPayloads.every((payload) => payload.max_tokens <= 5000), true);
     assert.equal(requestPayloads.reduce((sum, payload) => sum + payload.max_tokens, 0), 20000);
     assert.equal(result.modelRun.metadata.assessmentMaxTokens, 20000);
-    assert.deepEqual(result.modelRun.metadata.partitions.map((item) => item.id), ["foundation", "calculation", "application", "operation"]);
+    assert.deepEqual(result.modelRun.metadata.partitions.map((item) => item.id), ["fill", "choice", "calculation", "solution"]);
   } finally {
     await close(server);
   }
@@ -210,6 +210,11 @@ test("draftAssessment explicitly instructs every partition to follow the authori
   const server = http.createServer(async (req, res) => {
     const payload = await readJsonRequest(req);
     payloads.push(payload);
+    if (!payload.messages.some((message) => /json/i.test(String(message.content || "")))) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "messages must mention json" } }));
+      return;
+    }
     sendChatContent(res, validPartitionContent(payload));
   });
   const address = await listen(server);
@@ -232,10 +237,11 @@ test("draftAssessment explicitly instructs every partition to follow the authori
       })
     );
 
-    assert.equal(payloads.length, 2);
+    assert.equal(payloads.length, 4);
     for (const payload of payloads) {
       const system = String(payload.messages?.[0]?.content || "");
       const user = partitionPrompt(payload);
+      assert.match(system, /Return a valid json object only/);
       assert.match(system, /教材版本和册次/);
       assert.match(system, /不得混用其他版本/);
       assert.match(user, /贵州遵义/);
@@ -268,9 +274,9 @@ test("draftAssessment caps compact partition output at 8000 tokens per request",
     );
 
     assert.equal(result.available, true);
-    assert.equal(requestPayloads.length, 2);
-    assert.equal(requestPayloads.every((payload) => payload.max_tokens === 8000), true);
-    assert.equal(result.modelRun.metadata.partitions.every((item) => item.maxTokens === 8000), true);
+    assert.equal(requestPayloads.length, 4);
+    assert.equal(requestPayloads.every((payload) => payload.max_tokens <= 8000), true);
+    assert.equal(result.modelRun.metadata.partitions.every((item) => item.maxTokens <= 8000), true);
   } finally {
     await close(server);
   }
@@ -316,8 +322,8 @@ test("draftAssessment uses medium reasoning for quiz and practice and high for e
     await draftAssessment(config, { ...input, kind: "试卷" });
     const examPayloads = requestPayloads.slice(examStart);
 
-    assert.equal(quizPayloads.length, 2);
-    assert.equal(practicePayloads.length, 2);
+    assert.equal(quizPayloads.length, 4);
+    assert.equal(practicePayloads.length, 4);
     assert.equal(examPayloads.length, 4);
     assert.equal(quizPayloads.every((payload) => payload.reasoning_effort === "medium"), true);
     assert.equal(practicePayloads.every((payload) => payload.reasoning_effort === "medium"), true);
@@ -507,7 +513,7 @@ test("draftAssessment escalates only one failed Terra partition to Sol once", as
   const server = http.createServer(async (req, res) => {
     const payload = await readJsonRequest(req);
     payloads.push(payload);
-    if (payload.model === "gpt-5.6-terra" && partitionTitle(payload) === "基础概念与计算") {
+    if (payload.model === "gpt-5.6-terra" && partitionTitle(payload) === "一、填空题") {
       res.writeHead(524, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: { code: "upstream_timeout", message: "temporary upstream timeout" } }));
       return;
@@ -525,18 +531,18 @@ test("draftAssessment escalates only one failed Terra partition to Sol once", as
     const solPayloads = payloads.filter((payload) => payload.model === "gpt-5.6-sol");
     const solAttempts = result.modelRun.metadata.attempts.filter((attempt) => attempt.role === "sol-escalation");
 
-    assert.equal(terraPayloads.length, 2);
+    assert.equal(terraPayloads.length, 4);
     assert.equal(solPayloads.length, 1);
-    assert.equal(partitionTitle(solPayloads[0]), "基础概念与计算");
+    assert.equal(partitionTitle(solPayloads[0]), "一、填空题");
     assert.equal(solPayloads[0].reasoning_effort, "high");
-    assert.equal(solPayloads[0].max_tokens, terraPayloads.find((payload) => partitionTitle(payload) === "基础概念与计算").max_tokens);
+    assert.equal(solPayloads[0].max_tokens, terraPayloads.find((payload) => partitionTitle(payload) === "一、填空题").max_tokens);
     assert.equal(result.available, true);
     assert.equal(result.modelRun.metadata.partialGeneration, false);
     assert.equal(result.modelRun.metadata.primaryModel, "gpt-5.6-terra");
     assert.equal(result.modelRun.metadata.escalationModel, "gpt-5.6-sol");
     assert.equal(result.modelRun.metadata.escalationTriggered, true);
     assert.equal(result.modelRun.metadata.usedModelEscalation, true);
-    assert.deepEqual(result.modelRun.metadata.escalationScopes, ["foundation-calculation"]);
+    assert.deepEqual(result.modelRun.metadata.escalationScopes, ["fill"]);
     assert.equal(result.modelRun.metadata.solFallbackTimeoutMs, 180000);
     assert.equal(solAttempts.length, 1);
     assert.equal(solAttempts[0].providerId, "gpt56");
@@ -555,7 +561,7 @@ test("draftAssessment classifies malformed Terra model JSON as quality and repla
   const server = http.createServer(async (req, res) => {
     const payload = await readJsonRequest(req);
     payloads.push(payload);
-    if (payload.model === "gpt-5.6-terra" && partitionTitle(payload) === "基础概念与计算") {
+    if (payload.model === "gpt-5.6-terra" && partitionTitle(payload) === "一、填空题") {
       sendChatContent(res, "{malformed business json");
       return;
     }
@@ -572,11 +578,11 @@ test("draftAssessment classifies malformed Terra model JSON as quality and repla
     const solAttempt = result.modelRun.metadata.attempts.find((attempt) => attempt.role === "sol-escalation");
 
     assert.ok(solPayload);
-    assert.match(partitionPrompt(solPayload), /必须修复：partition:foundation-calculation:malformed_json/);
+    assert.match(partitionPrompt(solPayload), /必须修复：partition:fill:malformed_json/);
     assert.doesNotMatch(partitionPrompt(solPayload), /malformed business json/);
     assert.equal(solAttempt.triggerClass, "quality");
     assert.equal(solAttempt.triggerCode, "partition_validation");
-    assert.deepEqual(solAttempt.triggerIssues, ["partition:foundation-calculation:malformed_json"]);
+    assert.deepEqual(solAttempt.triggerIssues, ["partition:fill:malformed_json"]);
     assert.equal(result.modelRun.metadata.usedModelEscalation, true);
     assert.equal(result.modelRun.metadata.partialGeneration, false);
   } finally {
@@ -589,7 +595,7 @@ test("draftAssessment classifies hard-invalid Terra content as quality", async (
   const server = http.createServer(async (req, res) => {
     const payload = await readJsonRequest(req);
     payloads.push(payload);
-    if (payload.model === "gpt-5.6-terra" && partitionTitle(payload) === "基础概念与计算") {
+    if (payload.model === "gpt-5.6-terra" && partitionTitle(payload) === "一、填空题") {
       sendChatContent(res, JSON.stringify({
         title: "硬校验失败",
         sections: [{ items: [{ itemType: "writing", prompt: "越界题型", answer: "", analysisSteps: [] }] }]
@@ -611,8 +617,8 @@ test("draftAssessment classifies hard-invalid Terra content as quality", async (
     assert.equal(solAttempt.triggerClass, "quality");
     assert.equal(solAttempt.triggerCode, "partition_validation");
     assert.deepEqual(solAttempt.triggerIssues, [
-      "partition:foundation-calculation:disallowed_item_type",
-      "partition:foundation-calculation:incomplete_item"
+      "partition:fill:disallowed_item_type",
+      "partition:fill:incomplete_item"
     ]);
     assert.equal(result.modelRun.metadata.usedModelEscalation, true);
   } finally {
@@ -746,12 +752,12 @@ test("draftAssessment stops after failed Sol attempts instead of calling DeepSee
       compactAssessmentInput()
     );
 
-    assert.equal(solCalls, 2);
+    assert.equal(solCalls, 4);
     assert.equal(deepseekCalls, 0);
     assert.equal(result.available, false);
     assert.equal(result.modelRun.metadata.usedModelEscalation, false);
     assert.equal(result.modelRun.metadata.escalationTriggered, true);
-    assert.equal(result.modelRun.metadata.attempts.filter((attempt) => attempt.role === "sol-escalation").length, 2);
+    assert.equal(result.modelRun.metadata.attempts.filter((attempt) => attempt.role === "sol-escalation").length, 4);
     assert.equal(result.modelRun.metadata.fallbackProvider, null);
   } finally {
     await close(gptServer);
@@ -774,10 +780,10 @@ test("draftAssessment keeps valid Terra-only requests on the existing model and 
       compactAssessmentInput({ model: "gpt-5.6-sol", evidenceSufficient: false })
     );
 
-    assert.equal(payloads.length, 2);
+    assert.equal(payloads.length, 4);
     assert.equal(payloads.every((payload) => payload.model === "gpt-5.6-terra"), true);
     assert.equal(payloads.every((payload) => payload.reasoning_effort === "medium"), true);
-    assert.equal(payloads.every((payload) => payload.max_tokens === 8000), true);
+    assert.equal(payloads.every((payload) => payload.max_tokens === 4000), true);
     assert.equal(result.available, true);
     assert.equal(result.model, "gpt-5.6-terra");
     assert.equal(result.modelRun.metadata.escalationTriggered, false);
@@ -811,7 +817,7 @@ test("draftAssessment forces high reasoning for direct internal Sol execution", 
           { model: "gpt-5.6-sol", reasoningEffort: "low" }
         );
 
-        assert.equal(payloads.length, 2);
+        assert.equal(payloads.length, 4);
         assert.equal(payloads.every((payload) => payload.model === "gpt-5.6-sol"), true);
         assert.equal(payloads.every((payload) => payload.reasoning_effort === "high"), true);
         assert.equal(result.modelRun.metadata.attempts.every((attempt) => attempt.reasoningEffort === "high"), true);

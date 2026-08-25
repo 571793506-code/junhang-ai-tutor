@@ -4035,6 +4035,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
       scope: input.targetScope || null,
       studentId: input.studentId || null
     },
+    studentSignals: Array.isArray(input.studentSignals) ? input.studentSignals.slice(0, 40) : [],
     teaching: {
       textbook: {
         assetId: input.textbookAssetId || null,
