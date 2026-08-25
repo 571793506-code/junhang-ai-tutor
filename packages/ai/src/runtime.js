@@ -910,8 +910,17 @@ export async function draftAssessment(config, input = {}, execution = {}) {
   } = {}) => {
     throwIfCancelled();
     const partitionTokens = partitionTokenBudget(index);
+    const readingMinimum = subject === "英语"
+      ? kind === "试卷" ? "至少 560 个英文单词" : kind === "练习" ? "至少 150 个英文单词" : "至少 120 个英文单词"
+      : kind === "试卷" ? "至少 850 个汉字" : "至少 700 个汉字";
+    const readingContextExamples = subject === "英语"
+      ? "至少设置主旨/标题、细节定位、原因或推断、词义猜测中的 4 类上下文题，题干明确出现 according to the passage、why、infer、main idea、best title 或 word meaning 等依据提示"
+      : "至少设置内容概括、信息筛选、原因分析、句意理解中的 4 类上下文题，题干明确出现根据短文说明原因、联系上下文推断、主要内容、信息筛选或句子含义等依据提示";
+    const readingGroupRule = subject === "英语" && kind === "试卷"
+      ? "正式英语试卷必须输出至少两篇完整阅读材料，每篇使用不同 passageGroupId，并为每篇配置对应上下文题。"
+      : "";
     const readingRule = partition.itemTypes.includes("reading")
-      ? "阅读分区必须按完整题组输出：每道题都要带相同的 passageGroupId、passageTitle、passageText 和 passageQuestionIndex；passageText 必须是完整上下文材料，不得只写提纲或一句话；题目必须覆盖内容概括/主旨、细节定位、原因或推断等上下文考查。"
+      ? `阅读分区只输出${subject === "英语" && kind === "试卷" ? "完整阅读材料题组" : "一篇完整阅读材料"}；第一题必须携带完整 passageText、passageTitle、passageGroupId、showPassage=true，${readingMinimum}，不得只写提纲或一句话；后续题只携带相同 passageGroupId、passageQuestionIndex 和必要题目字段，不要重复 passageText；每题带 passageQuestionIndex，每题只保留必要字段，analysisSteps 最多 3 步；${readingContextExamples}。${readingGroupRule}`
       : "";
     const partitionMessages = messages.map((message) => message.role !== "user" ? message : {
       ...message,
@@ -941,11 +950,19 @@ export async function draftAssessment(config, input = {}, execution = {}) {
     model: primaryModel,
     reasoningEffort: primaryReasoningEffort
   };
+  const scheduledPartitions = partitions
+    .map((partition, index) => ({ partition, index }))
+    .sort((left, right) => {
+      const leftReading = left.partition.itemTypes.includes("reading") ? 0 : 1;
+      const rightReading = right.partition.itemTypes.includes("reading") ? 0 : 1;
+      return leftReading - rightReading || left.index - right.index;
+    });
   let partitionResults = await mapWithConcurrency(
-    partitions,
+    scheduledPartitions,
     2,
-    (partition, index) => callPartition(partition, index, primaryCallOptions)
+    ({ partition, index }) => callPartition(partition, index, primaryCallOptions)
   );
+  partitionResults = partitionResults.slice().sort((left, right) => left.index - right.index);
   throwIfCancelled();
   const reserveMs = assessmentTotalTimeoutMs ? Math.max(1000, Math.floor(assessmentTotalTimeoutMs * 0.15)) : 0;
   const retryable = partitionResults.filter((entry) => {

@@ -342,6 +342,80 @@ test("draftAssessment uses medium reasoning for quiz and practice and high for e
   }
 });
 
+test("draftAssessment schedules reading partitions in the first generation wave", async () => {
+  const firstWave = [];
+  let requestCount = 0;
+  const server = http.createServer(async (req, res) => {
+    const payload = await readJsonRequest(req);
+    const title = partitionTitle(payload);
+    requestCount += 1;
+    if (requestCount <= 2) firstWave.push(title);
+    setTimeout(() => {
+      sendChatContent(res, validPartitionContent(payload));
+    }, 10);
+  });
+  const address = await listen(server);
+
+  try {
+    await draftAssessment(
+      { GPT56_API_KEY: "test-key", GPT56_BASE_URL: `http://127.0.0.1:${address.port}`, GPT56_MODEL: "gpt-5.6" },
+      { subject: "语文", kind: "小测", grade: "五年级", requirement: "阅读优先调度" }
+    );
+    assert.equal(firstWave.includes("三、阅读理解"), true);
+  } finally {
+    await close(server);
+  }
+});
+
+test("draftAssessment asks reading partitions for compact complete passage output", async () => {
+  const payloads = [];
+  const server = http.createServer(async (req, res) => {
+    const payload = await readJsonRequest(req);
+    payloads.push(payload);
+    sendChatContent(res, validPartitionContent(payload));
+  });
+  const address = await listen(server);
+
+  try {
+    await draftAssessment(
+      { GPT56_API_KEY: "test-key", GPT56_BASE_URL: `http://127.0.0.1:${address.port}`, GPT56_MODEL: "gpt-5.6" },
+      { subject: "语文", kind: "小测", grade: "五年级", requirement: "阅读输出契约" }
+    );
+    const readingPayload = payloads.find((payload) => partitionTitle(payload) === "三、阅读理解");
+    assert.ok(readingPayload);
+    const prompt = partitionPrompt(readingPayload);
+    assert.match(prompt, /只输出一篇完整阅读材料/);
+    assert.match(prompt, /后续题.*不要重复 passageText/);
+    assert.match(prompt, /analysisSteps 最多 3 步/);
+    assert.match(prompt, /至少 700 个汉字/);
+    assert.match(prompt, /根据短文说明原因/);
+  } finally {
+    await close(server);
+  }
+});
+
+test("draftAssessment keeps two complete passages for formal English reading", async () => {
+  const payloads = [];
+  const server = http.createServer(async (req, res) => {
+    const payload = await readJsonRequest(req);
+    payloads.push(payload);
+    sendChatContent(res, validPartitionContent(payload));
+  });
+  const address = await listen(server);
+
+  try {
+    await draftAssessment(
+      { GPT56_API_KEY: "test-key", GPT56_BASE_URL: `http://127.0.0.1:${address.port}`, GPT56_MODEL: "gpt-5.6" },
+      { subject: "英语", kind: "试卷", grade: "五年级", requirement: "正式阅读输出契约" }
+    );
+    const readingPayload = payloads.find((payload) => partitionTitle(payload) === "三、阅读理解");
+    assert.ok(readingPayload);
+    assert.match(partitionPrompt(readingPayload), /至少两篇完整阅读材料/);
+  } finally {
+    await close(server);
+  }
+});
+
 test("draftAssessment uses expanded default assessment model attempt timeouts", async () => {
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
