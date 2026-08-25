@@ -85,6 +85,43 @@ export function validateAssessmentPartition(parsed = {}, partition = {}) {
     codes.push("incomplete_item");
   }
 
+  if (allowedItemTypes.has("reading")) {
+    const readingItems = items.filter((item) => String(item?.itemType || "").trim() === "reading");
+    const passageGroups = new Map();
+    for (const item of readingItems) {
+      const passageText = String(item?.passageText || item?.passage || item?.materialText || "").trim();
+      const groupId = String(item?.passageGroupId || item?.passageTitle || passageText.slice(0, 80) || "missing").trim();
+      const group = passageGroups.get(groupId) || { passageText, passageTexts: new Set(), prompts: [] };
+      if (passageText) group.passageTexts.add(passageText);
+      if (passageText.length > group.passageText.length) group.passageText = passageText;
+      group.prompts.push(String(item?.prompt || ""));
+      passageGroups.set(groupId, group);
+    }
+    const subject = String(partition?.subject || "");
+    const kind = String(partition?.kind || "");
+    const groups = [...passageGroups.values()];
+    const minimumGroups = subject === "英语" && kind === "试卷" ? 2 : 1;
+    if (!groups.length || groups.some((group) => !group.passageText)) codes.push("reading_passage_missing");
+    if (groups.some((group) => group.passageTexts.size > 1)) codes.push("reading_passage_inconsistent");
+    if (groups.length < minimumGroups) codes.push("reading_passage_groups_insufficient");
+    const minimumLength = subject === "英语"
+      ? kind === "试卷" ? 280 : kind === "练习" ? 150 : 120
+      : kind === "试卷" ? 700 : 550;
+    const shortGroup = groups.some((group) => {
+      const text = group.passageText;
+      const length = subject === "英语"
+        ? (text.match(/[A-Za-z]+(?:['-][A-Za-z]+)*/g) || []).length
+        : text.replace(/[^\u4e00-\u9fa5]/g, "").length;
+      return length < minimumLength;
+    });
+    if (shortGroup) codes.push("reading_passage_too_short");
+    const contextualQuestionCount = readingItems.filter((item) => /according|passage|infer|main idea|best title|why|because|learn from|根据|短文|联系上下文|推断|主要内容|原因|作者|题目/i.test(String(item?.prompt || ""))).length;
+    const minimumContextualQuestions = subject === "英语"
+      ? kind === "试卷" ? 6 : kind === "练习" ? 3 : 4
+      : 4;
+    if (contextualQuestionCount < minimumContextualQuestions) codes.push("reading_context_questions_insufficient");
+  }
+
   const uniqueCodes = [...new Set(codes)];
   const partitionId = partition?.id || "unknown";
   return {

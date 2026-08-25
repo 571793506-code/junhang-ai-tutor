@@ -127,6 +127,66 @@ test("assessment partition validation accepts numeric and boolean answers", () =
   assert.deepEqual(result, { valid: true, codes: [], issues: [] });
 });
 
+test("assessment partition validation rejects an incomplete Chinese reading group", () => {
+  const result = validateAssessmentPartition({
+    sections: [{
+      items: Array.from({ length: 6 }, (_, index) => ({
+        itemType: "reading",
+        prompt: index < 2 ? `短文主要写了什么？第${index + 1}题` : `第${index + 1}题`,
+        answer: "参考答案",
+        analysisSteps: ["定位材料。", "联系上下文。"],
+        knowledgePoint: "阅读理解",
+        passageGroupId: "reading-1",
+        passageText: "这是一段过短的材料。"
+      }))
+    }]
+  }, { id: "reading", subject: "语文", kind: "小测", itemTypes: ["reading"] });
+
+  assert.equal(result.valid, false);
+  assert.ok(result.codes.includes("reading_passage_too_short"));
+  assert.ok(result.codes.includes("reading_context_questions_insufficient"));
+  assert.ok(result.issues.includes("partition:reading:reading_passage_too_short"));
+});
+
+test("assessment partition validation accepts a complete English reading group", () => {
+  const passageText = Array.from({ length: 130 }, (_, index) => `word${index}`).join(" ");
+  const result = validateAssessmentPartition({
+    sections: [{
+      items: [
+        "What is the main idea of the passage?",
+        "Why did the students change their plan?",
+        "What does the word helpful mean in the passage?",
+        "Which title is best for the passage?"
+      ].map((prompt, index) => ({
+        itemType: "reading",
+        prompt,
+        answer: "参考答案",
+        analysisSteps: ["定位信息。", "联系上下文。", "组织答案。"],
+        knowledgePoint: "Reading comprehension",
+        passageGroupId: "reading-1",
+        passageTitle: "A helpful plan",
+        passageText
+      }))
+    }]
+  }, { id: "reading", subject: "英语", kind: "小测", itemTypes: ["reading"] });
+
+  assert.deepEqual(result, { valid: true, codes: [], issues: [] });
+});
+
+test("assessment partition validation rejects inconsistent passage text within one group", () => {
+  const result = validateAssessmentPartition({
+    sections: [{ items: [
+      { itemType: "reading", prompt: "短文主要写了什么？", answer: "答案", analysisSteps: ["定位。"], knowledgePoint: "主旨", passageGroupId: "same", passageText: "材料甲" },
+      { itemType: "reading", prompt: "根据短文说明原因。", answer: "答案", analysisSteps: ["定位。"], knowledgePoint: "原因", passageGroupId: "same", passageText: "材料乙" },
+      { itemType: "reading", prompt: "联系上下文推断。", answer: "答案", analysisSteps: ["定位。"], knowledgePoint: "推断", passageGroupId: "same", passageText: "材料甲" },
+      { itemType: "reading", prompt: "给短文拟题。", answer: "答案", analysisSteps: ["定位。"], knowledgePoint: "主旨", passageGroupId: "same", passageText: "材料甲" }
+    ] }]
+  }, { id: "reading", subject: "语文", kind: "小测", itemTypes: ["reading"] });
+
+  assert.equal(result.valid, false);
+  assert.deepEqual(result.codes, ["reading_passage_inconsistent", "reading_passage_too_short"]);
+});
+
 test("assessment partition validation rejects null and blank-string answers", () => {
   const result = validateAssessmentPartition({
     sections: [

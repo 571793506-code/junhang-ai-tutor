@@ -910,9 +910,12 @@ export async function draftAssessment(config, input = {}, execution = {}) {
   } = {}) => {
     throwIfCancelled();
     const partitionTokens = partitionTokenBudget(index);
+    const readingRule = partition.itemTypes.includes("reading")
+      ? "阅读分区必须按完整题组输出：每道题都要带相同的 passageGroupId、passageTitle、passageText 和 passageQuestionIndex；passageText 必须是完整上下文材料，不得只写提纲或一句话；题目必须覆盖内容概括/主旨、细节定位、原因或推断等上下文考查。"
+      : "";
     const partitionMessages = messages.map((message) => message.role !== "user" ? message : {
       ...message,
-      content: `${message.content}\n\nReturn a valid json object for this partition. 本次只生成分区：${partition.title}。允许题型：${partition.itemTypes.join(", ")}。不要生成其他分区。${partition.targetItemCount ? `本分区必须恰好生成 ${partition.targetItemCount} 题。` : ""}顶层仍返回 {title,layout,sections,printNotes}，sections 只包含本分区。请精简输出，避免重复规则和冗长说明；优先保证 JSON 完整，并让每题的答案、解析步骤、考点、易错点和分值字段齐全。${trigger?.issues?.length ? `必须修复：${trigger.issues.join("；")}。` : ""}`
+      content: `${message.content}\n\nReturn a valid json object for this partition. 本次只生成分区：${partition.title}。允许题型：${partition.itemTypes.join(", ")}。不要生成其他分区。${partition.targetItemCount ? `本分区必须恰好生成 ${partition.targetItemCount} 题。` : ""}${readingRule}顶层仍返回 {title,layout,sections,printNotes}，sections 只包含本分区。请精简输出，避免重复规则和冗长说明；优先保证 JSON 完整，并让每题的答案、解析步骤、考点、易错点和分值字段齐全。${trigger?.issues?.length ? `必须修复：${trigger.issues.join("；")}。` : ""}`
     });
     const result = await timedCall(() => callGpt56Chat(config, partitionMessages, {
       model,

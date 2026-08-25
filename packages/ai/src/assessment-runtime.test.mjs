@@ -48,22 +48,31 @@ function firstAllowedItemType(payload) {
 }
 
 function validPartitionContent(payload, marker = payload.model) {
+  const allowedType = firstAllowedItemType(payload);
+  const reading = allowedType === "reading";
+  const readingPassage = Array.from({ length: 130 }, (_, index) => `word${index}`).join(" ");
+  const itemPrompts = reading
+    ? ["What is the main idea of the passage?", "Why did the students change their plan?", "What does the word helpful mean in the passage?", "Which title is best for the passage?"]
+    : [`${partitionTitle(payload)}-${marker}`];
   return JSON.stringify({
     title: "分区生成测试",
     layout: { paper: "A4", pages: 2 },
     sections: [
       {
         title: partitionTitle(payload),
-        items: [
-          {
-            itemType: firstAllowedItemType(payload),
-            prompt: `${partitionTitle(payload)}-${marker}`,
+        items: itemPrompts.map((prompt) => ({
+            itemType: allowedType,
+            prompt,
             answer: "测试答案",
             analysisSteps: ["读取条件。", "完成作答。"],
             knowledgePoint: "测试考点",
-            commonMistake: "不要遗漏条件。"
-          }
-        ]
+            commonMistake: "不要遗漏条件。",
+            ...(reading ? {
+              passageGroupId: "test-reading",
+              passageTitle: "Test passage",
+              passageText: readingPassage
+            } : {})
+          }))
       }
     ]
   });
@@ -400,14 +409,21 @@ test("draftAssessment reserves request-level total budget instead of giving all 
                 {
                   title: "三、阅读提升",
                   items: [
-                    {
-                      itemType: "reading",
-                      prompt: "短文主要写了什么？",
-                      answer: "围绕阅读材料概括主要内容。",
-                      analysisSteps: ["先读全文。", "再概括人物和事件。"],
-                      knowledgePoint: "阅读概括"
-                    }
-                  ]
+                    ["短文主要写了什么？", "内容概括"],
+                    ["根据短文说明原因。", "原因分析"],
+                    ["联系上下文推断人物想法。", "推断"],
+                    ["给短文拟一个合适的题目。", "主旨概括"]
+                  ].map(([prompt, knowledgePoint], index) => ({
+                    itemType: "reading",
+                    prompt,
+                    answer: "围绕阅读材料概括主要内容。",
+                    analysisSteps: ["先读全文。", "再定位依据。", "组织完整答案。"],
+                    knowledgePoint,
+                    passageGroupId: "budget-reading",
+                    passageTitle: "阅读材料",
+                    passageText: "同学们通过观察、记录和讨论发现了校园中的问题，并根据事实提出改进办法。".repeat(80),
+                    passageQuestionIndex: index + 1
+                  }))
                 }
               ]
             })
