@@ -366,11 +366,11 @@ export async function callOpenAiCompatibleChat({
 
   if (!response.ok) {
     const message = body?.error?.message || body?.message || text.trim() || response.statusText;
-    if (
-      response.status === 502 &&
-      responseFormat?.type === "json_object" &&
-      /json_object|response_format|must contain the word ['\"]?json/i.test(message)
-    ) {
+    const canRetryStructuredRequest = responseFormat?.type === "json_object" && (
+      (response.status === 502 && /json_object|response_format|must contain the word ['\"]?json|no available channel|channel unavailable/i.test(message)) ||
+      (response.status === 503 && /no available channel|channel unavailable/i.test(message))
+    );
+    if (canRetryStructuredRequest) {
       const remainingTimeoutMs = timeoutMs ? Math.max(1, timeoutMs - (Date.now() - requestStartedAt)) : undefined;
       return callOpenAiCompatibleChat({
         baseUrl,

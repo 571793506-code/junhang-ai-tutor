@@ -247,6 +247,46 @@ test("callGpt56Chat retries json_object compatibility failures without response_
   }
 });
 
+test("callGpt56Chat retries transient channel failures without response_format", async () => {
+  const payloads = [];
+  let requestCount = 0;
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      requestCount += 1;
+      payloads.push(JSON.parse(body));
+      if (requestCount === 1) {
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "No available channel for model gpt-5.6-terra" } }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }));
+    });
+  });
+  const address = await listen(server);
+  try {
+    const result = await callGpt56Chat(
+      {
+        GPT56_API_KEY: "test-key",
+        GPT56_BASE_URL: `http://127.0.0.1:${address.port}`,
+        GPT56_MODEL: "gpt-5.6-terra"
+      },
+      [{ role: "user", content: "Return a valid json object." }],
+      { responseFormat: { type: "json_object" } }
+    );
+
+    assert.equal(result.choices[0].message.content, '{"ok":true}');
+    assert.equal(payloads.length, 2);
+    assert.deepEqual(payloads[0].response_format, { type: "json_object" });
+    assert.equal(Object.hasOwn(payloads[1], "response_format"), false);
+  } finally {
+    await close(server);
+  }
+});
+
 test("callGpt56Chat preserves status for a non-JSON upstream error", async () => {
   const server = http.createServer((_req, res) => {
     res.writeHead(524, { "Content-Type": "text/plain" });
