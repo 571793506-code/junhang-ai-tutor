@@ -314,6 +314,7 @@ export async function callOpenAiCompatibleChat({
   signal
 }) {
   if (!apiKey) throw new Error("Missing API key");
+  const requestStartedAt = Date.now();
 
   const payload = { model, messages, temperature };
   if (responseFormat) payload.response_format = responseFormat;
@@ -364,6 +365,24 @@ export async function callOpenAiCompatibleChat({
 
   if (!response.ok) {
     const message = body?.error?.message || body?.message || text.trim() || response.statusText;
+    if (
+      response.status === 502 &&
+      responseFormat?.type === "json_object" &&
+      /json_object|response_format|must contain the word ['\"]?json/i.test(message)
+    ) {
+      const remainingTimeoutMs = timeoutMs ? Math.max(1, timeoutMs - (Date.now() - requestStartedAt)) : undefined;
+      return callOpenAiCompatibleChat({
+        baseUrl,
+        apiKey,
+        model,
+        messages,
+        temperature,
+        maxTokens,
+        timeoutMs: remainingTimeoutMs,
+        reasoningEffort,
+        signal
+      });
+    }
     const requestError = new Error(`${response.status} ${message}`);
     requestError.status = response.status;
     requestError.code = body?.error?.code || body?.code || null;
@@ -893,7 +912,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
     const partitionTokens = partitionTokenBudget(index);
     const partitionMessages = messages.map((message) => message.role !== "user" ? message : {
       ...message,
-      content: `${message.content}\n\n本次只生成分区：${partition.title}。允许题型：${partition.itemTypes.join(", ")}。不要生成其他分区。${partition.targetItemCount ? `本分区必须恰好生成 ${partition.targetItemCount} 题。` : ""}顶层仍返回 {title,layout,sections,printNotes}，sections 只包含本分区。请精简输出，避免重复规则和冗长说明；优先保证 JSON 完整，并让每题的答案、解析步骤、考点、易错点和分值字段齐全。${trigger?.issues?.length ? `必须修复：${trigger.issues.join("；")}。` : ""}`
+      content: `${message.content}\n\nReturn a valid json object for this partition. 本次只生成分区：${partition.title}。允许题型：${partition.itemTypes.join(", ")}。不要生成其他分区。${partition.targetItemCount ? `本分区必须恰好生成 ${partition.targetItemCount} 题。` : ""}顶层仍返回 {title,layout,sections,printNotes}，sections 只包含本分区。请精简输出，避免重复规则和冗长说明；优先保证 JSON 完整，并让每题的答案、解析步骤、考点、易错点和分值字段齐全。${trigger?.issues?.length ? `必须修复：${trigger.issues.join("；")}。` : ""}`
     });
     const result = await timedCall(() => callGpt56Chat(config, partitionMessages, {
       model,
@@ -929,7 +948,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
   const retryable = partitionResults.filter((entry) => {
     if (entry.result.status === "SUCCESS") return false;
     const classification = classifySolEscalationError(entry.result.errorDetails || { message: entry.result.error });
-    return !(solGateOpen && classification.allowed);
+    return classification.allowed || !solGateOpen;
   });
   if (retryable.length && hasBudget() && (remainingBudgetMs() == null || remainingBudgetMs() > reserveMs)) {
     const retries = await mapWithConcurrency(retryable, 2, (entry) => callPartition(entry.partition, entry.index, {

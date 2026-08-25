@@ -531,7 +531,7 @@ test("draftAssessment escalates only one failed Terra partition to Sol once", as
     const solPayloads = payloads.filter((payload) => payload.model === "gpt-5.6-sol");
     const solAttempts = result.modelRun.metadata.attempts.filter((attempt) => attempt.role === "sol-escalation");
 
-    assert.equal(terraPayloads.length, 4);
+    assert.equal(terraPayloads.length, 5);
     assert.equal(solPayloads.length, 1);
     assert.equal(partitionTitle(solPayloads[0]), "一、填空题");
     assert.equal(solPayloads[0].reasoning_effort, "high");
@@ -551,6 +551,45 @@ test("draftAssessment escalates only one failed Terra partition to Sol once", as
     assert.equal(solAttempts[0].timeoutMs, 180000);
     assert.equal(solAttempts[0].triggerClass, "availability");
     assert.equal(solAttempts[0].triggerCode, "upstream_timeout");
+  } finally {
+    await close(server);
+  }
+});
+
+test("draftAssessment retries a transient partition failure before Sol escalation", async () => {
+  const payloads = [];
+  const attemptsByPartition = new Map();
+  const server = http.createServer(async (req, res) => {
+    const payload = await readJsonRequest(req);
+    payloads.push(payload);
+    const title = partitionTitle(payload);
+    const count = (attemptsByPartition.get(title) || 0) + 1;
+    attemptsByPartition.set(title, count);
+    if (payload.model === "gpt-5.6-terra" && title === "一、填空题" && count === 1) {
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "temporary upstream unavailable" } }));
+      return;
+    }
+    sendChatContent(res, validPartitionContent(payload));
+  });
+  const address = await listen(server);
+
+  try {
+    const result = await draftAssessment(
+      enabledSolConfig(`http://127.0.0.1:${address.port}`),
+      compactAssessmentInput()
+    );
+    const solPayloads = payloads.filter((payload) => payload.model === "gpt-5.6-sol");
+    const retryAttempt = result.modelRun.metadata.attempts.find(
+      (attempt) => attempt.role === "partition-retry" && attempt.partitionId === "fill"
+    );
+
+    assert.equal(attemptsByPartition.get("一、填空题"), 2);
+    assert.equal(solPayloads.length, 0);
+    assert.ok(retryAttempt);
+    assert.equal(retryAttempt.status, "SUCCESS");
+    assert.equal(result.available, true);
+    assert.equal(result.modelRun.metadata.partialGeneration, false);
   } finally {
     await close(server);
   }
@@ -655,7 +694,7 @@ test("draftAssessment gives all failed Terra partitions one Sol attempt with con
     const terraPayloads = payloads.filter((payload) => payload.model === "gpt-5.6-terra");
     const solPayloads = payloads.filter((payload) => payload.model === "gpt-5.6-sol");
 
-    assert.equal(terraPayloads.length, 4);
+    assert.equal(terraPayloads.length, 8);
     assert.equal(solPayloads.length, 4);
     assert.equal(maxActiveSol <= 2, true);
     assert.equal(result.modelRun.metadata.attempts.filter((attempt) => attempt.role === "sol-escalation").length, 4);
