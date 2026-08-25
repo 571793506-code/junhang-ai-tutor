@@ -291,6 +291,31 @@ test("draftAssessment caps compact partition output at 8000 tokens per request",
   }
 });
 
+test("draftAssessment reserves extra compact tokens for reading partitions", async () => {
+  const requestPayloads = [];
+  const server = http.createServer(async (req, res) => {
+    const payload = await readJsonRequest(req);
+    requestPayloads.push(payload);
+    sendChatContent(res, validPartitionContent(payload));
+  });
+  const address = await listen(server);
+
+  try {
+    await draftAssessment(
+      { GPT56_API_KEY: "test-key", GPT56_BASE_URL: `http://127.0.0.1:${address.port}`, GPT56_MODEL: "gpt-5.6" },
+      { subject: "语文", kind: "小测", grade: "五年级", requirement: "阅读预算分配", assessmentMaxTokens: 16000 }
+    );
+    const readingPayload = requestPayloads.find((payload) => partitionTitle(payload) === "三、阅读理解");
+    const otherPayloads = requestPayloads.filter((payload) => partitionTitle(payload) !== "三、阅读理解");
+    assert.ok(readingPayload);
+    assert.ok(otherPayloads.length > 0);
+    assert.ok(readingPayload.max_tokens > Math.max(...otherPayloads.map((payload) => payload.max_tokens)));
+    assert.equal(requestPayloads.reduce((sum, payload) => sum + payload.max_tokens, 0), 16000);
+  } finally {
+    await close(server);
+  }
+});
+
 test("draftAssessment uses medium reasoning for quiz and practice and high for exams", async () => {
   const requestPayloads = [];
   const server = http.createServer((req, res) => {
@@ -389,6 +414,7 @@ test("draftAssessment asks reading partitions for compact complete passage outpu
     assert.match(prompt, /analysisSteps 最多 3 步/);
     assert.match(prompt, /至少 700 个汉字/);
     assert.match(prompt, /根据短文说明原因/);
+    assert.match(prompt, /前四题题干必须依次覆盖/);
   } finally {
     await close(server);
   }

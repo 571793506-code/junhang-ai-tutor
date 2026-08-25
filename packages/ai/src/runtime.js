@@ -862,9 +862,20 @@ export async function draftAssessment(config, input = {}, execution = {}) {
   const partitions = buildAssessmentPartitions({ subject, kind, requestedItemCount: input.requestedItemCount });
   const basePartitionTokens = Math.floor(assessmentMaxTokens / partitions.length);
   const extraPartitionTokens = assessmentMaxTokens % partitions.length;
+  const readingPartitionIndex = partitions.findIndex((partition) => partition.itemTypes.includes("reading"));
+  const readingExtraTokens = readingPartitionIndex >= 0 && kind !== "试卷"
+    ? Math.min(2000, Math.floor(assessmentMaxTokens / 4))
+    : 0;
+  const nonReadingCount = Math.max(1, partitions.length - (readingPartitionIndex >= 0 ? 1 : 0));
   const partitionTokenBudget = (index) => {
     const allocated = basePartitionTokens + (index < extraPartitionTokens ? 1 : 0);
-    return kind === "试卷" ? allocated : Math.min(allocated, 8000);
+    if (kind === "试卷" || readingPartitionIndex < 0 || readingExtraTokens === 0) return kind === "试卷" ? allocated : Math.min(allocated, 8000);
+    if (index === readingPartitionIndex) return Math.min(allocated + readingExtraTokens, 8000);
+    const nonReadingRank = partitions.slice(0, index).filter((partition) => !partition.itemTypes.includes("reading")).length;
+    const reductionBase = Math.floor(readingExtraTokens / nonReadingCount);
+    const reductionRemainder = readingExtraTokens % nonReadingCount;
+    const reduction = reductionBase + (nonReadingRank < reductionRemainder ? 1 : 0);
+    return Math.max(1, Math.min(allocated - reduction, 8000));
   };
   const primaryModel = execution.model || runtime.gpt56Model;
   const primaryReasoningEffort = primaryModel === runtime.gpt56SolModel
@@ -914,8 +925,8 @@ export async function draftAssessment(config, input = {}, execution = {}) {
       ? kind === "试卷" ? "至少 560 个英文单词" : kind === "练习" ? "至少 150 个英文单词" : "至少 120 个英文单词"
       : kind === "试卷" ? "至少 850 个汉字" : "至少 700 个汉字";
     const readingContextExamples = subject === "英语"
-      ? "至少设置主旨/标题、细节定位、原因或推断、词义猜测中的 4 类上下文题，题干明确出现 according to the passage、why、infer、main idea、best title 或 word meaning 等依据提示"
-      : "至少设置内容概括、信息筛选、原因分析、句意理解中的 4 类上下文题，题干明确出现根据短文说明原因、联系上下文推断、主要内容、信息筛选或句子含义等依据提示";
+      ? "前四题题干必须依次覆盖主旨/标题、细节定位、原因或推断、词义猜测，分别明确出现 main idea/best title、according to the passage、why/infer、word meaning 等依据提示"
+      : "前四题题干必须依次覆盖内容概括、信息筛选、原因分析、句意理解，分别明确出现主要内容、信息筛选、根据短文说明原因、联系上下文推断或句子含义等依据提示";
     const readingGroupRule = subject === "英语" && kind === "试卷"
       ? "正式英语试卷必须输出至少两篇完整阅读材料，每篇使用不同 passageGroupId，并为每篇配置对应上下文题。"
       : "";
