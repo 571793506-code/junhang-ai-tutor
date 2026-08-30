@@ -29,6 +29,11 @@ textarea {
   font: inherit;
 }
 
+:where(button, input, select, textarea, a):focus-visible {
+  outline: 2px solid var(--accent, #1e6fcb);
+  outline-offset: 2px;
+}
+
 button {
   cursor: pointer;
 }
@@ -2241,7 +2246,7 @@ button:disabled {
 
 .generation-workbench {
   display: grid;
-  grid-template-columns: minmax(230px, 0.64fr) minmax(460px, 1.42fr) minmax(300px, 0.92fr);
+  grid-template-columns: minmax(0, 0.64fr) minmax(0, 1.42fr) minmax(0, 0.92fr);
   gap: 14px;
   align-items: start;
   min-width: 0;
@@ -5988,6 +5993,12 @@ button:disabled {
 
   to {
     opacity: 1;
+  }
+}
+
+@media (max-width: 1300px) {
+  .generation-workbench {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

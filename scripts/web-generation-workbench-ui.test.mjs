@@ -4,6 +4,34 @@ import test from "node:test";
 
 const source = fs.readFileSync(new URL("../apps/web/src/main.tsx", import.meta.url), "utf8");
 const apiSource = fs.readFileSync(new URL("../apps/web/src/api.ts", import.meta.url), "utf8");
+const styles = fs.readFileSync(new URL("../apps/web/src/styles.css", import.meta.url), "utf8");
+
+test("web workbench keeps the generation rail inside the available desktop width", () => {
+  const gridStart = styles.indexOf(".generation-workbench {");
+  const gridEnd = styles.indexOf("}", gridStart);
+  const gridSource = styles.slice(gridStart, gridEnd);
+
+  assert.match(gridSource, /minmax\(0,/);
+  assert.match(styles, /@media \(max-width: 1300px\)[\s\S]{0,1800}\.generation-workbench/);
+});
+
+test("module navigation resets the main scroll position", () => {
+  assert.match(source, /window\.scrollTo\(\{\s*top:\s*0/);
+  assert.match(source, /function selectModule\(nextModule: string/);
+  assert.match(source, /onClick=\{\(\) => selectModule\(item\)\}/);
+});
+
+test("web workbench exposes focus-visible styles and semantic landmarks", () => {
+  assert.match(styles, /:focus-visible/);
+  assert.doesNotMatch(source, /<main className="generation-config-panel">/);
+  assert.doesNotMatch(source, /<main className="grading-stage-shell">/);
+  assert.match(source, /aria-label=\{`第\$\{marker\.questionNo\}题，\$\{statusText\(marker\.status\)\}`\}/);
+});
+
+test("stale generation history explains why a record cannot be opened", () => {
+  assert.match(source, /历史上下文不匹配/);
+  assert.match(source, /generationDraftContextMatches/);
+});
 
 test("generation workbench keeps selectable options for preview-matched fields", () => {
   assert.match(source, /const practiceTrainingTargetOptions = \[/);

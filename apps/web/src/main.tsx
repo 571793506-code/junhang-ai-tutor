@@ -509,6 +509,11 @@ function App() {
     setSync({ busy: false, ok: null, message: "已切换使用端，登录后同步对应端数据" });
   }
 
+  function selectModule(nextModule: string, nextRole: Role = role) {
+    setActiveModule((value) => ({ ...value, [nextRole]: nextModule }));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   async function applyBootstrap() {
     const data = await getBootstrapData();
     setTeachers(data.teachers);
@@ -1203,7 +1208,7 @@ function App() {
           <button className={role === "classroom" ? "active" : ""} onClick={() => switchRole("classroom")}>课堂平板</button>
         </div>
         <nav className="nav-list">
-          {currentNav.map((item) => <button className={`nav-item ${currentModule === item ? "active" : ""}`} key={item} onClick={() => setActiveModule((value) => ({ ...value, [role]: item }))}><Home size={17} /><span>{item}</span></button>)}
+          {currentNav.map((item) => <button className={`nav-item ${currentModule === item ? "active" : ""}`} key={item} onClick={() => selectModule(item)}><Home size={17} /><span>{item}</span></button>)}
         </nav>
       </aside>
       <main className="main">
@@ -1214,7 +1219,7 @@ function App() {
             setLatestAssessmentDraft(draft);
             setPrintAssets([]);
           }
-        }} onAssessmentRegenerate={regenerateAssessmentDraft} onAssessmentReject={rejectAssessmentDraft} onConfirmTextbookGenerationScope={confirmTextbookGenerationScopeForTeacher} onContentIndexRebuild={rebuildTeachingContentIndex} onContentUpload={uploadTeachingContent} onExportPrint={exportLatestPrint} onKnowledgeRefresh={refreshKnowledgeLibrary} onKnowledgeReview={reviewKnowledgeLibrarySource} onKnowledgeSourceCreate={addKnowledgeSource} onKnowledgeSync={syncKnowledgeLibrary} onMarkReviewed={markReviewed} onOpenModule={(module) => setActiveModule((value) => ({ ...value, teacher: module }))} onOpenTextbook={openTextbookAsset} onProfileDraft={createStudentProfileDraft} onProfilePrint={generateStudentProfilePrintFile} onProfilePublish={publishStudentProfileDraft} onQuestionReview={reviewQuestion} onRecognize={recognizeSubmission} onRefreshOps={refreshReviewQueue} onRefreshTextbooks={refreshTextbookLibrary} onRepairTextbookChapterDrafts={repairTextbookChapterDraftsForTeacher} onRescanTextbooks={rescanTextbookLibrary} onResetCode={resetStudentCode} onSaveTextbookChapters={saveTextbookChapters} onSelectTextbookContext={setSelectedTextbookContext} onStudentAccess={updateStudentAccess} onStudentCreate={async (input) => {
+        }} onAssessmentRegenerate={regenerateAssessmentDraft} onAssessmentReject={rejectAssessmentDraft} onConfirmTextbookGenerationScope={confirmTextbookGenerationScopeForTeacher} onContentIndexRebuild={rebuildTeachingContentIndex} onContentUpload={uploadTeachingContent} onExportPrint={exportLatestPrint} onKnowledgeRefresh={refreshKnowledgeLibrary} onKnowledgeReview={reviewKnowledgeLibrarySource} onKnowledgeSourceCreate={addKnowledgeSource} onKnowledgeSync={syncKnowledgeLibrary} onMarkReviewed={markReviewed} onOpenModule={(module) => selectModule(module, "teacher")} onOpenTextbook={openTextbookAsset} onProfileDraft={createStudentProfileDraft} onProfilePrint={generateStudentProfilePrintFile} onProfilePublish={publishStudentProfileDraft} onQuestionReview={reviewQuestion} onRecognize={recognizeSubmission} onRefreshOps={refreshReviewQueue} onRefreshTextbooks={refreshTextbookLibrary} onRepairTextbookChapterDrafts={repairTextbookChapterDraftsForTeacher} onRescanTextbooks={rescanTextbookLibrary} onResetCode={resetStudentCode} onSaveTextbookChapters={saveTextbookChapters} onSelectTextbookContext={setSelectedTextbookContext} onStudentAccess={updateStudentAccess} onStudentCreate={async (input) => {
           const name = input.displayName.trim();
           if (!name || !input.guardianPhone.trim()) {
             setSync({ busy: false, ok: false, message: "请至少填写学生姓名和家长电话" });
@@ -1872,7 +1877,7 @@ function TeacherWorkspace({
           </button>)}
         </aside>
 
-        <main className="generation-config-panel">
+        <section className="generation-config-panel">
           <div className="generation-config-head">
             <div>
               <h3>{activeGenerationMode.panelTitle}</h3>
@@ -1930,7 +1935,7 @@ function TeacherWorkspace({
           <p className="context-note"><ShieldCheck size={15} />排版规则已按当前题型自动优化：学生卷不出现答案，解析卷包含答案、步骤和易错提醒。</p>
           {generationMode === "quiz" ? <div className="generation-source-card"><strong>教材资料状态<StatusPill label={hasApprovedTextbookSource ? "可生成" : generationTextbookContext ? "待确认" : "待选择"} status={hasApprovedTextbookSource ? "ready" : "pending"} /></strong><span>{generationTextbookContext ? hasApprovedTextbookSource ? `已找到 ${matchingApprovedTextbookSources.length} 份已确认且允许生成的范围来源。` : "请由教师确认当前教材章节范围；这只恢复小测的范围依据，不转写教材正文。" : `当前年级和科目下有 ${generationTextbookAssets.length} 本可选教材。`}</span>{!hasApprovedTextbookSource ? <div className="button-row"><button className="secondary-button" disabled={isAssessmentRecoveryBusy} onClick={() => void recoverAssessmentEvidence()} type="button"><RefreshCw size={16} />{isAssessmentRecoveryBusy ? "正在修复教材依据" : "修复教材依据"}</button>{generationTextbookContext?.chapter ? <button className="primary-button" onClick={() => void onConfirmTextbookGenerationScope(generationTextbookContext.asset.id, [generationTextbookContext.chapter?.id || ""])} type="button"><ShieldCheck size={16} />确认当前教材章节范围并恢复小测</button> : null}<button className="primary-button" onClick={submitTeacherRequirementEmergencyDraft} type="button"><ShieldCheck size={16} />按教师要求生成临时草稿</button><button className="secondary-button" onClick={() => onOpenModule("教材资料")} type="button"><BookOpen size={16} />前往教材资料审核</button></div> : null}</div> : null}
           {assessmentGenerationBlockReason ? <p className="context-note blocked"><ShieldCheck size={15} />{assessmentGenerationBlockReason}</p> : null}
-        </main>
+        </section>
 
         <aside className="generation-review-rail">
           <div className="generation-panel-head"><strong>依据与复核流程</strong><span>右侧固定展示生成依据、草稿状态和导出闸门。</span></div>
@@ -1976,7 +1981,14 @@ function TeacherWorkspace({
           {recentGenerationAssignments.length ? recentGenerationAssignments.map((assignment) => {
             const reviewLabel = assignment.draftReviewStatus === "accepted" ? "已确认" : assignment.draftReviewStatus === "rejected" ? "已否决" : assignment.draftReviewStatus === "pending_teacher_review" ? "待审查" : "未导出草稿";
             const status = assignment.draftReviewStatus === "accepted" ? "ready" : assignment.draftReviewStatus === "rejected" ? "blocked" : "pending";
-            return <button aria-pressed={latestAssessmentDraft?.assignmentId === assignment.id} className={`generation-record-card ${latestAssessmentDraft?.assignmentId === assignment.id ? "active" : ""}`} disabled={!assignment.draftReviewAsset} key={assignment.id} onClick={() => onAssessmentDraftSelect(assignment)} type="button"><strong>{assignment.kind}<StatusPill label={reviewLabel} status={status} /></strong><b>{assignment.title}</b><span>{assignment.subject} · {assignment.audit?.itemCount ? `${assignment.audit.itemCount}题` : assignment.status}{assignment.draftRequest?.generationBasis === "teacher_requirement_emergency" ? " · 教师要求临时草稿" : ""}</span></button>;
+            const historyContextMatches = assessmentDraftMatchesGenerationContext(assessmentDraftRefFromAssignment(assignment), {
+              targetScope: generationTargetScope,
+              studentId: generationTargetScope === "student" ? generationSelectedStudent?.id : undefined,
+              targetGrade: generationTargetGrade,
+              subject: assessmentSubject,
+              kind: assessmentKind
+            });
+            return <button aria-pressed={latestAssessmentDraft?.assignmentId === assignment.id} className={`generation-record-card ${latestAssessmentDraft?.assignmentId === assignment.id ? "active" : ""}`} disabled={!assignment.draftReviewAsset || !historyContextMatches} key={assignment.id} onClick={() => onAssessmentDraftSelect(assignment)} type="button"><strong>{assignment.kind}<StatusPill label={reviewLabel} status={status} /></strong><b>{assignment.title}</b><span>{assignment.subject} · {assignment.audit?.itemCount ? `${assignment.audit.itemCount}题` : assignment.status}{assignment.draftRequest?.generationBasis === "teacher_requirement_emergency" ? " · 教师要求临时草稿" : ""}</span>{!historyContextMatches ? <small className="context-note blocked">历史上下文不匹配，请切回对应学生、年级、科目和生成类型后复核</small> : null}</button>;
           }) : recentAssessmentJobs.length ? null : <p className="review-empty">暂无生成进度记录。</p>}
         </div>
         {visiblePrintAssets.length ? <div className="print-asset-list">{visiblePrintAssets.map((asset) => <a key={asset.id} href={asset.url} target="_blank" rel="noreferrer"><FileText size={16} />{asset.title}</a>)}</div> : null}
@@ -2793,7 +2805,7 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onMarkReviewed, onQueryG
           </div>) : <p className="review-empty">暂无批改批次。上传照片后会显示在这里。</p>}
         </div>
       </aside>
-      <main className="grading-stage-shell">
+      <section className="grading-stage-shell">
         <div className="grading-stage-head">
           <div>
             <h3>图片复核区</h3>
@@ -2809,7 +2821,7 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onMarkReviewed, onQueryG
         <div className="grading-image-stage empty-stage">
           <div className="annotation-empty">暂无图片预览。请先上传作业照片或刷新工作台。</div>
         </div>
-      </main>
+      </section>
       <aside className="grading-inspector">
         <div className="grading-question-strip"><p className="review-empty">暂无逐题结果</p></div>
         <div className="question-detail-panel workbench-detail">
@@ -2940,7 +2952,7 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onMarkReviewed, onQueryG
       </div>
       {pageData?.pagination ? <div className="grading-pagination"><button className="secondary-button" disabled={pageData.pagination.page <= 1} onClick={() => void runGradingQuery(pageData.pagination.page - 1)} type="button"><ArrowLeft size={15} />上一页</button><span>第 {pageData.pagination.page}/{pageData.pagination.totalPages} 页 · 共 {pageData.pagination.total} 份</span><button className="secondary-button" disabled={!pageData.pagination.hasMore} onClick={() => void runGradingQuery(pageData.pagination.page + 1)} type="button">下一页</button></div> : null}
     </aside>
-    <main className="grading-stage-shell">
+    <section className="grading-stage-shell">
       <div className="grading-stage-head">
         <div>
           <h3>{active?.title}</h3>
@@ -2959,12 +2971,12 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onMarkReviewed, onQueryG
       {page ? <p className={`context-note ${page.qualityStatus === "ready" ? "" : "blocked"}`}><ShieldCheck size={15} />{pageQualityText}{page.qualityScore != null ? ` · 质量分 ${Math.round(page.qualityScore * 100)}%` : ""}{pageQualityIssues.length ? ` · ${pageQualityIssues.slice(0, 2).join("；")}` : ""}</p> : null}
       <div className="grading-image-stage">
         {page?.imageUrl ? <img src={page.imageUrl} alt={`${active?.studentName || ""} 上传页面 ${page.pageNumber}`} /> : <div className="annotation-empty">暂无图片预览</div>}
-        {markers.map((marker, index) => <button className={`annotation-marker ${marker.status}`} key={`${marker.id}-${index}`} style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }} title={`第${marker.questionNo}题 ${statusText(marker.status)}`} onClick={() => {
+        {markers.map((marker, index) => <button aria-label={`第${marker.questionNo}题，${statusText(marker.status)}`} className={`annotation-marker ${marker.status}`} key={`${marker.id}-${index}`} style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }} title={`第${marker.questionNo}题 ${statusText(marker.status)}`} onClick={() => {
           const target = active?.questions.find((item) => item.questionNo === marker.questionNo);
           if (target) setActiveQuestionId(target.id);
         }}>{marker.label}</button>)}
       </div>
-    </main>
+    </section>
     <aside className="grading-inspector">
       <div className="grading-question-strip">
         {activeQuestions.map((item, index) => <button className={`${item.id === question?.id ? "active" : ""} ${item.status} ${reviewedQuestionReady(item) ? "reviewed" : "unreviewed"}`} key={`${item.id}-${index}`} onClick={() => {
@@ -3411,7 +3423,7 @@ function ReviewSubmissionCard({ item, onMarkReviewed, onRecognize }: { item: Rev
     <div className="annotation-review-layout">
       <div className="annotation-image-stage">
         {activeImage?.url ? <img src={activeImage.url} alt={`${item.studentName} 上传作业第${activePage}张`} /> : <div className="annotation-empty">暂无图片预览</div>}
-        {pageMarkers.map((marker) => <button className={`annotation-marker ${marker.status}`} key={marker.id} style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }} title={`第${marker.questionNo}题 ${statusText(marker.status)}`} onClick={() => selectQuestionFromMarker(marker.questionNo)}>{marker.label}</button>)}
+        {pageMarkers.map((marker) => <button aria-label={`第${marker.questionNo}题，${statusText(marker.status)}`} className={`annotation-marker ${marker.status}`} key={marker.id} style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }} title={`第${marker.questionNo}题 ${statusText(marker.status)}`} onClick={() => selectQuestionFromMarker(marker.questionNo)}>{marker.label}</button>)}
       </div>
       <div className="question-detail-panel">
         {selectedQuestion ? <>
