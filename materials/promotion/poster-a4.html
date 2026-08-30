@@ -3,194 +3,73 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>君航 AI 助教宣传海报</title>
+  <title>君航 AI 助教｜小学课后学习陪伴班</title>
   <style>
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      padding: 24px;
-      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
-      color: #172033;
-      background: #edf5f8;
-    }
-    .poster {
-      width: 210mm;
-      min-height: 297mm;
-      margin: 0 auto;
-      background: linear-gradient(180deg, #f8fcff 0%, #ffffff 42%, #f3faf8 100%);
-      border: 1px solid #d2e0ea;
-      padding: 18mm;
-      position: relative;
-      overflow: hidden;
-    }
-    .badge {
-      display: inline-block;
-      padding: 7px 12px;
-      border-radius: 999px;
-      background: #e7f5f7;
-      color: #176c7c;
-      font-size: 15px;
-      font-weight: 700;
-    }
-    h1 {
-      margin: 16px 0 10px;
-      font-size: 42px;
-      line-height: 1.15;
-      color: #0d3958;
-      letter-spacing: 0;
-    }
-    .subtitle {
-      font-size: 22px;
-      color: #2f596e;
-      line-height: 1.5;
-      margin-bottom: 22px;
-      font-weight: 700;
-    }
-    .lead {
-      padding: 14px 16px;
-      background: #ffffff;
-      border: 1px solid #d8e7ef;
-      border-radius: 8px;
-      font-size: 17px;
-      line-height: 1.7;
-      color: #44586b;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 14px;
-      margin-top: 20px;
-    }
-    .card {
-      min-height: 92px;
-      padding: 14px;
-      border-radius: 8px;
-      background: #ffffff;
-      border: 1px solid #d7e5ee;
-    }
-    .card-title {
-      display: block;
-      margin-bottom: 8px;
-      font-size: 18px;
-      font-weight: 700;
-      color: #0f3d5e;
-    }
-    .card-text {
-      font-size: 14px;
-      line-height: 1.6;
-      color: #566a7d;
-    }
-    .section-title {
-      margin: 24px 0 12px;
-      font-size: 22px;
-      font-weight: 800;
-      color: #0f3d5e;
-    }
-    .items {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      font-size: 16px;
-      line-height: 1.55;
-    }
-    .item {
-      padding: 10px 12px;
-      border-radius: 8px;
-      background: #f5fafc;
-      border: 1px solid #dbe9f0;
-    }
-    .bottom {
-      display: grid;
-      grid-template-columns: 1fr 46mm;
-      gap: 16px;
-      align-items: center;
-      margin-top: 24px;
-      padding-top: 18px;
-      border-top: 1px solid #d6e3ec;
-    }
-    .qr {
-      width: 46mm;
-      height: 46mm;
-      border: 2px solid #dce8ef;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-      font-size: 14px;
-      color: #5e7888;
-      background: #ffffff;
-      overflow: hidden;
-    }
-    .qr img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      display: block;
-    }
-    .cta {
-      font-size: 23px;
-      line-height: 1.4;
-      font-weight: 800;
-      color: #0f3d5e;
-    }
-    .note {
-      margin-top: 8px;
-      font-size: 13px;
-      line-height: 1.6;
-      color: #627487;
-    }
-    @media print {
-      body { padding: 0; background: #fff; }
-      .poster { border: 0; margin: 0; }
-    }
+    @page { size: A4; margin: 0; }
+    body { margin: 0; background: #dfeff2; font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif; color: #174d5b; }
+    .poster { width: 210mm; height: 297mm; margin: 0 auto; padding: 7mm 9mm 5mm; position: relative; overflow: hidden; background: linear-gradient(180deg, #fff9df 0%, #f2f9f4 34%, #d9f1f5 100%); }
+    .poster:before { content: ""; position: absolute; width: 150mm; height: 150mm; left: -82mm; top: 10mm; border: 5mm solid rgba(139, 213, 226, .18); border-radius: 50%; box-shadow: 0 0 0 5mm rgba(255,255,255,.45), 0 0 0 10mm rgba(139, 213, 226, .12); }
+    .poster:after { content: ""; position: absolute; right: -12mm; bottom: -5mm; width: 70mm; height: 65mm; background: rgba(107, 207, 178, .22); clip-path: polygon(100% 0, 100% 100%, 0 100%); }
+    .content { position: relative; z-index: 1; }
+    .brand-row { display: flex; align-items: center; gap: 4mm; min-height: 10mm; }
+    .brand { font-size: 17px; font-weight: 900; color: #0d5968; letter-spacing: 0; }
+    .date-pill { padding: 2mm 4mm; border: 1px solid #9dd9e7; border-radius: 999px; background: rgba(255,255,255,.84); color: #0e7183; font-size: 12.5px; font-weight: 800; }
+    .grade { display: inline-block; margin-top: 4.5mm; padding: 2mm 4mm; border-radius: 999px; background: #ffd45c; color: #5f4c18; font-size: 14px; font-weight: 900; }
+    h1 { margin: 3.5mm 0 1.2mm; max-width: 155mm; font-size: 38px; line-height: 1.06; letter-spacing: 0; color: #075167; }
+    .subtitle { max-width: 178mm; margin: 0; font-size: 14px; line-height: 1.35; font-weight: 800; color: #426b73; }
+    .pill-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2mm; margin-top: 4mm; }
+    .pill { padding: 2.8mm 4mm; border: 1px solid #bce6ed; border-radius: 7mm; background: rgba(255,255,255,.86); color: #15586a; font-size: 15px; font-weight: 900; box-shadow: 0 2px 0 rgba(38,139,160,.04); }
+    .limit { margin-top: 4mm; padding: 3mm 4mm; border: 1px solid #91dce8; border-radius: 7mm; background: rgba(255,255,255,.7); }
+    .limit strong { font-size: 23px; color: #08617a; }
+    .limit b { margin-left: 2mm; font-size: 14px; color: #416d75; }
+    .limit p { margin: .8mm 0 0; font-size: 11px; line-height: 1.25; color: #4a7076; font-weight: 700; }
+    .section-title { display: flex; align-items: center; gap: 2mm; margin: 4mm 0 2mm; font-size: 22px; color: #075167; }
+    .section-title:before { content: ""; width: 2.5mm; height: 6mm; border-radius: 2mm; background: linear-gradient(180deg, #20b9ad, #63d48e); }
+    .steps { display: grid; gap: 2mm; }
+    .step { display: grid; grid-template-columns: 13mm 1fr; align-items: center; min-height: 16.5mm; padding: 2.2mm 3mm; border: 1px solid #c9e7eb; border-radius: 7mm; background: rgba(255,255,255,.88); }
+    .number { width: 10mm; height: 10mm; display: grid; place-items: center; border-radius: 3mm; color: white; background: linear-gradient(135deg, #1bb5bd, #43c78f); font-size: 18px; font-weight: 900; box-shadow: 0 3px 8px rgba(29, 159, 166, .22); }
+    .step strong { display: block; font-size: 15.5px; color: #0b5668; }
+    .step span { display: block; margin-top: .4mm; font-size: 11.5px; line-height: 1.22; color: #52727a; }
+    .feedback { margin-top: 3mm; padding: 3mm 4mm; border: 1px solid #f2d782; border-radius: 7mm; background: rgba(255, 249, 224, .92); }
+    .feedback strong { display: block; font-size: 17px; color: #6a531c; }
+    .feedback p { margin: .8mm 0 0; font-size: 11.5px; line-height: 1.25; color: #6c674b; font-weight: 700; }
+    .olympiad { display: flex; align-items: center; gap: 4mm; margin-top: 3mm; padding: 3mm 4mm; border: 1px solid #8fdcc1; border-radius: 7mm; background: rgba(236, 252, 239, .9); }
+    .olympiad strong { font-size: 16px; color: #08705f; white-space: nowrap; }
+    .olympiad span { font-size: 11.5px; line-height: 1.25; color: #52736c; font-weight: 700; }
+    .bottom { display: grid; grid-template-columns: 35mm 1fr; gap: 4mm; align-items: center; margin-top: 3mm; padding: 3mm; border: 1px solid #a9e2eb; border-radius: 7mm; background: rgba(255,255,255,.9); }
+    .qr { width: 30mm; height: 30mm; padding: 1mm; border: 1px solid #c7eaf0; border-radius: 4mm; background: #fff; }
+    .qr img { width: 100%; height: 100%; object-fit: contain; }
+    .contact strong { display: block; font-size: 19px; color: #075167; }
+    .contact .phone { margin-top: .5mm; font-size: 19px; font-weight: 900; color: #075167; }
+    .contact p { margin: .5mm 0 0; font-size: 10.5px; line-height: 1.25; color: #53747b; font-weight: 700; }
+    .offer { margin-top: .8mm; font-size: 13px; font-weight: 900; color: #b66321; }
+    @media print { body { background: #fff; } .poster { margin: 0; } }
   </style>
 </head>
 <body>
   <main class="poster">
-    <span class="badge">期末后开放预约体验</span>
-    <h1>君航 AI 助教<br />3 天学习诊断体验</h1>
-    <div class="subtitle">新四 / 新五 / 新六限额预约</div>
-    <div class="lead">
-      不是普通试听课。通过学生端、课堂平板和电视动态屏，完整体验“老师发布任务、学生提交、AI 辅助分析、老师复核、学习档案反馈”的闭环。
+    <div class="content">
+      <div class="brand-row"><div class="brand">君航 AI 课后辅导</div><div class="date-pill">新学期持续陪伴</div></div>
+      <div class="grade">小学阶段｜日常课后学习</div>
+      <h1>小学课后学习陪伴班</h1>
+      <p class="subtitle">不只是完成作业，更要找出孩子不会做的题，分析不会的原因，帮助孩子真正弄懂并学会，针对薄弱点进行练习。</p>
+      <section class="pill-grid">
+        <div class="pill">作业辅导与任务跟进</div><div class="pill">听写默写与背书检查</div>
+        <div class="pill">错题订正与薄弱点巩固</div><div class="pill">数学基础与思维提升</div>
+      </section>
+      <section class="limit"><strong>长期日常陪伴</strong><b>关注每个孩子的具体学习状态</b><p>围绕日常作业、错题、听写和练习，帮助孩子把不会的地方弄明白、练扎实。</p></section>
+      <h2 class="section-title">我们具体怎样帮助孩子</h2>
+      <section class="steps">
+        <div class="step"><div class="number">1</div><div><strong>找出真正不会的题</strong><span>从作业、错题和日常练习中，发现孩子反复出错的地方。</span></div></div>
+        <div class="step"><div class="number">2</div><div><strong>分析不会的原因</strong><span>区分看错、算错、知识点不牢、审题不清和方法不会运用。</span></div></div>
+        <div class="step"><div class="number">3</div><div><strong>针对薄弱点进行练习</strong><span>围绕具体问题安排讲解、小测、练习和订正，帮助孩子真正学会。</span></div></div>
+        <div class="step"><div class="number">4</div><div><strong>日常订正与反馈</strong><span>及时完成订正，关注同类题是否真正掌握，持续调整练习方向。</span></div></div>
+      </section>
+      <section class="feedback"><strong>家长持续看见孩子的变化</strong><p>从计算中反复看错数字、算错步骤，到多次日常训练保持正确，并进一步理解和运用乘法分配律。</p></section>
+      <section class="olympiad"><strong>可开展周末奥数思维培训</strong><span>根据学生基础单独开展，训练分析、推理和综合解决问题的能力。</span></section>
+      <section class="bottom"><div class="qr"><img src="assets/wechat-qr-cropped.jpeg" alt="微信二维码" /></div><div class="contact"><strong>扫码了解课后学习陪伴</strong><div class="phone">19082308229</div><p>地址：沙滩街310号（原敬老院，现交警队对面）</p><div class="offer">前五名报名了解，可享长期优惠</div></div></section>
     </div>
-
-    <section class="grid">
-      <div class="card">
-        <span class="card-title">学生端</span>
-        <span class="card-text">今日任务、AI 问答、英语词汇、拍照提交、学生档案。</span>
-      </div>
-      <div class="card">
-        <span class="card-title">课堂端</span>
-        <span class="card-text">平板互动、头像确认、听写播报、课文跟读。</span>
-      </div>
-      <div class="card">
-        <span class="card-title">大屏端</span>
-        <span class="card-text">匿名展示学习流程，不公开排名、分数和个人错题。</span>
-      </div>
-      <div class="card">
-        <span class="card-title">教师把关</span>
-        <span class="card-text">AI 初步分析，老师复核后再进入学生档案。</span>
-      </div>
-    </section>
-
-    <div class="section-title">体验内容</div>
-    <section class="items">
-      <div class="item">建立学生学习档案</div>
-      <div class="item">作业/小测/听写拍照提交</div>
-      <div class="item">AI 问答做思路引导</div>
-      <div class="item">英语词汇和基础检查</div>
-      <div class="item">统一小测与个性化反馈</div>
-      <div class="item">生成 3 天学习诊断建议</div>
-    </section>
-
-    <section class="bottom">
-      <div>
-        <div class="cta">扫码领取报名表与小程序演示视频</div>
-        <div class="note">期末前只做预约和说明，不打乱复习节奏。本体验用于学习诊断、错题分析和暑期班适配，不承诺短期提分或排名变化。</div>
-      </div>
-      <div class="qr"><img src="assets/wechat-qr-cropped.jpeg" alt="微信二维码" /></div>
-    </section>
   </main>
 </body>
 </html>
