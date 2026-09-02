@@ -42,3 +42,32 @@ test("shared chapter repair keeps teacher-indexed chapters and only appends miss
   assert.equal(repaired.filter((chapter) => chapter.unit === "第一单元").length, 1);
   assert.equal(repaired[1].unit, "第二单元");
 });
+
+test("shared chapter drafts cover the teacher-confirmed 2022 grade seven math catalogs", async () => {
+  const { chapterDraftsForTextbookAsset } = await import(moduleUrl);
+  const firstTerm = chapterDraftsForTextbookAsset({ id: "math-7a", subject: "数学", grade: "七年级", volume: "上册" });
+  const secondTerm = chapterDraftsForTextbookAsset({ id: "math-7b", subject: "数学", grade: "七年级", volume: "下册" });
+
+  assert.equal(firstTerm.length, 6);
+  assert.equal(secondTerm.length, 6);
+  assert.deepEqual(firstTerm.map((chapter) => chapter.title), [
+    "有理数",
+    "有理数的运算",
+    "代数式",
+    "整式的加减",
+    "一元一次方程",
+    "几何图形初步"
+  ]);
+  assert.deepEqual(secondTerm.map((chapter) => chapter.title), [
+    "相交线与平行线",
+    "实数",
+    "平面直角坐标系",
+    "二元一次方程组",
+    "不等式与不等式组",
+    "数据的收集、整理与描述"
+  ]);
+  assert.match(firstTerm[0].readingSupport, /1\.1 正数和负数/);
+  assert.match(secondTerm[3].readingSupport, /10\.2 消元/);
+  assert.ok(firstTerm.every((chapter) => chapter.focusItems.length > 0));
+  assert.ok(secondTerm.every((chapter) => chapter.focusItems.length > 0));
+});

@@ -1,4 +1,5 @@
 import { buildAssessmentPartitions, mapWithConcurrency } from "./assessment-partitions.js";
+import { normalizeGradeLevel } from "@junhang/core";
 import {
   classifySolEscalationError,
   describeModelError,
@@ -468,8 +469,36 @@ const projectPromptPrinciples = [
   "内容不完整时也要标出 needsTeacherReview 或等待教师复核，不能把不确定内容包装成确定结论。"
 ].join("\n");
 
-function withProjectPromptPrinciples(content) {
-  return `${projectPromptPrinciples}\n\n${content}`;
+function withProjectPromptPrinciples(content, stage = "primary") {
+  const principles = stage === "middle"
+    ? projectPromptPrinciples.replace("小学三到六年级课后辅导场景", "初中七年级数学课后辅导场景")
+    : projectPromptPrinciples;
+  return `${principles}\n\n${content}`;
+}
+
+const primaryMathPromptRule = "数学固定结构：填空题、选择题、计算题、解答题。计算题和解答题保留适度过程书写区，需要图形时必须提供 figure。";
+const middleMathPromptRule = "初中七年级数学按人教版2022年课程标准修订内容组织：有理数、有理数的运算、代数式、整式的加减、一元一次方程、几何图形初步、相交线与平行线、实数、平面直角坐标系、二元一次方程组、不等式与不等式组、数据的收集、整理与描述。题目必须围绕教师选定章节，不跨章拼接无关知识点；计算题和解答题必须给出逐步推理、符号/单位检查和适度过程书写区；几何题必须提供 figure 或证明条件，不得只写‘如图’。";
+
+export function buildAssessmentPromptProfile(input = {}) {
+  const grade = normalizeGradeLevel(input.grade || input.targetGrade);
+  const middle = input.subject === "数学" && grade?.stage === "middle" && grade.level === 7;
+  return {
+    stage: middle ? "middle" : grade?.stage || "primary",
+    role: middle ? "初中七年级数学教研出题助手" : "小学教研出题助手",
+    subjectRule: middle ? middleMathPromptRule : primaryMathPromptRule
+  };
+}
+
+export function buildGradingPromptProfile(input = {}) {
+  const grade = normalizeGradeLevel(input.grade || input.targetGrade);
+  const middle = input.subject === "数学" && grade?.stage === "middle" && grade.level === 7;
+  return {
+    stage: middle ? "middle" : grade?.stage || "primary",
+    role: middle ? "初中七年级数学作业批改助手" : "小学作业、练习、小测和试卷批改助手",
+    guardrails: middle
+      ? "初中数学必须区分印刷题干与学生作答，保留有理数符号、分式/根式、方程移项、几何证明和图像条件的步骤证据；OCR 无法确认负号、上下标、括号、图形或关键步骤时标记 needsTeacherReview=true，不只按最终答案判定。"
+      : "小学数学按题目和答案证据保守批改；无法确认时标记 needsTeacherReview=true。"
+  };
 }
 
 export function inferClassroomQaMode(question = "") {
@@ -763,7 +792,9 @@ export async function draftAssessment(config, input = {}, execution = {}) {
   const kind = String(input.kind || "练习");
   const requirement = String(input.requirement || input.specialRequirements || "");
   const gradeText = String(input.grade || input.targetGrade || "");
-  const gradeNumber = /三|3/.test(gradeText) ? 3 : /四|4/.test(gradeText) ? 4 : /五|5/.test(gradeText) ? 5 : 6;
+  const gradeNumber = normalizeGradeLevel(gradeText)?.level || 6;
+  const promptProfile = buildAssessmentPromptProfile({ subject, grade: gradeText });
+  const middleMath = promptProfile.stage === "middle" && subject === "数学";
   const teacherRequirementEmergency = input.generationBasis === "teacher_requirement_emergency";
   const evidenceRule = teacherRequirementEmergency
     ? "本次是教师要求临时小测草稿，教材资料尚未恢复。只能依据教师明确提供的年级、科目、范围和要求出题；不得声称引用、复述或覆盖任何教材原文、版本、册次或章节内容。"
@@ -780,12 +811,16 @@ export async function draftAssessment(config, input = {}, execution = {}) {
       ? "参考单元随堂检测常见模式，但题目必须原创：中英互译检查核心词汇和短语，写单词检查拼写，造句检查本单元句型，造句题可以包含中译英句子补全或指定词表达，选择题只做少量易错辨析，阅读围绕单元活动、日期、人物或主题情境。需要学生写英文的填空、短语、造句和句子补全必须使用 answerFormat:'english-four-line'。不要把试卷中的文章选词填空、完形填空或写作搬进小测。"
       : "参考个性化巩固练习常见模式，但题目必须原创：词汇巩固、句型表达、易错选择和短阅读要围绕薄弱点形成梯度；题量服务于补弱和复练，不套用完整试卷结构，不默认加入文章选词填空、完形填空或写作。";
   const subjectRules = {
-    数学: "数学固定结构：填空题、选择题、计算题、解答题。没有特殊要求不要生成附加题。试卷题量要能撑满四页A4：填空约12题、选择约8题、计算约8题、解答约5题；小测/练习两页A4：填空约8题、选择约6题、计算约4题、解答约4题。计算题和解答题只需要给适度 answerSpaceMm，后端会渲染干净白色过程区，不要要求横线。需要图形的题必须提供 figure，不允许只写“如图”。",
+    数学: middleMath
+      ? `${promptProfile.subjectRule} 没有特殊要求不要生成竞赛或中考拔高题。小测/练习默认两页 A4，填空约5题、选择约4题、计算约4题、解答约4题。`
+      : `${primaryMathPromptRule} 没有特殊要求不要生成附加题。试卷题量要能撑满四页A4：填空约12题、选择约8题、计算约8题、解答约5题；小测/练习两页A4：填空约8题、选择约6题、计算约4题、解答约4题。计算题和解答题只需要给适度 answerSpaceMm，后端会渲染干净白色过程区，不要要求横线。`,
     语文: `语文固定结构：基础知识、积累与应用、阅读理解；只有试卷才允许写作题，小测和练习绝对不要生成作文/习作题。${gradeNumber >= 5 ? "五六年级试卷可以加入文言文阅读或文言句意理解，但现代文阅读仍必须是主体。" : "三四年级不要主动加入文言文题。"} 试卷题量要能撑满四页A4：基础知识约12题、积累应用约8题、阅读理解约10-12题、写作1题；小测/练习两页A4：基础知识约8题、积累应用约6题、阅读理解约8题。语文现代文阅读材料必须像正式试卷材料，不允许短日记式片段；小测/练习现代文不少于550个汉字，试卷现代文不少于700个汉字，并设置内容概括、原因分析、句意理解、信息筛选、表达效果、拓展启示等上下文题。写作题只生成一个题目、提示和要求；如果写作题单独成页或空间充足，可提供 answerFormat:'chinese-square-grid' 和适度 answerSpaceMm，后端会渲染多列方格；如果空间不足则只显示题目要求。看拼音写词语不要写成“拼音+括号”，要提供 answerFormat:'tianzige' 和 pinyinWords:[{pinyin,cells}]；积累与应用只给短作答空间，阅读简答最多少量作答线，不要每道小题下方画分隔线。`,
     英语: `${englishAssessmentRule} 阅读题必须包含细节定位、原因推断、词义猜测、主旨标题或事件顺序等上下文题，不能只生成孤立选择题。阅读题请给 passageGroupId、passageTitle、passageText、passageQuestionIndex，且每组第一题 showPassage=true。`
   };
   const referencePatterns = {
-    数学: "参考公开小学试卷和智慧中小学组题的常见模式，但题目必须原创：概念填空覆盖单位换算、分数小数百分数、比和比例、几何概念；选择题做易错概念辨析；计算题分直接计算、简便计算、解方程、图形公式计算；解答题加入生活情境、图形操作或数据表格。图形操作题归入解答题，不另起附加题。",
+    数学: middleMath
+      ? "参考七年级数学常见题型但题目必须原创：上册覆盖有理数、有理数的运算、代数式、整式的加减、一元一次方程、几何图形初步；下册覆盖相交线与平行线、实数、平面直角坐标系、二元一次方程组、不等式与不等式组、数据的收集、整理与描述。选定章节时只围绕该章知识点生成，解答题必须给出条件、列式/推理和结论；几何题提供 figure 或完整文字条件。"
+      : "参考公开小学试卷和智慧中小学组题的常见模式，但题目必须原创：概念填空覆盖单位换算、分数小数百分数、比和比例、几何概念；选择题做易错概念辨析；计算题分直接计算、简便计算、解方程、图形公式计算；解答题加入生活情境、图形操作或数据表格。图形操作题归入解答题，不另起附加题。",
     语文: "参考公开小学语文试卷常见模式，但题目必须原创：基础知识包含看拼音写词语、易错字音字形、成语/词语、关联词、修辞；积累与应用包含句式转换、病句修改、标点、古诗文积累、口语交际或应用文信息提取；阅读理解必须使用完整现代文材料，不能用几句话凑阅读；高年级试卷可加一篇短文言文；小测和练习不出作文，试卷作文只列题目要求。",
     英语: englishReferencePattern
   };
@@ -793,7 +828,8 @@ export async function draftAssessment(config, input = {}, execution = {}) {
     {
       role: "system",
       content: withProjectPromptPrinciples(
-        `你是小学教研出题助手。Return a valid json object only; do not return markdown or prose outside json. 生成内容必须可以直接按 A4 试卷打印，不能只给一串未分类题目。本项目教材基准为贵州遵义：语文统编版 / 人教体系、数学人教版、英语人教版 PEP。输入含 generationContext.teaching.textbook 时，教材版本和册次必须以该服务端教材对象为准，不得混用其他版本或仅凭相似单元名猜测。${evidenceRule} 练习若收到 generationContext.studentSignals，必须把题目明确绑定到其中的未解决错题、薄弱点或近期批改信号，不能退化成与学生无关的通用试卷。可以参考公开小学试卷网站、教辅和智慧中小学组题模式的题型结构，但只能借鉴结构和考法，不能复制现成题目、阅读材料、答案或固定模板；每次生成都要围绕 requestId、年级、学科、难度和教师要求重新原创。返回严格 JSON：{title, layout, sections, printNotes}。sections 中每项必须包含 title, type, items。每道题必须包含 itemType(fill|choice|judgment|calculation|solution|operation|reading|writing|listening), prompt, answer, analysisSteps(string[]), commonMistake, knowledgePoint, score, answerSpaceMm；选择题还必须有 options(string[])。题目需要图形时必须提供 figure 对象，不允许只写“如图”却没有 figure。三角形可用 {type:'triangle',labels:['A','B','C'],angleLabels:{A:'50°'},equalAngles:['B','C']}；长方形可用 {type:'rectangle',widthLabel:'8cm',heightLabel:'5cm'}；圆可用 {type:'circle',radiusLabel:'5cm'}。看拼音写词语要用 answerFormat:'tianzige' 和 pinyinWords。阅读理解要给完整材料，不允许只有一个短句配一个答案。解析必须写出分步过程和关键依据，不能只有答案。不要在小题之间设计横线分隔；填空、选择、判断、写作题不要大块空白；计算和解答题只标注适度 answerSpaceMm，后端会渲染白色作答区。卷头的姓名、日期、得分只在首页出现；不要输出“用时”。小测和练习总分60分，试卷总分100分，有附加题时试卷总分110分。小测和练习默认两页 A4，试卷默认四页 A4。${subjectRules[subject] || ""} ${referencePatterns[subject] || ""}`
+        `你是${promptProfile.role}。Return a valid json object only; do not return markdown or prose outside json. 生成内容必须可以直接按 A4 试卷打印，不能只给一串未分类题目。本项目教材基准为贵州遵义：语文统编版 / 人教体系、数学人教版、英语人教版 PEP。输入含 generationContext.teaching.textbook 时，教材版本和册次必须以该服务端教材对象为准，不得混用其他版本或仅凭相似单元名猜测。${evidenceRule} 练习若收到 generationContext.studentSignals，必须把题目明确绑定到其中的未解决错题、薄弱点或近期批改信号，不能退化成与学生无关的通用试卷。可以参考公开试卷和教辅的题型结构，但只能借鉴结构和考法，不能复制现成题目、阅读材料、答案或固定模板；每次生成都要围绕 requestId、年级、学科、难度和教师要求重新原创。返回严格 JSON：{title, layout, sections, printNotes}。sections 中每项必须包含 title, type, items。每道题必须包含 itemType(fill|choice|judgment|calculation|solution|operation|reading|writing|listening), prompt, answer, analysisSteps(string[]), commonMistake, knowledgePoint, score, answerSpaceMm；选择题还必须有 options(string[])。题目需要图形时必须提供 figure 对象，不允许只写“如图”却没有 figure。解析必须写出分步过程和关键依据，不能只有答案。不要在小题之间设计横线分隔；填空、选择、判断、写作题不要大块空白；计算和解答题只标注适度 answerSpaceMm，后端会渲染干净白色过程区。卷头的姓名、日期、得分只在首页出现；不要输出“用时”。小测和练习总分60分，试卷总分100分，有附加题时试卷总分110分。${subjectRules[subject] || ""} ${referencePatterns[subject] || ""}`,
+        promptProfile.stage
       )
     },
     {
@@ -806,7 +842,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
           assessmentKind: kind,
           subjectRule: subjectRules[subject] || "",
           referencePattern: referencePatterns[subject] || "",
-          grades: ["三年级", "四年级", "五年级", "六年级"]
+          grades: middleMath ? ["七年级"] : ["三年级", "四年级", "五年级", "六年级"]
         },
         null,
         2
@@ -1359,16 +1395,18 @@ export async function gradeSubmissionText(config, input = {}, execution = {}) {
     });
   }
 
+  const gradingProfile = buildGradingPromptProfile(input);
   const messages = [
     {
       role: "system",
       content:
-        "你是小学作业批改助手。基于老师提供的 OCR 文本、题目或答案证据批改。必须优先使用 studentAnswerText、manualText、answerKey 和 assignmentItems；普通 ocrText 可能包含印刷题干，不能把印刷题干或示例答案当作学生作答。必须返回 JSON，字段为 score, summary, strengths, mistakes, nextPractice, needsTeacherReview。无法确认时标记 needsTeacherReview=true。"
+        `${gradingProfile.role}。基于老师提供的 OCR 文本、题目或答案证据批改。${gradingProfile.guardrails} 必须优先使用 studentAnswerText、manualText、answerKey 和 assignmentItems；普通 ocrText 可能包含印刷题干，不能把印刷题干或示例答案当作学生作答。必须返回 JSON，字段为 score, summary, strengths, mistakes, nextPractice, needsTeacherReview。无法确认时标记 needsTeacherReview=true。`
     },
     { role: "user", content: `请按 json 对象输出批改结果，不要输出 json 之外内容。\n\n${JSON.stringify(input, null, 2)}` }
   ];
   messages[0].content = withProjectPromptPrinciples(
-    "你是小学作业、练习、小测和试卷批改助手。必须按最高置信链路批改：1）优先使用 answerKey、assignmentItems 和 questionLayoutManifest；其中 questionLayoutManifest 是本系统生成 PDF 的逐题清单，包含题号、题干、答案、解析、分值和页内相对区域，必须作为生成卷批改的权威证据；2）没有老师答案键或生成卷清单时，优先使用 referenceAnswers 作为参考答案；3）referenceAnswers 也不足时，才根据 printedText/ocrText 自行推导正确答案和解题步骤；4）studentAnswerText、manualText 是学生作答的最高优先证据，普通 ocrText 可能混有印刷题干，不能把印刷题干、题目自带答案或示例内容当作学生作答。若输入包含 ocrQuestions，必须优先按 ocrQuestions 逐题批改：使用 printedPrompt 理解题目，使用 studentAnswer/observedWork 判断学生作答，使用 bbox 生成对应题目的相对图片坐标；不要把其他题或印刷题干串到本题作答里。若 questionLayoutManifest 和 ocrQuestions 同时存在，先按题号对齐，再用 ocrQuestions 判定学生作答。不得因为缺少标准答案而直接判定无法确认；只有题干、关键条件、图片内容或学生作答识别不清时，才允许 status=uncertain，并说明是图片/OCR证据不足。必须只返回 JSON，不要解释 JSON 之外的内容。字段必须包含：score, summary, strengths, mistakes, nextPractice, needsTeacherReview, referenceAnswerMode, questionResults。questionResults 是逐题结果数组，每项字段为 questionNo, status(correct|wrong|partial|uncertain), studentAnswer, correctAnswer, studentProcess(数组), errorStep, explanation, knowledgePoint, suggestedPractice, confidence(0-1), bbox。bbox 使用相对图片坐标，字段为 page, x, y, w, h，范围 0-1；正确题说明关键作答过程；错误题指出哪一步导致错误，并给出正确思路。不要输出供应商或模型名称。"
+    `${gradingProfile.role}。${gradingProfile.guardrails} 必须按最高置信链路批改：1）优先使用 answerKey、assignmentItems 和 questionLayoutManifest；其中 questionLayoutManifest 是本系统生成 PDF 的逐题清单，包含题号、题干、答案、解析、分值和页内相对区域，必须作为生成卷批改的权威证据；2）没有老师答案键或生成卷清单时，优先使用 referenceAnswers 作为参考答案；3）referenceAnswers 也不足时，才根据 printedText/ocrText 自行推导正确答案和解题步骤；4）studentAnswerText、manualText 是学生作答的最高优先证据，普通 ocrText 可能混有印刷题干，不能把印刷题干、题目自带答案或示例内容当作学生作答。若输入包含 ocrQuestions，必须优先按 ocrQuestions 逐题批改：使用 printedPrompt 理解题目，使用 studentAnswer/observedWork 判断学生作答，使用 bbox 生成对应题目的相对图片坐标；不要把其他题或印刷题干串到本题作答里。若 questionLayoutManifest 和 ocrQuestions 同时存在，先按题号对齐，再用 ocrQuestions 判定学生作答。不得因为缺少标准答案而直接判定无法确认；只有题干、关键条件、图片内容或学生作答识别不清时，才允许 status=uncertain，并说明是图片/OCR证据不足。必须只返回 JSON，不要解释 JSON 之外的内容。字段必须包含：score, summary, strengths, mistakes, nextPractice, needsTeacherReview, referenceAnswerMode, questionResults。questionResults 是逐题结果数组，每项字段为 questionNo, status(correct|wrong|partial|uncertain), studentAnswer, correctAnswer, studentProcess(数组), errorStep, explanation, knowledgePoint, suggestedPractice, confidence(0-1), bbox。bbox 使用相对图片坐标，字段为 page, x, y, w, h，范围 0-1；正确题说明关键作答过程；错误题指出哪一步导致错误，并给出正确思路。不要输出供应商或模型名称。`,
+    gradingProfile.stage
   );
 
   const timeoutMs = firstPositiveNumber(execution.timeoutMs, runtime.gpt56GradingTimeoutMs);

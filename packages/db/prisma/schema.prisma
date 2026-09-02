@@ -92,6 +92,7 @@ model Student {
   loginEnabled         Boolean                    @default(true)
   currentSessionJti    String?
   currentSessionAt     DateTime?
+  deletedAt            DateTime?
   responsibleTeacherId String?
   notes                String?
   createdAt            DateTime                   @default(now())

@@ -75,13 +75,13 @@ export function requireSession(config, allowedRoles = []) {
     }
     if (session.role === "student") {
       const students = await prisma.$queryRaw`
-        SELECT "currentSessionJti", "loginEnabled"
+        SELECT "currentSessionJti", "loginEnabled", "deletedAt"
         FROM "Student"
         WHERE "id" = ${session.studentId}
         LIMIT 1
       `;
       const student = students[0];
-      if (!student || !student.loginEnabled) {
+      if (!student || !student.loginEnabled || student.deletedAt) {
         return res.status(401).json({
           ok: false,
           error: "STUDENT_ACCESS_DISABLED",

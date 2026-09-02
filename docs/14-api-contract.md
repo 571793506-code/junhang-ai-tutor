@@ -39,7 +39,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 | 教师登录 | `POST /api/teacher-login` | 教师 Web/小程序共用登录校验 | 可返回教师工作台所需状态，不返回完整密钥或数据库配置 | `check --workspace apps/api` |
 | 课堂设备登录 | `POST /api/classroom/device-login` | 课堂平板绑定设备后拉取课堂状态 | 只显示课堂任务、解锁状态和必要学生互动信息 | `check --workspace apps/api`、`check:miniprogram-js` |
 | AI 问答 | `POST /api/ai/qa`、`POST /api/classroom/voice-qa` | 学生端、课堂平板复用同一服务端问答契约 | 最多一次 Terra 低推理调用，Terra 不可用时零调用且绝不调用 Sol；学习者响应不含学习信号或内部路由元数据 | `check --workspace apps/api`、`check:miniprogram-js` |
-| 今日任务 | `POST /api/teacher/tasks`、`GET /api/bootstrap` | 教师创建，学生/平板从启动数据或任务接口读取 | 未发布或教师未确认内容不进入学生/平板可见区 | `check --workspace apps/api` |
+| 今日任务 | `POST /api/teacher/tasks`、`GET /api/bootstrap` | 教师创建，学生/平板从启动数据或任务接口读取 | 学生可见任务统一返回 `summary`（紧凑目标）和 `description`（完整目标、步骤及家长查看说明）；未发布或教师未确认内容不进入学生/平板可见区 | `check --workspace apps/api`、`check:miniprogram-js` |
 | 组卷草稿 | `POST /api/assessments/draft` | 教师端提交要求、结构化题量和章节，服务层生成并修复草稿 | 草稿只供教师复核，不直接展示给学生/家长 | `check:content-context`、`check:teaching-content` |
 | 组卷任务队列 | `POST/GET /api/assessments/generation-jobs`、`POST /api/assessments/generation-jobs/:jobId/cancel` | Web、小程序和教师工作台复用同一任务状态、取消和草稿链接 | 队列最多并行运行 5 个独立任务；取消只清理未完成草稿，不影响其他任务 | `check:content-context`、`check --workspace apps/api` |
 | 教材修复与临时小测 | `POST /api/assessments/generation-recovery`、`POST /api/assessments/draft` | 各端先复用教材重扫和重新校验；教师可在证据仍不足时创建临时小测草稿 | 修复不自动批准资料；临时草稿只能由教师要求生成，且不声称教材依据 | `check:content-context`、`check:encoding` |
@@ -76,6 +76,15 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 - `POST /api/students/:studentId/disable-access`
   - 退课或停用时禁用学生登录码，不删除学生档案。
+
+- `PATCH /api/students/:studentId/profile`
+  - 教师端更新学生当前年级，当前允许三至七年级（可传中文年级、数字或“初一”等可解析形式）。
+  - 只更新学生资料中的 `grade`，不修改登录状态，也不改写历史任务、批改、错题或成长档案；返回 `historyRetained=true` 并写入教师审计记录。
+  - 必须通过教师学生范围校验；年级不在可服务范围时返回 `STUDENT_GRADE_INVALID`。
+
+- `DELETE /api/students/:studentId/access`
+  - 教师端移除学生权限，必须提交完全匹配的 `confirmationName`。
+  - 这是软删除：关闭登录、移除新任务/生成/批改资格并保留历史任务、批改、错题和成长档案；操作按教师学生范围校验并写入审计记录。
 
 - `GET /api/teachers/:teacherId/students`
   - 教师端查看自己绑定的学生。
@@ -241,6 +250,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 关键字段：`kind`, `grade`, `subject`, `difficulty`, `requirement`。
   - 小测和练习可传整数 `requestedItemCount`；服务层按学科蓝图缩放各题型并守住最终总题量，模型分区也接收同一题量目标。试卷仍按正式结构和页数规划，不使用该字段缩成小测结构。
   - 贵州遵义教材基准固定为：语文统编版 / 人教体系、数学人教版、英语人教版 PEP。教材小测或任何带教材标题、章节 ID、章节标题的请求必须提交真实 `textbookAssetId`；不能只传 `textbookChapterTitle` 让模型猜教材。
+  - 当前初中数学第一阶段支持七年级（初一）人教版的练习、小测和外部材料批改；八、九年级请求必须等待对应教材资产和规则接入，不得回退为小学六年级。
   - 服务端以 `TextbookAsset` 为权威，派生 `textbookEdition`, `textbookSeries`, `textbookVolume`, `textbookRegion` 并写入 `generationContext.teaching.textbook`。客户端同名字段不能覆盖服务端教材记录。
   - 未绑定任何教材字段的综合测评仍可作为通用生成请求；一旦声明教材或章节，若教材不符合遵义基准，返回 `422 ASSESSMENT_TEXTBOOK_BASELINE_MISMATCH`；若没有已复核且允许生成的同学科、年级且不与版本、系列和册次冲突的资料，返回 `422 ASSESSMENT_CONTENT_CONTEXT_REQUIRED`，且不调用模型。
   - 教材证据暂未恢复时，教师可显式传 `generationBasis=teacher_requirement_emergency` 创建临时草稿。它只允许 `kind=小测`，并且必须包含年级、科目和明确 `requirement`；请求不得携带任何 `textbook*` 字段，否则返回 `422 EMERGENCY_DRAFT_TEXTBOOK_FIELDS_NOT_ALLOWED`。

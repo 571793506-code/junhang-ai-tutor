@@ -12,7 +12,7 @@ import {
   solEscalationEnabled
 } from "@junhang/ai";
 import { randomUUID } from "node:crypto";
-import { matchesTeacherConfirmedTextbookChapterScope, matchesTextbookEvidenceScope } from "@junhang/core";
+import { matchesTeacherConfirmedTextbookChapterScope, matchesTextbookEvidenceScope, normalizeGradeLevel } from "@junhang/core";
 import {
   createAssignmentDraft,
   createLearningTask,
@@ -143,11 +143,10 @@ function canonicalContentSubject(value) {
 }
 
 function canonicalContentGrade(value) {
+  const normalized = normalizeGradeLevel(value);
+  if (normalized) return String(normalized.level);
   const text = normalizedSearchText(value);
-  const chineseGrade = text.match(/([一二三四五六])年级/);
-  if (chineseGrade) return String({ 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 }[chineseGrade[1]]);
-  const numericGrade = text.match(/([1-6])年级/);
-  return numericGrade ? numericGrade[1] : text;
+  return text;
 }
 
 function matchesContentDimension(requestedValue, sourceValues, normalizer) {
@@ -247,6 +246,7 @@ export function matchApprovedContentContext(input = {}, sources = []) {
       volume: source.volume || null,
       curriculumSeries: metadata.curriculumSeries || null,
       curriculumRegion: metadata.curriculumRegion || null,
+      curriculumStandard: metadata.curriculumStandard || null,
       markdownPath: source.markdownPath || null,
       summary: source.summary || null,
       knowledgePoints: contextValues(metadata.knowledgePoints),
@@ -297,10 +297,7 @@ export function validateAssessmentContentContext(input = {}, contentContext = {}
 }
 
 function gradeLevelNumber(input = {}) {
-  const text = String(input.grade || input.targetGrade || "");
-  const match = text.match(/[三四五六3456]/);
-  const map = { 三: 3, 四: 4, 五: 5, 六: 6 };
-  return match ? Number(map[match[0]] || match[0]) : 6;
+  return normalizeGradeLevel(input.grade || input.targetGrade)?.level || 6;
 }
 
 function wantsListening(input = {}) {
@@ -312,6 +309,272 @@ function wantsListening(input = {}) {
 function wantsEnglishWordBank(input = {}) {
   const text = `${input.requirement || ""} ${input.specialRequirements || ""} ${input.title || ""}`;
   return /方框词|词库|word bank/i.test(text);
+}
+
+const gradeSevenMathChapterProfiles = {
+  "有理数": {
+    themes: ["有理数", "正数和负数", "数轴", "绝对值"],
+    fill: [
+      ["数轴上表示 -3 的点到原点的距离是______。", "3", "绝对值"],
+      ["最大的负整数是______。", "-1", "有理数分类"],
+      ["如果收入 200 元记作 +200 元，那么支出 50 元记作______元。", "-50", "正数和负数"]
+    ],
+    choice: [
+      ["下列各数中，属于负数的是（ ）。", ["A. 0", "B. -2", "C. 1/3", "D. 2"], "B", "正数和负数"],
+      ["-|-5| 的结果是（ ）。", ["A. 5", "B. -5", "C. 0", "D. 10"], "B", "绝对值"],
+      ["数轴上点 A 表示 -2，点 B 表示 3，A、B 两点的距离是（ ）。", ["A. 1", "B. 3", "C. 5", "D. 6"], "C", "数轴"
+      ]
+    ],
+    calculation: [
+      ["计算：|-7|+(-3)。", "4", "绝对值与有理数", ["先求 |-7|=7。", "再算 7+(-3)=4。", "结果为 4。"]],
+      ["比较 -5、-2、0、3 的大小并从小到大排列。", "-5<-2<0<3", "有理数大小规律", ["负数都小于 0。", "负数中绝对值越大数越小。", "所以 -5<-2<0<3。"]]
+    ],
+    solution: [
+      ["小明向东走 6 m 记作 +6 m，再向西走 10 m。求他现在相对出发点的位置。", "-4 m", "有理数应用", ["向东为正，向西为负。", "列式：+6+(-10)=-4。", "他在出发点西侧 4 m。"]],
+      ["数轴上点 P 表示 -4，点 Q 表示 5，求 P、Q 两点的距离。", "9", "数轴", ["两点距离等于较大数减较小数。", "5-(-4)=9。", "两点距离为 9 个单位长度。"]]
+    ]
+  },
+  "有理数的运算": {
+    themes: ["有理数的运算", "加法与减法", "乘法与除法", "乘方"],
+    fill: [
+      ["(-2)^3 的结果是______。", "-8", "有理数乘方"],
+      ["计算：-6+9=______。", "3", "有理数加法"],
+      ["-1/2 的倒数是______。", "-2", "有理数除法"]
+    ],
+    choice: [
+      ["下列计算正确的是（ ）。", ["A. -2+3=-5", "B. (-2)^2=-4", "C. (-2)^2=4", "D. 6÷(-2)=3"], "C", "有理数运算"],
+      ["(-3)×(-4) 的结果是（ ）。", ["A. -12", "B. -7", "C. 7", "D. 12"], "D", "有理数乘法"],
+      ["下列各式中，结果为负数的是（ ）。", ["A. (-2)^2", "B. -(-3)", "C. (-1)×4", "D. 0-(-5)"], "C", "有理数符号"]
+    ],
+    calculation: [
+      ["计算：-7+12-5。", "0", "有理数加减混合运算", ["从左到右计算：-7+12=5。", "5-5=0。", "结果为 0。"]],
+      ["计算：(-3)×4÷(-2)。", "6", "有理数乘除混合运算", ["先算 (-3)×4=-12。", "再算 -12÷(-2)=6。", "结果为 6。"]],
+      ["计算：(-2)^3+5。", "-3", "有理数乘方", ["(-2)^3=-8。", "-8+5=-3。", "结果为 -3。"]]
+    ],
+    solution: [
+      ["某地一天最高气温 8℃，最低气温 -3℃，求这一天的温差。", "11℃", "有理数应用", ["温差用最高气温减最低气温。", "8-(-3)=11。", "这一天温差为 11℃。"]],
+      ["计算并说明：(-2)^4 与 -(2^4) 的结果有什么不同？", "16；-16", "乘方符号" , ["(-2)^4 的底数是 -2，结果为 16。", "-(2^4) 是先算 2^4 再取相反数，结果为 -16。", "括号会改变底数。"]]
+    ]
+  },
+  "代数式": {
+    themes: ["代数式", "字母表示数", "代数式的值", "数量关系"],
+    fill: [
+      ["单项式 3a^2b 的次数是______。", "3", "单项式"],
+      ["当 x=2 时，代数式 3x+1 的值是______。", "7", "代数式的值"],
+      ["比 x 的 2 倍少 5 的数可表示为______。", "2x-5", "字母表示数"]
+    ],
+    choice: [
+      ["下列式子中，属于代数式的是（ ）。", ["A. 3+5", "B. x+2", "C. 7=7", "D. 2<3"], "B", "代数式"],
+      ["当 a=-1 时，a^2+2a 的值是（ ）。", ["A. -1", "B. 0", "C. 1", "D. 3"], "B", "代数式求值"],
+      ["单项式 -5xy^2 的系数是（ ）。", ["A. 5", "B. -5", "C. xy^2", "D. 2"], "B", "单项式"]
+    ],
+    calculation: [
+      ["当 x=-2 时，求 2x^2-3x+1 的值。", "15", "代数式求值", ["先代入 x=-2。", "2×(-2)^2-3×(-2)+1=8+6+1。", "结果为 15。"]],
+      ["用代数式表示：m 的 3 倍与 n 的和的一半。", "(3m+n)/2", "列代数式", ["m 的 3 倍是 3m。", "与 n 的和是 3m+n。", "和的一半是 (3m+n)/2。"]]
+    ],
+    solution: [
+      ["一支铅笔 x 元，买 4 支再付 2 元包装费。写出总价，并求 x=3 时的总价。", "4x+2；14 元", "代数式应用", ["4 支铅笔价格为 4x 元。", "总价为 4x+2。", "x=3 时，4×3+2=14 元。"]],
+      ["正方形边长为 a cm，写出它的周长和面积，并求 a=5 时的结果。", "周长 4a；面积 a^2；20 cm；25 cm^2", "代数式与图形", ["正方形周长是 4a。", "面积是 a^2。", "a=5 时分别为 20 cm 和 25 cm^2。"]]
+    ]
+  },
+  "整式的加减": {
+    themes: ["整式的加减", "同类项", "合并同类项", "去括号"],
+    fill: [
+      ["单项式 4x 与 -3x 的和是______。", "x", "合并同类项"],
+      ["多项式 2x^2-3x+1 的常数项是______。", "1", "多项式"],
+      ["去括号：-(a-2)=______。", "-a+2", "去括号"]
+    ],
+    choice: [
+      ["下列各组中，属于同类项的是（ ）。", ["A. 3x 与 3y", "B. 2x^2y 与 -5x^2y", "C. x 与 x^2", "D. ab 与 a^2b"], "B", "同类项"],
+      ["化简 2a+3a 的结果是（ ）。", ["A. 5", "B. 5a", "C. 6a", "D. a^5"], "B", "合并同类项"],
+      ["下列去括号正确的是（ ）。", ["A. -(x+1)=-x+1", "B. -(x-1)=-x-1", "C. 2(x+1)=2x+2", "D. -2(x-1)=-2x-1"], "C", "去括号"]
+    ],
+    calculation: [
+      ["化简：3x+2-5x-7。", "-2x-5", "整式加减", ["合并同类项：3x-5x=-2x。", "合并常数项：2-7=-5。", "结果为 -2x-5。"]],
+      ["化简：2(3a-1)-4(a+2)。", "2a-10", "去括号与合并同类项", ["去括号得 6a-2-4a-8。", "合并同类项得 2a-10。", "结果为 2a-10。"]]
+    ],
+    solution: [
+      ["一个长方形长为 (x+2) cm，宽为 (x-1) cm，写出它的周长并化简。", "4x+2 cm", "整式与图形", ["周长为 2[(x+2)+(x-1)]。", "括号内合并为 2x+1。", "周长化简为 4x+2 cm。"]],
+      ["小明计算 2(3x-1)-4(x+2) 时漏掉了负号。请化简并指出易错点。", "2x-10", "整式运算纠错", ["先正确去括号：6x-2-4x-8。", "合并得 2x-10。", "括号前是负号或负系数时，括号内各项都要变号。"]]
+    ]
+  },
+  "一元一次方程": {
+    themes: ["一元一次方程", "等式性质", "解方程", "实际问题与方程"],
+    fill: [
+      ["若 2x+1=7，则 x=______。", "3", "解一元一次方程"],
+      ["方程 3x=12 的解是______。", "x=4", "等式性质"],
+      ["比一个数 x 少 5 的数是 12，则方程为______。", "x-5=12", "列方程"]
+    ],
+    choice: [
+      ["方程 2x-6=0 的解是（ ）。", ["A. x=2", "B. x=3", "C. x=4", "D. x=6"], "B", "解方程"],
+      ["下列变形正确的是（ ）。", ["A. 由 x+2=5 得 x=7", "B. 由 3x=6 得 x=2", "C. 由 x/2=3 得 x=1.5", "D. 由 x-4=1 得 x=-3"], "B", "等式性质"],
+      ["一元一次方程的一般形式是（ ）。", ["A. ax+b=0 且 a≠0", "B. ax^2+b=0", "C. x+y=1", "D. a+b=c"], "A", "方程概念"]
+    ],
+    calculation: [
+      ["解方程：3(x-2)=2x+5。", "x=11", "一元一次方程", ["去括号得 3x-6=2x+5。", "移项得 x=11。", "代入原方程可检验成立。"]],
+      ["解方程：5x-7=2x+8。", "x=5", "一元一次方程", ["移项得 5x-2x=8+7。", "合并得 3x=15。", "所以 x=5。"]]
+    ],
+    solution: [
+      ["某数的 3 倍比它大 12，求这个数。", "6", "实际问题与方程", ["设这个数为 x，列方程 3x=x+12。", "移项得 2x=12。", "解得 x=6。"]],
+      ["长方形周长为 26 cm，长比宽多 3 cm，求长和宽。", "长 8 cm，宽 5 cm", "方程应用", ["设宽为 x cm，则长为 x+3 cm。", "列方程 2[x+(x+3)]=26，解得 x=5。", "所以宽 5 cm，长 8 cm。"]]
+    ]
+  },
+  "几何图形初步": {
+    themes: ["几何图形初步", "点、线、面、角", "线段", "角"],
+    fill: [
+      ["直线 AB 上有 A、B、C 三点，若 AB=4 cm，BC=3 cm 且 B 在 A、C 之间，则 AC=______ cm。", "7", "线段和差"],
+      ["一个周角等于______°。", "360", "角的度量"],
+      ["两点之间，______最短。", "线段", "线段性质"]
+    ],
+    choice: [
+      ["下列图形中，能无限延伸的是（ ）。", ["A. 线段", "B. 射线", "C. 直线", "D. 角"], "C", "直线"],
+      ["一个平角等于（ ）。", ["A. 90°", "B. 180°", "C. 270°", "D. 360°"], "B", "角的度量"],
+      ["下列说法正确的是（ ）。", ["A. 线段有一个端点", "B. 射线有两个端点", "C. 直线没有端点", "D. 角没有顶点"], "C", "基本图形"]
+    ],
+    calculation: [
+      ["已知 ∠AOB=35°，求它的余角。", "55°", "角的和差", ["余角的和为 90°。", "90°-35°=55°。", "余角为 55°。"]],
+      ["已知 ∠AOB=120°，求它的补角。", "60°", "角的和差", ["补角的和为 180°。", "180°-120°=60°。", "补角为 60°。"]]
+    ],
+    solution: [
+      ["如图，直线 AB 与 CD 相交，∠AOC=52°，求 ∠BOD。", "52°", "对顶角", ["∠AOC 与 ∠BOD 是对顶角。", "对顶角相等。", "所以 ∠BOD=52°。"], { type: "intersecting-lines", angleLabels: { AOC: "52°" } }],
+      ["一条线段 AB=10 cm，点 C 在线段 AB 上且 AC:CB=2:3，求 AC、CB。", "AC=4 cm，CB=6 cm", "线段比例", ["总份数为 2+3=5。", "每份长 10÷5=2 cm。", "AC=4 cm，CB=6 cm。"]]
+    ]
+  },
+  "相交线与平行线": {
+    themes: ["相交线与平行线", "相交线", "平行线", "平移"],
+    fill: [
+      ["两条直线相交形成的对顶角______。", "相等", "对顶角"],
+      ["同位角相等，两直线______。", "平行", "平行线判定"],
+      ["平移只改变图形的位置，不改变图形的______和大小。", "形状", "平移"]
+    ],
+    choice: [
+      ["下列各组角中，一定相等的是（ ）。", ["A. 邻补角", "B. 对顶角", "C. 同旁内角", "D. 余角"], "B", "对顶角"],
+      ["两条平行线被第三条直线所截，同位角（ ）。", ["A. 互余", "B. 互补", "C. 相等", "D. 不一定"], "C", "平行线性质"],
+      ["平移后的图形与原图形相比（ ）。", ["A. 形状改变", "B. 大小改变", "C. 位置改变而形状大小不变", "D. 只有面积改变"], "C", "平移"]
+    ],
+    calculation: [
+      ["两条平行线被截线所截，一个同位角为 68°，求另一个同位角。", "68°", "同位角相等", ["平行线的同位角相等。", "所以另一同位角等于 68°。", "答案为 68°。"]],
+      ["一组邻补角中一个角为 115°，求另一个角。", "65°", "邻补角", ["邻补角的和为 180°。", "180°-115°=65°。", "另一个角为 65°。"]]
+    ],
+    solution: [
+      ["如图，AB∥CD，截线 EF 与它们相交，若 ∠1=72°，求与 ∠1 相等的同位角并说明理由。", "72°", "平行线性质", ["AB∥CD。", "两平行线被截线所截，同位角相等。", "所求同位角为 72°。"]],
+      ["把三角形 ABC 向右平移 4 cm，说明平移后对应边和对应角如何变化。", "对应边相等，对应角相等", "平移性质", ["平移保持图形形状和大小不变。", "对应边长度不变。", "对应角度数不变。"]]
+    ]
+  },
+  "实数": {
+    themes: ["实数", "平方根", "立方根", "无理数"],
+    fill: [
+      ["√49=______。", "7", "平方根"],
+      ["∛(-8)=______。", "-2", "立方根"],
+      ["π 是______数（有理/无理）。", "无理", "无理数"]
+    ],
+    choice: [
+      ["下列各数中，是无理数的是（ ）。", ["A. 0.5", "B. √2", "C. 3/4", "D. -2"], "B", "无理数"],
+      ["√81 的算术平方根是（ ）。", ["A. -9", "B. 9", "C. 81", "D. ±9"], "B", "算术平方根"],
+      ["下列等式正确的是（ ）。", ["A. (-3)^2=-9", "B. √(-9)=3", "C. ∛(-27)=-3", "D. √16=±4"], "C", "实数运算"]
+    ],
+    calculation: [
+      ["计算：√25+∛(-8)。", "3", "实数运算", ["√25=5，∛(-8)=-2。", "5+(-2)=3。", "结果为 3。"]],
+      ["求 √(x+1)=3 中 x 的值。", "x=8", "平方根方程", ["两边平方得 x+1=9。", "解得 x=8。", "代回检验 √9=3。"]]
+    ],
+    solution: [
+      ["一个正方形面积为 50 cm^2，边长用根式表示，并估计其范围。", "√50=5√2 cm，约 7.07 cm", "平方根应用", ["正方形边长是面积的算术平方根。", "√50=5√2。", "因为 7^2<50<8^2，所以边长在 7 cm 与 8 cm 之间。"]],
+      ["比较 √3 与 1.7 的大小，并说明方法。", "√3>1.7", "实数大小规律", ["1.7^2=2.89。", "3>2.89，且两数均为正。", "所以 √3>1.7。"]]
+    ]
+  },
+  "平面直角坐标系": {
+    themes: ["平面直角坐标系", "点的坐标", "象限", "坐标方法的简单应用"],
+    fill: [
+      ["点 A(-2,3) 的横坐标是______。", "-2", "点的坐标"],
+      ["点 B(4,-1) 在第______象限。", "四", "象限"],
+      ["坐标原点的坐标是______。", "(0,0)", "坐标系"]
+    ],
+    choice: [
+      ["点 (3,2) 位于第（ ）象限。", ["A. 一", "B. 二", "C. 三", "D. 四"], "A", "象限"],
+      ["点 (-4,0) 在（ ）。", ["A. x 轴正半轴", "B. x 轴负半轴", "C. y 轴正半轴", "D. 原点"], "B", "坐标轴"],
+      ["点 P(a,0) 一定在（ ）。", ["A. x 轴", "B. y 轴", "C. 第一象限", "D. 原点"], "A", "坐标轴"]
+    ],
+    calculation: [
+      ["已知 A(2,3)，B(2,-1)，求 AB 的长度。", "4", "坐标距离", ["两点横坐标相同。", "AB=|3-(-1)|=4。", "线段 AB 长 4 个单位。"]],
+      ["将点 P(-2,4) 向右平移 5 个单位，求新坐标。", "(3,4)", "坐标平移", ["向右平移横坐标加 5。", "-2+5=3，纵坐标不变。", "新坐标为 (3,4)。"]]
+    ],
+    solution: [
+      ["在平面直角坐标系中描出 A(1,2)、B(1,6)、C(5,6)、D(5,2)，说明四边形 ABCD 的形状。", "正方形", "坐标与图形", ["AB、BC、CD、DA 都长 4。", "相邻边互相垂直。", "因此 ABCD 是正方形。"]],
+      ["学校位于原点，图书馆在 (3,4)，求图书馆到学校的水平和竖直距离。", "水平 3，竖直 4", "坐标方法应用", ["水平距离看横坐标绝对值。", "竖直距离看纵坐标绝对值。", "所以分别为 3 和 4 个单位。"]]
+    ]
+  },
+  "二元一次方程组": {
+    themes: ["二元一次方程组", "消元", "代入", "实际问题与方程组"],
+    fill: [
+      ["方程组 {x+y=5，x-y=1} 的解中 x=______。", "3", "二元一次方程组"],
+      ["若 x=2，y=3，则 2x+y=______。", "7", "代入"],
+      ["解方程组常用的基本方法有代入消元法和______消元法。", "加减", "消元"]
+    ],
+    choice: [
+      ["下列是二元一次方程的是（ ）。", ["A. x^2+y=1", "B. 2x-y=3", "C. xy=2", "D. 1/x+y=2"], "B", "方程组概念"],
+      ["方程组 {x+y=7，x-y=1} 的解是（ ）。", ["A. x=3,y=4", "B. x=4,y=3", "C. x=5,y=2", "D. x=2,y=5"], "B", "解方程组"],
+      ["解方程组时，消去一个未知数的过程叫（ ）。", ["A. 配方", "B. 消元", "C. 因式分解", "D. 开方"], "B", "消元"]
+    ],
+    calculation: [
+      ["解方程组：{x+y=7，x-y=1。}", "x=4，y=3", "加减消元", ["两式相加得 2x=8。", "解得 x=4。", "代回得 y=3。"]],
+      ["解方程组：{2x+y=8，x=3。}", "x=3，y=2", "代入消元", ["把 x=3 代入 2x+y=8。", "6+y=8，得 y=2。", "所以 x=3，y=2。"]]
+    ],
+    solution: [
+      ["鸡兔同笼共 8 个头、22 条腿，求鸡和兔各多少只。", "鸡 5 只，兔 3 只", "方程组应用", ["设鸡 x 只、兔 y 只，列 x+y=8，2x+4y=22。", "消元得 y=3。", "代回得 x=5。"]],
+      ["两数和为 18，差为 4，求这两个数。", "11 和 7", "方程组应用", ["设两数为 x、y，列 x+y=18，x-y=4。", "两式相加得 2x=22，x=11。", "所以 y=7。"]]
+    ]
+  },
+  "不等式与不等式组": {
+    themes: ["不等式与不等式组", "不等式", "一元一次不等式", "不等式组"],
+    fill: [
+      ["不等式 x+3>5 的解集是______。", "x>2", "一元一次不等式"],
+      ["不等式组的解集是各个不等式解集的______。", "公共部分", "不等式组"],
+      ["若 a>b，则 a+2______b+2（填 >、< 或 =）。", ">", "不等式性质"]
+    ],
+    choice: [
+      ["不等式 2x<6 的解集是（ ）。", ["A. x<3", "B. x>3", "C. x<12", "D. x>12"], "A", "解不等式"],
+      ["不等式两边同乘 -2 时，不等号方向应（ ）。", ["A. 不变", "B. 改变", "C. 先变后不变", "D. 无法确定"], "B", "不等式性质"],
+      ["不等式组 {x>1，x<4} 的整数解有（ ）个。", ["A. 2", "B. 3", "C. 4", "D. 5"], "B", "不等式组"]
+    ],
+    calculation: [
+      ["解不等式：3x-5≤7。", "x≤4", "一元一次不等式", ["两边同时加 5，得 3x≤12。", "两边同时除以正数 3，不等号不变。", "所以 x≤4。"]],
+      ["解不等式组：{x>2，x≤5。}", "2<x≤5", "不等式组", ["分别求得 x>2 与 x≤5。", "取两个解集的公共部分。", "解集为 2<x≤5。"]]
+    ],
+    solution: [
+      ["学校规定体温超过 37.3℃需留在家中，若小林体温为 t℃，写出不等式并说明 t=37.5 是否符合要求。", "t>37.3；37.5 符合", "不等式应用", ["超过 37.3℃表示 t>37.3。", "37.5>37.3。", "所以小林需留在家中。"]],
+      ["用长 20 m 的篱笆围成长方形，若宽为 x m，写出长和宽均为正的范围。", "0<x<10", "不等式应用", ["长为 10-x。", "宽和长都为正：x>0 且 10-x>0。", "所以 0<x<10。"]]
+    ]
+  },
+  "数据的收集、整理与描述": {
+    themes: ["数据的收集、整理与描述", "统计调查", "统计表", "统计图"],
+    fill: [
+      ["在调查学生最喜欢的运动项目时，常用的调查方式是______调查。", "抽样", "统计调查"],
+      ["条形图适合表示不同类别数据的______。", "数量多少", "统计图"],
+      ["一组数据 2、4、6、8 的平均数是______。", "5", "平均数"]
+    ],
+    choice: [
+      ["要了解全校学生近视情况，比较合理的调查方式是（ ）。", ["A. 普查每一名学生", "B. 抽样调查", "C. 只调查班干部", "D. 只调查视力好的学生"], "B", "抽样调查"],
+      ["扇形统计图主要表示各部分占总体的（ ）。", ["A. 数量", "B. 平均数", "C. 百分比", "D. 最大值"], "C", "扇形统计图"],
+      ["数据 3、5、5、7 的众数是（ ）。", ["A. 3", "B. 5", "C. 6", "D. 7"], "B", "众数"]
+    ],
+    calculation: [
+      ["计算数据 6、8、7、9、10 的平均数。", "8", "平均数", ["先求和：6+8+7+9+10=40。", "共有 5 个数据。", "平均数为 40÷5=8。"]],
+      ["某班 40 人，喜欢篮球的有 12 人，喜欢篮球的频率是多少？", "30%", "频数与频率", ["频率=频数÷总人数。", "12÷40=0.3。", "换成百分数为 30%。"]]
+    ],
+    solution: [
+      ["某班四组人数分别为 10、12、8、10，求全班人数和各组人数的平均数。", "全班 40 人，平均 10 人", "统计量", ["总人数为 10+12+8+10=40。", "共有 4 组。", "平均数为 40÷4=10。"]],
+      ["一项问卷中，喜欢阅读、运动、音乐的人数分别为 18、12、10，请选择合适的统计图并说明理由。", "条形统计图；便于比较各类别人数", "统计图选择", ["数据按类别给出具体人数。", "条形图能直观看出各类别数量。", "因此选择条形统计图。"]]
+    ]
+  }
+};
+
+function gradeSevenMathChapterProfile(input = {}) {
+  const title = compactText(input.textbookChapterTitle, "");
+  if (!title) return null;
+  const entry = Object.entries(gradeSevenMathChapterProfiles)
+    .sort(([left], [right]) => right.length - left.length)
+    .find(([chapterTitle]) => title.includes(chapterTitle));
+  return entry ? { title: entry[0], ...entry[1] } : null;
 }
 
 function wantsBonusQuestions(input = {}) {
@@ -365,6 +628,7 @@ function buildAssessmentBlueprint(input = {}) {
   const subject = normalizeSubject(input.subject);
   const kind = normalizeAssessmentKind(input.kind);
   const grade = gradeLevelNumber(input);
+  const gradeContext = normalizeGradeLevel(input.grade || input.targetGrade);
   const includeListening = subject === "英语" && wantsListening(input);
   const classical = subject === "语文" && grade >= 5;
   const blueprints = {
@@ -428,7 +692,24 @@ function buildAssessmentBlueprint(input = {}) {
       ] }
     }
   };
-  const blueprint = blueprints[subject]?.[kind] || blueprints[subject]?.练习 || blueprints.英语.练习;
+  let blueprint = blueprints[subject]?.[kind] || blueprints[subject]?.练习 || blueprints.英语.练习;
+  if (subject === "数学" && gradeContext?.stage === "middle" && gradeContext.level === 7) {
+    const chapterProfile = gradeSevenMathChapterProfile(input);
+    const isExam = kind === "试卷";
+    blueprint = {
+      pages: isExam ? 4 : 2,
+      minItems: isExam ? 30 : 16,
+      maxItems: isExam ? 36 : 20,
+      curriculumStage: "middle",
+      knowledgeThemes: chapterProfile?.themes || ["有理数", "整式", "一元一次方程", "几何图形与数据基础"],
+      sections: [
+        { title: isExam ? "一、填空题" : "一、有理数与整式", type: "fill", target: isExam ? 12 : 5 },
+        { title: isExam ? "二、选择题" : "二、概念辨析", type: "choice", target: isExam ? 8 : 4 },
+        { title: isExam ? "三、计算题" : "三、运算与方程", type: "calculation", target: isExam ? 8 : 4 },
+        { title: isExam ? "四、解答题" : "四、应用与几何", type: "solution", target: isExam ? 6 : 4 }
+      ]
+    };
+  }
   return scaleAssessmentBlueprint(blueprint, input);
 }
 
@@ -507,6 +788,7 @@ export function buildAssessmentBlueprintCheck(input = {}) {
     subject: normalizeSubject(modelInput.subject),
     kind: normalizeAssessmentKind(modelInput.kind),
     grade: modelInput.grade || modelInput.targetGrade || null,
+    gradeContext: normalizeGradeLevel(modelInput.grade || modelInput.targetGrade),
     blueprint,
     printProfile,
     layoutTemplate,
@@ -3348,6 +3630,10 @@ function buildEnglishFallbackAssessmentItems(input = {}) {
 }
 
 function buildMathFallbackAssessmentItems(input = {}) {
+  const gradeContext = normalizeGradeLevel(input.grade || input.targetGrade);
+  if (gradeContext?.stage === "middle" && gradeContext.level === 7) {
+    return buildGradeSevenMathFallbackAssessmentItems(input);
+  }
   const seed = fallbackSeed(input, "math");
   const random = seededRandom(seed);
   const pick = (items) => items[Math.floor(random() * items.length)];
@@ -3486,6 +3772,87 @@ function buildMathFallbackAssessmentItems(input = {}) {
     ...shuffleBySeed([...dynamicCalculations, ...calculations], seed + 29),
     ...shuffleBySeed([...dynamicSolutions, ...solutions], seed + 41)
   ], input, "math");
+}
+
+function buildGradeSevenChapterFallbackAssessmentItems(input = {}, profile) {
+  const sections = {
+    fill: sectionTitleByType(input, "fill") || "一、有理数与整式",
+    choice: sectionTitleByType(input, "choice") || "二、概念辨析",
+    calculation: sectionTitleByType(input, "calculation") || "三、运算与方程",
+    solution: sectionTitleByType(input, "solution") || "四、应用与几何"
+  };
+  const blueprint = buildAssessmentBlueprint(input);
+  const targetByType = Object.fromEntries(blueprint.sections.map((section) => [section.type, section.target]));
+  const sourceByType = {
+    fill: profile.fill,
+    choice: profile.choice,
+    calculation: profile.calculation,
+    solution: profile.solution
+  };
+  const variantLabels = ["甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸", "子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉"];
+  const result = [];
+  for (const [type, sources] of Object.entries(sourceByType)) {
+    const target = Math.max(1, Number(targetByType[type] || 1));
+    for (let index = 0; index < target; index += 1) {
+      const source = sources[index % sources.length];
+      const [prompt, answerOrOptions, answerOrPoint, pointOrSteps, stepsOrFigure] = source;
+      const isChoice = type === "choice";
+      const isSolution = type === "solution";
+      const answer = isChoice ? answerOrPoint : answerOrOptions;
+      const knowledgePoint = isChoice ? pointOrSteps : source[2];
+      const analysisSteps = isChoice
+        ? ["根据定义、性质或数量关系逐项判断。", `结合${knowledgePoint}核对条件。`, `正确答案是 ${answer}。`]
+        : source[3];
+      const figure = isSolution ? stepsOrFigure : null;
+      result.push({
+        itemType: type,
+        sectionTitle: sections[type],
+        prompt: index < sources.length ? prompt : `${prompt}（变式${variantLabels[index - sources.length] || `第${index + 1 - sources.length}组`}）`,
+        options: isChoice ? answerOrOptions : undefined,
+        answer,
+        knowledgePoint,
+        analysisSteps,
+        figure,
+        answerSpaceMm: type === "calculation" ? 18 : type === "solution" ? 22 : 0
+      });
+    }
+  }
+  return result;
+}
+
+function buildGradeSevenMathFallbackAssessmentItems(input = {}) {
+  const fillSection = sectionTitleByType(input, "fill") || "一、有理数与整式";
+  const choiceSection = sectionTitleByType(input, "choice") || "二、概念辨析";
+  const calcSection = sectionTitleByType(input, "calculation") || "三、运算与方程";
+  const solutionSection = sectionTitleByType(input, "solution") || "四、应用与几何";
+  const chapterProfile = gradeSevenMathChapterProfile(input);
+  if (chapterProfile) {
+    return markDynamicFallback(buildGradeSevenChapterFallbackAssessmentItems(input, chapterProfile), input, `math-grade7-${chapterProfile.title}`);
+  }
+  const items = [
+    ["计算：-3+5。", "2", "有理数加法", ["异号两数相加，取绝对值较大的符号。", "5-3=2。", "结果为 2。"]],
+    ["-8 的相反数是______。", "8", "相反数", ["只有符号不同、绝对值相等的两个数互为相反数。", "-8 的相反数是 8。"]],
+    ["单项式 -3a²b 的系数是______，次数是______。", "-3；3", "单项式", ["系数为数字因数 -3。", "字母指数和为 2+1=3。"]],
+    ["若 2x+1=7，则 x=______。", "3", "一元一次方程", ["等式两边同时减 1，得 2x=6。", "两边同时除以 2，得 x=3。"]],
+    ["下列各组数中，互为相反数的是（ ）。", ["-2 与 2", "-2 与 -1/2", "2 与 1/2", "0 与 1"], "A", "相反数"],
+    ["下列计算正确的是（ ）。", ["(-2)²=-4", "-2²=4", "(-2)²=4", "2-5=3"], "C", "有理数乘方"],
+    ["下列各式中，属于同类项的是（ ）。", ["3a 与 3b", "2x²y 与 -5x²y", "x 与 x²", "ab 与 a²b"], "B", "同类项"],
+    ["一条直线上有 A、B、C 三点，若 AB=4 cm，BC=3 cm，且 B 在 A、C 之间，则 AC=（ ）。", ["1 cm", "4 cm", "7 cm", "12 cm"], "C", "线段和差"],
+    ["计算：-7+12-5。", "0", "有理数混合运算", ["从左到右计算：-7+12=5。", "5-5=0。"]],
+    ["化简：3x+2-5x-7。", "-2x-5", "整式加减", ["合并同类项：3x-5x=-2x。", "常数项 2-7=-5。"]],
+    ["解方程：3(x-2)=2x+5。", "x=11", "一元一次方程", ["去括号得 3x-6=2x+5。", "移项得 x=11。"]],
+    ["计算：(-2)³+4。", "-4", "有理数乘方", ["(-2)³=-8。", "-8+4=-4。"]],
+    ["某校七年级学生参加知识竞赛，答对 1 题得 4 分，答错 1 题扣 1 分。小明答对 8 题、答错 2 题，得多少分？", "30 分", "有理数应用", ["答对得分 8×4=32 分。", "答错扣分 2×1=2 分。", "总分 32-2=30 分。"]],
+    ["如图，直线 AB 与 CD 相交，∠AOC=52°，求 ∠BOD 的度数。", "52°", "对顶角", ["∠AOC 与 ∠BOD 是对顶角。", "对顶角相等，所以 ∠BOD=52°。"], { type: "intersecting-lines", angleLabels: { AOC: "52°" } }],
+    ["某商品原价 x 元，先打八折再减 10 元，售价是多少？当 x=100 时售价是多少？", "0.8x-10；70 元", "代数式与求值", ["打八折为 0.8x。", "再减 10 元得 0.8x-10。", "x=100 时为 80-10=70 元。"]],
+    ["一个长方形的长为 (x+2) cm，宽为 (x-1) cm，周长为 18 cm，求 x。", "x=4", "整式与方程应用", ["周长方程 2[(x+2)+(x-1)]=18。", "化简 4x+2=18，得 x=4。", "代入校验：长 6 cm、宽 3 cm，周长为 18 cm。"]]
+  ];
+  return markDynamicFallback([
+    ...items.slice(0, 4).map(([prompt, answer, knowledgePoint, analysisSteps]) => ({ itemType: "fill", sectionTitle: fillSection, prompt, answer, knowledgePoint, analysisSteps })),
+    ...items.slice(4, 8).map(([prompt, options, answer, knowledgePoint]) => ({ itemType: "choice", sectionTitle: choiceSection, prompt, options, answer, knowledgePoint, analysisSteps: ["根据定义或运算规则逐项判断。", `正确答案是 ${answer}。`] })),
+    ...items.slice(8, 12).map(([prompt, answer, knowledgePoint, analysisSteps]) => ({ itemType: "calculation", sectionTitle: calcSection, prompt, answer, knowledgePoint, analysisSteps, answerSpaceMm: 18 })),
+    ...items.slice(12).map(([prompt, answer, knowledgePoint, analysisSteps, figure]) => ({ itemType: "solution", sectionTitle: solutionSection, prompt, answer, knowledgePoint, analysisSteps, figure, answerSpaceMm: 22 }))
+  ], input, "math-grade7");
 }
 
 function buildChineseFallbackAssessmentItems(input = {}) {
@@ -4015,6 +4382,11 @@ export async function draftTeacherTaskService(config, input = {}, options = {}) 
 }
 
 export async function draftAssessmentService(config, input = {}, options = {}) {
+  const requestedGradeText = input.grade || input.targetGrade;
+  const requestedGrade = normalizeGradeLevel(requestedGradeText);
+  if (requestedGradeText && (!requestedGrade || (requestedGrade.stage === "middle" && requestedGrade.level !== 7))) {
+    throw new Error("UNSUPPORTED_GRADE");
+  }
   const contentContext = input.contentContext && typeof input.contentContext === "object"
     ? input.contentContext
     : matchApprovedContentContext(input, []);

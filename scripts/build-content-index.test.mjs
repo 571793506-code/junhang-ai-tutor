@@ -78,6 +78,8 @@ test("content index builder preserves textbook edition metadata for matching", (
       'volume: "下册"',
       'curriculumSeries: "PEP"',
       'curriculumRegion: "贵州遵义"',
+      'curriculumStandard: "2022年课程标准修订"',
+      'sourceUrl: "https://www.pep.com.cn/products/jc/czjks/201602/t20160228_1258440.shtml"',
       "---",
       "# 五年级英语 Unit 3 Weather",
       "",
@@ -94,4 +96,33 @@ test("content index builder preserves textbook edition metadata for matching", (
   assert.equal(index.documents[0].volume, "下册");
   assert.equal(index.documents[0].curriculumSeries, "PEP");
   assert.equal(index.documents[0].curriculumRegion, "贵州遵义");
+  assert.equal(index.documents[0].curriculumStandard, "2022年课程标准修订");
+  assert.equal(index.documents[0].sourceUrl, "https://www.pep.com.cn/products/jc/czjks/201602/t20160228_1258440.shtml");
+});
+
+test("content index builder recognizes grade seven math materials", (t) => {
+  const workspace = createWorkspace(t);
+  const inputDir = path.join(workspace, "markdown");
+  const outDir = path.join(workspace, "index");
+  fs.mkdirSync(inputDir);
+  fs.writeFileSync(
+    path.join(inputDir, "grade-seven-math.md"),
+    "# 初一数学有理数\n\n本资料用于七年级数学有理数、实数、二元一次方程组、不等式与不等式组、平面直角坐标系和数据的收集、整理与描述练习。",
+    "utf8"
+  );
+
+  const result = runBuilder(inputDir, outDir);
+
+  assert.equal(result.status, 0, result.stderr);
+  const index = JSON.parse(fs.readFileSync(path.join(outDir, "index.json"), "utf8"));
+  assert.deepEqual(index.documents[0].grades, ["七年级"]);
+  assert.deepEqual(index.documents[0].subjects, ["数学"]);
+  assert.deepEqual(index.documents[0].knowledgePoints, [
+    "有理数",
+    "实数",
+    "平面直角坐标系",
+    "二元一次方程组",
+    "不等式与不等式组",
+    "数据的收集、整理与描述"
+  ]);
 });

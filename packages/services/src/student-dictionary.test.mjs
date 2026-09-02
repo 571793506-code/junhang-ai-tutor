@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildDictionaryAliases,
   normalizeDictionaryTerm,
+  normalizeDictionaryDraft,
   queryStudentDictionaryService,
   sharedDictionaryCard,
   validateDictionaryDraft
@@ -54,6 +55,47 @@ test("dictionary validation requires a real form relationship and two bilingual 
   }).ok, false);
 });
 
+test("dictionary validation normalizes descriptive model form types", () => {
+  const descriptiveDraft = {
+    ...validDraft,
+    queryRelation: { type: "inflected-form", label: "carried 是 carry 的过去式和过去分词" },
+    forms: [
+      { term: "carry", type: "base-form", label: "原形" },
+      { term: "carries", type: "third-person-singular-present", label: "第三人称单数现在时" },
+      { term: "carried", type: "past-tense-and-past-participle", label: "过去式和过去分词" },
+      { term: "carrying", type: "present-participle-gerund", label: "现在分词和动名词" }
+    ]
+  };
+  const normalized = normalizeDictionaryDraft("carried", descriptiveDraft);
+  assert.equal(normalized.queryRelation.type, "past");
+  assert.equal(normalized.forms.some((item) => item.type === "headword"), true);
+  assert.equal(normalized.forms.some((item) => item.type === "third_person"), true);
+  assert.equal(normalized.forms.some((item) => item.type === "past"), true);
+  assert.equal(normalized.forms.some((item) => item.type === "past_participle"), true);
+  assert.equal(normalized.forms.some((item) => item.type === "present_participle"), true);
+  assert.equal(validateDictionaryDraft("carried", descriptiveDraft).ok, true);
+  assert.equal(normalizeDictionaryDraft("carried", {
+    ...descriptiveDraft,
+    queryRelation: { type: "inflected-form", label: "carried is an inflected form of carry" }
+  }).queryRelation.type, "past");
+});
+
+test("dictionary meanings normalize object entries and reject corrupted object strings", () => {
+  const objectMeanings = normalizeDictionaryDraft("carried", {
+    ...validDraft,
+    parts: [{
+      part: "adjective",
+      partCn: "形容词",
+      meanings: [{ meaning: "舒服的" }, { meaning: "舒适的" }]
+    }]
+  });
+  assert.deepEqual(objectMeanings.parts[0].meanings, ["舒服的", "舒适的"]);
+  assert.equal(validateDictionaryDraft("carried", {
+    ...validDraft,
+    parts: [{ part: "adjective", partCn: "形容词", meanings: ["[object Object]"] }]
+  }).ok, false);
+});
+
 test("dictionary aliases preserve the query-specific relation for duplicate forms", () => {
   const aliases = buildDictionaryAliases("carried", validDraft);
   assert.deepEqual(aliases.find((item) => item.term === "carried"), {
@@ -88,6 +130,44 @@ test("cache hit returns the alias relation without calling the model", async () 
     label: "carried 是 carry 的过去式"
   });
   assert.equal(modelCalls, 0);
+});
+
+test("corrupted cached meanings are rejected and regenerated", async () => {
+  let modelCalls = 0;
+  let saveCalls = 0;
+  const result = await queryStudentDictionaryService({}, { word: "carried" }, {
+    findEntry: async () => ({
+      term: "carried",
+      relationType: "past",
+      relationLabel: "carried 是 carry 的过去式",
+      entry: {
+        headword: "carry",
+        card: sharedDictionaryCard({
+          ...validDraft,
+          parts: [{ part: "verb", partCn: "动词", meanings: ["[object Object]"] }]
+        })
+      }
+    }),
+    generateDraft: async () => {
+      modelCalls += 1;
+      return {
+        available: true,
+        draft: {
+          ...validDraft,
+          parts: [{ part: "verb", partCn: "动词", meanings: [{ meaning: "携带" }, { meaning: "搬运" }] }]
+        },
+        modelRun: null
+      };
+    },
+    saveEntry: async () => {
+      saveCalls += 1;
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.entry.parts[0].meanings, ["携带", "搬运"]);
+  assert.equal(modelCalls, 1);
+  assert.equal(saveCalls, 1);
 });
 
 test("cache miss generates once and persists only the shared card and aliases", async () => {

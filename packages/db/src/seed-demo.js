@@ -257,12 +257,14 @@ async function seedLearningContent() {
         studentId: task.studentId,
         subjectId: subject?.id,
         title: task.title,
+        description: task.description,
         status: taskStatus(task.status),
         metadata: task
       },
       update: {
         studentId: task.studentId,
         title: task.title,
+        description: task.description,
         status: taskStatus(task.status),
         metadata: task
       }

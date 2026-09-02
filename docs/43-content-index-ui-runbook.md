@@ -124,7 +124,7 @@ Content-Type: application/json
 
 只有同时满足 `reviewStatus=APPROVED`、`allowedForGeneration=true` 和 `licenseStatus!=NOT_ALLOWED` 的来源才会进入生成上下文。
 
-教材绑定生成还要遵守贵州遵义基准：语文统编版 / 人教体系、数学人教版、英语人教版 PEP。内容索引 front matter 和 `KnowledgeSource` 会保留 `edition`, `volume`, `curriculumSeries`, `curriculumRegion`；匹配时排除明确冲突的版本、系列和册次。未声明这些字段的普通教师资料仍需教师审批，不能用来覆盖服务端教材资产元数据。
+教材绑定生成还要遵守贵州遵义基准：语文统编版 / 人教体系、数学人教版、英语人教版 PEP。内容索引 front matter 和 `KnowledgeSource` 会保留 `edition`, `volume`, `curriculumSeries`, `curriculumRegion`；需要区分教材修订版本时，同时保留 `curriculumStandard`。当前教师确认的七年级数学目录基准为“2022 年课程标准修订、人教版”。匹配时排除明确冲突的版本、系列和册次。未声明这些字段的普通教师资料仍需教师审批，不能用来覆盖服务端教材资产元数据。
 
 ## 4. Web 教师端
 

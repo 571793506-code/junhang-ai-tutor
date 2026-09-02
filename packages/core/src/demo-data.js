@@ -215,7 +215,8 @@ export const demoTasks = [
     minutes: 12,
     dueLabel: "今日",
     source: "教材词表",
-    knowledgePoints: ["词义", "拼写", "搭配"]
+    knowledgePoints: ["词义", "拼写", "搭配"],
+    description: "学习目标：掌握 Unit 4 重点词汇的词义、拼写和常用搭配。完成步骤：听写词义；写出英文单词；用其中 2 个词各造 1 个句子。家长查看：完成后请拍照提交，老师会复核拼写和句子使用。"
   },
   {
     id: "task-2",
@@ -227,7 +228,8 @@ export const demoTasks = [
     minutes: 18,
     dueLabel: "今日",
     source: "错题同类题",
-    knowledgePoints: ["角度", "分类讨论"]
+    knowledgePoints: ["角度", "分类讨论"],
+    description: "学习目标：巩固等腰三角形中的角度关系和分类讨论。完成步骤：先标出已知角；写出等角关系；完成 6 道题并检查单位和结论。家长查看：重点关注是否写出推理过程，不只看最后答案。"
   },
   {
     id: "task-3",
@@ -239,7 +241,8 @@ export const demoTasks = [
     minutes: 15,
     dueLabel: "明日",
     source: "老师批注",
-    knowledgePoints: ["细节描写", "语句连贯"]
+    knowledgePoints: ["细节描写", "语句连贯"],
+    description: "学习目标：把作文片段写得更具体、连贯。完成步骤：根据老师批注补充 2 处细节；调整语句顺序；通读并修改不通顺的句子。家长查看：保留修改前后内容，便于老师复核。"
   },
   {
     id: "task-4",
@@ -251,7 +254,8 @@ export const demoTasks = [
     minutes: 10,
     dueLabel: "今日",
     source: "AI 复练",
-    knowledgePoints: ["时态", "句型"]
+    knowledgePoints: ["时态", "句型"],
+    description: "学习目标：正确使用一般过去时描述已经发生的事情。完成步骤：完成 5 个动词变形；用过去时写 3 个句子；朗读并检查 yesterday、last 等时间词。家长查看：完成后核对动词是否使用过去式。"
   }
 ];
 

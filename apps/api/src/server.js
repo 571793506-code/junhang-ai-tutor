@@ -18,7 +18,8 @@ import {
   classifyTextbookBaseline,
   inspectEncodingPayload,
   matchesTextbookAssetSearch,
-  mergeTextbookChapterDrafts
+  mergeTextbookChapterDrafts,
+  normalizeGradeLevel
 } from "@junhang/core";
 import {
   GRADING_SOURCE_PACKAGE_SCHEMA_VERSION,
@@ -38,7 +39,9 @@ import {
   prisma,
   recordBehaviorEvent,
   recordModelRun,
+  removeStudentAccess,
   resetStudentAccessCode,
+  updateStudentProfile,
   updateStudentAccessStatus
 } from "@junhang/db";
 import {
@@ -725,6 +728,7 @@ async function studentCanReceiveNewWork(studentId) {
   const student = await prisma.student.findFirst({
     where: {
       id: studentId,
+      deletedAt: null,
       loginEnabled: true,
       enrollmentStatus: { not: "WITHDRAWN" }
     },
@@ -975,6 +979,7 @@ function mapKnowledgeSourceRow(row) {
     textbookTitle: metadata.textbookTitle || "",
     curriculumSeries: metadata.curriculumSeries || "",
     curriculumRegion: metadata.curriculumRegion || "",
+    curriculumStandard: metadata.curriculumStandard || "",
     metadata,
     chunkCount: Number(row.chunkCount || 0),
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
@@ -995,6 +1000,8 @@ async function syncContentIndexToKnowledgeLibrary(index, teacherId = null) {
       grades: document.grades || [],
       curriculumSeries: document.curriculumSeries || null,
       curriculumRegion: document.curriculumRegion || null,
+      curriculumStandard: document.curriculumStandard || null,
+      sourceUrl: document.sourceUrl || null,
       knowledgePoints: document.knowledgePoints || [],
       textLength: document.textLength || 0,
       syncedByTeacherId: teacherId,
@@ -1014,7 +1021,7 @@ async function syncContentIndexToKnowledgeLibrary(index, teacherId = null) {
     const metadata = indexedSource.metadata;
     await prisma.$executeRaw`
       INSERT INTO "KnowledgeSource" (
-        "id", "title", "sourceType", "subject", "grade", "edition", "volume", "sourcePath", "markdownPath",
+        "id", "title", "sourceType", "subject", "grade", "edition", "volume", "sourceUrl", "sourcePath", "markdownPath",
         "licenseStatus", "reviewStatus", "allowedForGeneration", "confidence", "summary",
         "metadata", "createdAt", "updatedAt"
       )
@@ -1022,6 +1029,7 @@ async function syncContentIndexToKnowledgeLibrary(index, teacherId = null) {
         ${id}, ${knowledgeSourceTitle(document)}, ${readableText(document.sourceType, "teacher-upload")},
         ${indexedSource.subject || null}, ${indexedSource.grade || null},
         ${indexedSource.edition || null}, ${indexedSource.volume || null},
+        ${document.sourceUrl || null},
         ${document.sourcePath || null}, ${document.relativeMarkdownPath || document.markdownPath || null},
         'REVIEW_REQUIRED', 'PENDING', false, ${document.textLength ? 0.72 : null},
         ${document.summary || null}, ${JSON.stringify(metadata)}::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
@@ -1033,6 +1041,7 @@ async function syncContentIndexToKnowledgeLibrary(index, teacherId = null) {
         "grade" = EXCLUDED."grade",
         "edition" = EXCLUDED."edition",
         "volume" = EXCLUDED."volume",
+        "sourceUrl" = EXCLUDED."sourceUrl",
         "sourcePath" = EXCLUDED."sourcePath",
         "markdownPath" = EXCLUDED."markdownPath",
         "confidence" = EXCLUDED."confidence",
@@ -1143,11 +1152,12 @@ function parseStructuredDisplayText(value) {
 }
 
 function taskDisplayDetails(task, metadata = {}) {
-  const raw = task.description || metadata.draftText || metadata.requirement || "";
+  const raw = task.description || metadata.draftText || metadata.requirement || metadata.description || metadata.summary || "";
   const parsed = parseStructuredDisplayText(raw);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     const text = readableText(raw, "");
-    return { summary: text, description: text };
+    const goal = text.match(/学习目标：([^。]+)/)?.[1]?.trim() || "";
+    return { summary: goal || text, description: text };
   }
 
   const parentSummary = readableText(parsed.parentVisibleSummary, "");
@@ -1262,7 +1272,8 @@ function mapStudent(student, role = "teacher") {
     accessCode: student.accessCodes?.[0]?.codePreview || null,
     enrollmentStatus: enrollmentStatusToClient(student.enrollmentStatus),
     loginEnabled: student.loginEnabled,
-    canReceiveNewWork: student.loginEnabled && student.enrollmentStatus !== "WITHDRAWN",
+    accessRemovedAt: student.deletedAt?.toISOString() || null,
+    canReceiveNewWork: !student.deletedAt && student.loginEnabled && student.enrollmentStatus !== "WITHDRAWN",
     registeredAt: student.createdAt.toISOString().slice(0, 10),
     focus: student.notes || "",
     weeklyScore: profile.weeklyScore ?? 0,
@@ -1367,6 +1378,7 @@ function mapAssignment(assignment, options = {}) {
     totalScore: metadata.totalScore || (kind === "试卷" ? 100 : 60),
     items: assignment.items?.map((item) => item.prompt) || [],
     draftReviewStatus: metadata.draftReviewStatus || null,
+    draftReviewFeedback: metadata.draftReviewFeedback || null,
     draftReviewAsset: options.includeDraftReviewAsset && draftReviewAssetId && draftReviewUrl
       ? { id: draftReviewAssetId, title: `${title} - 内容审查草稿`, url: draftReviewUrl }
       : null,
@@ -1394,6 +1406,11 @@ function mapAssignment(assignment, options = {}) {
           textbookRegion: readableText(metadata.textbookRegion || generationTeaching.textbookRegion || generationTextbook.region, "") || undefined,
           textbookChapterId: readableText(metadata.textbookChapterId || generationTeaching.textbookChapterId, "") || undefined,
           textbookChapterTitle: readableText(metadata.textbookChapterTitle || generationTeaching.textbookChapterTitle, "") || undefined,
+          knowledgePoints: Array.isArray(generationTeaching.knowledgePoints)
+            ? generationTeaching.knowledgePoints
+            : Array.isArray(generationContext.request?.knowledgePoints)
+              ? generationContext.request.knowledgePoints
+              : undefined,
           contentScope: readableText(metadata.contentScope, "") || undefined,
           generationBasis: readableText(metadata.generationBasis || generationContext.request?.generationBasis, "") || undefined,
           recoveryReason: readableText(metadata.recoveryReason || generationContext.request?.recoveryReason, "") || undefined
@@ -3708,6 +3725,17 @@ function assessmentContentContextFailure(contentContext, contentContextValidatio
 
 async function prepareAssessmentDraftInput(req) {
   const input = assessmentDraftInputFromRequest(req);
+  const requestedGradeText = input.grade || input.targetGrade;
+  const requestedGrade = normalizeGradeLevel(requestedGradeText);
+  if (requestedGradeText && (!requestedGrade || (requestedGrade.stage === "middle" && requestedGrade.level !== 7))) {
+    return {
+      ok: false,
+      failure: {
+        error: "ASSESSMENT_GRADE_NOT_SUPPORTED",
+        message: "当前仅支持小学三至六年级和初中七年级数学。"
+      }
+    };
+  }
   const emergency = prepareTeacherRequirementEmergency(input);
   if (emergency) return emergency;
   const database = await checkDatabaseStatus();
@@ -3745,7 +3773,7 @@ function assessmentGenerationJobRequest(input = {}) {
   for (const key of [
     "targetScope", "studentId", "targetGrade", "subject", "kind", "difficulty", "requirement", "requestedItemCount", "contentScope",
     "textbookAssetId", "textbookTitle", "textbookEdition", "textbookSeries", "textbookVolume", "textbookRegion",
-    "textbookChapterId", "textbookChapterTitle", "generationBasis", "recoveryReason"
+    "textbookChapterId", "textbookChapterTitle", "knowledgePoints", "generationBasis", "recoveryReason"
   ]) {
     if (input[key] != null && input[key] !== "") request[key] = input[key];
   }
@@ -5163,6 +5191,45 @@ app.patch("/api/students/:studentId/access-status", requireDatabase, requireSess
   res.json({ ok: true, student });
 }));
 
+app.patch("/api/students/:studentId/profile", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  if (!(await assertTeacherStudentScope(req, res, req.params.studentId))) return;
+  const body = getBody(req);
+  const normalizedGrade = normalizeGradeLevel(body.grade);
+  if (!normalizedGrade || normalizedGrade.level < 3 || normalizedGrade.level > 7) {
+    return res.status(400).json({ ok: false, error: "STUDENT_GRADE_INVALID", message: "请选择三至七年级。" });
+  }
+  const student = await updateStudentProfile(req.params.studentId, { grade: normalizedGrade.label });
+  await auditEvent(req, {
+    studentId: req.params.studentId,
+    feature: "student-access",
+    action: "update-student-grade",
+    metadata: { studentId: req.params.studentId, grade: normalizedGrade.label, historyRetained: true }
+  });
+  res.json({ ok: true, student, historyRetained: true });
+}));
+
+app.delete("/api/students/:studentId/access", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  if (!(await assertTeacherStudentScope(req, res, req.params.studentId))) return;
+  const student = await prisma.student.findUnique({
+    where: { id: req.params.studentId },
+    select: { id: true, displayName: true, deletedAt: true }
+  });
+  if (!student) return res.status(404).json({ ok: false, error: "STUDENT_NOT_FOUND", message: "未找到学生。" });
+  if (student.deletedAt) return res.status(409).json({ ok: false, error: "STUDENT_ACCESS_ALREADY_REMOVED", message: "该学生权限已移除。" });
+  const confirmationName = String(getBody(req).confirmationName || "").trim();
+  if (!confirmationName || confirmationName !== student.displayName) {
+    return res.status(400).json({ ok: false, error: "STUDENT_DELETE_CONFIRMATION_REQUIRED", message: "请输入完全匹配的学生姓名后再移除权限。" });
+  }
+  const removed = await removeStudentAccess(req.params.studentId);
+  await auditEvent(req, {
+    studentId: req.params.studentId,
+    feature: "student-access",
+    action: "remove-access",
+    metadata: { studentId: req.params.studentId, historyRetained: true }
+  });
+  res.json({ ok: true, student: mapStudent(removed, "teacher"), historyRetained: true });
+}));
+
 async function loadStudentProfileSources(studentId) {
   return prisma.student.findUnique({
     where: { id: studentId },
@@ -6252,6 +6319,7 @@ app.post("/api/student-login", requireDatabase, asyncRoute(async (req, res) => {
   const student = await prisma.student.findFirst({
     where: {
       displayName,
+      deletedAt: null,
       loginEnabled: true,
       accessCodes: { some: { codeHash: hashAccessCode(accessCode), status: "ACTIVE" } },
       guardians: guardianPhone

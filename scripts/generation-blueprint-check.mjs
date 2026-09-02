@@ -1,6 +1,8 @@
 import { buildAssessmentBlueprintCheck } from "@junhang/services";
 
 const cases = [
+  { subject: "数学", kind: "小测", grade: "七年级", difficulty: "基础", requirement: "有理数与整式" },
+  { subject: "数学", kind: "试卷", grade: "七年级", difficulty: "中等", textbookChapterTitle: "二元一次方程组", requirement: "章节综合测评" },
   { subject: "数学", kind: "小测", grade: "五年级", difficulty: "基础", requirement: "小数乘法与图形" },
   { subject: "数学", kind: "练习", grade: "五年级", difficulty: "中等", requirement: "近期错题巩固" },
   { subject: "数学", kind: "试卷", grade: "六年级", difficulty: "偏高", requirement: "小升初综合测评" },
@@ -42,6 +44,12 @@ const checks = cases.map((input) => {
   if (input.subject === "数学") {
     if (!itemTypes.has("calculation")) issues.push("数学生成缺少计算题");
     if (!itemTypes.has("solution")) issues.push("数学生成缺少解答题");
+    if (input.grade === "七年级" && snapshot.blueprint.curriculumStage !== "middle") {
+      issues.push("七年级数学必须使用初中数学蓝图");
+    }
+    if (input.textbookChapterTitle && !snapshot.blueprint.knowledgeThemes.some((theme) => input.textbookChapterTitle.includes(theme) || theme.includes(input.textbookChapterTitle))) {
+      issues.push("七年级数学选定章节未进入知识主题");
+    }
   }
   if (snapshot.audit.status !== "passed") {
     issues.push(...snapshot.audit.issues);

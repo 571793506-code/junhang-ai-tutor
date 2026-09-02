@@ -250,6 +250,8 @@ test("content-index sync preserves textbook asset binding", () => {
   const syncEnd = serverSource.indexOf("app.post(\"/api/knowledge/sources/sync-content-index\"", syncStart);
   const syncSource = serverSource.slice(syncStart, syncEnd);
   assert.match(syncSource, /textbookAssetId:\s*document\.textbookAssetId/);
+  assert.match(syncSource, /sourceUrl:\s*document\.sourceUrl/);
+  assert.match(syncSource, /curriculumStandard:\s*document\.curriculumStandard/);
 });
 
 test("knowledge-source review keeps textbook asset binding visible", () => {

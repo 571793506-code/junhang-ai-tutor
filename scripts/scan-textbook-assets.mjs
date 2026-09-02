@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { classifyTextbookBaseline } from "@junhang/core";
+import { classifyTextbookBaseline, normalizeGradeLevel } from "@junhang/core";
 
 const defaultRoot = "D:/\u541b\u822aAI\u52a9\u6559/textbooks";
 const rootArg = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
@@ -40,11 +40,7 @@ function inferSubject(text) {
 }
 
 function inferGrade(text) {
-  const matches = [...text.matchAll(/([一二三四五六]|1|2|3|4|5|6)\s*年级/g)];
-  if (!matches.length) return "";
-  const match = matches[matches.length - 1];
-  const map = { "1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六" };
-  return `${map[match[1]] || match[1]}年级`;
+  return normalizeGradeLevel(text)?.label || "";
 }
 
 function inferVolume(text) {

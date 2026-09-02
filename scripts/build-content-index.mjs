@@ -6,20 +6,35 @@ const defaultOutDir = "exports/content-index";
 const noMarkdownDocumentsError = "CONTENT_INDEX_NO_MARKDOWN_DOCUMENTS";
 const subjectSignals = {
   数学: ["数学", "计算", "解答", "填空", "选择", "应用题", "小数", "分数", "几何", "面积", "周长", "方程"],
-  语文: ["语文", "阅读", "作文", "习作", "文言", "拼音", "词语", "句子", "段落", "课文"],
+  语文: ["语文", "阅读理解", "作文", "习作", "文言", "拼音", "词语", "句子", "段落", "课文"],
   英语: ["英语", "English", "word", "sentence", "reading", "listening", "grammar", "vocabulary"]
 };
 const gradeSignals = {
   三年级: ["三年级", "3年级", "Grade 3", "third grade"],
   四年级: ["四年级", "4年级", "Grade 4", "fourth grade"],
   五年级: ["五年级", "5年级", "Grade 5", "fifth grade"],
-  六年级: ["六年级", "6年级", "Grade 6", "sixth grade"]
+  六年级: ["六年级", "6年级", "Grade 6", "sixth grade"],
+  七年级: ["七年级", "7年级", "初一", "Grade 7", "seventh grade"]
 };
 const knowledgeSignals = [
   "小数乘法",
   "小数除法",
   "分数乘法",
   "分数除法",
+  "有理数",
+  "相交线",
+  "平行线",
+  "实数",
+  "平方根",
+  "立方根",
+  "平面直角坐标系",
+  "二元一次方程组",
+  "不等式与不等式组",
+  "数据的收集、整理与描述",
+  "代数式",
+  "整式",
+  "一元一次方程",
+  "几何证明",
   "单位换算",
   "应用题",
   "竖式计算",
@@ -213,6 +228,8 @@ function buildDocument(filePath, index, manifestRecords, maxChunksPerFile) {
     volume: metadata.volume || manifestRecord?.volume || "",
     curriculumSeries: metadata.curriculumSeries || manifestRecord?.curriculumSeries || "",
     curriculumRegion: metadata.curriculumRegion || manifestRecord?.curriculumRegion || "",
+    curriculumStandard: metadata.curriculumStandard || manifestRecord?.curriculumStandard || "",
+    sourceUrl: metadata.sourceUrl || manifestRecord?.sourceUrl || "",
     summary: normalizeDisplayText(summary),
     subjects: topLabels(subjectScores),
     grades: topLabels(gradeScores),

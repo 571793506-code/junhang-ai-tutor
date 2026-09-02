@@ -156,6 +156,31 @@ test("shared textbook evidence scope requires an exact textbook asset binding", 
   }), false);
 });
 
+test("matches grade seven math textbook evidence without treating it as primary grade six", () => {
+  const textbook = {
+    id: "tb-math-7a",
+    subject: "数学",
+    grade: "七年级",
+    edition: "人教版",
+    curriculumSeries: "人教版",
+    volume: "上册",
+    curriculumRegion: "贵州遵义"
+  };
+  const source = {
+    subject: "数学",
+    grade: "初一",
+    edition: "人教版",
+    volume: "上册",
+    metadata: {
+      textbookAssetId: "tb-math-7a",
+      curriculumSeries: "人教版",
+      curriculumRegion: "贵州遵义"
+    }
+  };
+
+  assert.equal(textbookBaseline.matchesTextbookEvidenceScope(textbook, source), true);
+});
+
 test("teacher-confirmed textbook scopes only cover their confirmed chapters", () => {
   assert.equal(typeof textbookBaseline.matchesTeacherConfirmedTextbookChapterScope, "function");
   const source = {

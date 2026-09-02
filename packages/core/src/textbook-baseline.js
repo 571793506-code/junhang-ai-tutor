@@ -1,3 +1,5 @@
+import { normalizeGradeLevel } from "./grade-level.js";
+
 export const ZUNYI_TEXTBOOK_REGION = "贵州遵义";
 
 const baselineProfiles = {
@@ -51,11 +53,10 @@ function normalizedSubject(value) {
 }
 
 function normalizedGrade(value) {
+  const normalized = normalizeGradeLevel(value);
+  if (normalized) return String(normalized.level);
   const text = normalizedText(value);
-  const chineseGrade = text.match(/([一二三四五六])年级/);
-  if (chineseGrade) return String({ 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 }[chineseGrade[1]]);
-  const numericGrade = text.match(/([1-6])年级/);
-  return numericGrade ? numericGrade[1] : text;
+  return text;
 }
 
 function normalizedEdition(value, subject) {

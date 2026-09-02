@@ -12,6 +12,8 @@ export declare function upsertStudentWithAccessCode(input: Record<string, unknow
 export declare function disableStudentAccess(studentId: string, options?: { prisma?: PrismaClient }): Promise<unknown>;
 export declare function resetStudentAccessCode(studentId: string, input?: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
 export declare function updateStudentAccessStatus(studentId: string, input?: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function updateStudentProfile(studentId: string, input?: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
+export declare function removeStudentAccess(studentId: string, options?: { prisma?: PrismaClient; now?: Date }): Promise<unknown>;
 export declare function listTeacherStudents(teacherId: string, options?: { prisma?: PrismaClient }): Promise<unknown>;
 export declare function createLearningTask(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;
 export declare function createClassroomBroadcast(input: Record<string, unknown>, options?: { prisma?: PrismaClient }): Promise<unknown>;

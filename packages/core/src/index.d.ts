@@ -48,6 +48,7 @@ export interface StudentProfile {
   accessCode: string | null;
   enrollmentStatus: "测试" | "在读" | "暂停" | "已退课";
   loginEnabled: boolean;
+  accessRemovedAt?: string | null;
   canReceiveNewWork: boolean;
   registeredAt: string;
   focus: string;
@@ -152,6 +153,7 @@ export interface AssignmentCard {
     nextPractice: string;
   } | null;
   draftReviewStatus?: "pending_teacher_review" | "accepted" | "rejected" | null;
+  draftReviewFeedback?: string | null;
   draftReviewAsset?: {
     id: string;
     title: string;
@@ -262,6 +264,17 @@ export interface TextbookAssetCard {
 }
 
 export declare const ZUNYI_TEXTBOOK_REGION: "贵州遵义";
+
+export type GradeStage = "primary" | "middle";
+
+export interface GradeLevel {
+  level: number;
+  stage: GradeStage;
+  label: string;
+}
+
+export declare function normalizeGradeLevel(value?: unknown): GradeLevel | null;
+export declare function gradeLevelLabel(value?: unknown): string;
 
 export declare function classifyTextbookBaseline(input?: {
   subject?: string;

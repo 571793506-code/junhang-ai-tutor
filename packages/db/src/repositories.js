@@ -1,10 +1,13 @@
 import { prisma as defaultPrisma } from "./client.js";
 import { generateAccessCode, hashAccessCode, previewAccessCode } from "./access-codes.js";
+import { normalizeGradeLevel } from "@junhang/core";
 import { buildGradingSourcePackage } from "@junhang/core/grading-source-package";
 
 export function normalizeGrade(grade) {
   if (!grade) return null;
   const text = String(grade).trim();
+  const normalized = normalizeGradeLevel(text);
+  if (normalized) return normalized.label;
   const gradeMap = new Map([
     ["3", "三年级"],
     ["4", "四年级"],
@@ -277,6 +280,55 @@ export async function updateStudentAccessStatus(
       });
     }
 
+    return student;
+  });
+}
+
+export async function updateStudentProfile(
+  studentId,
+  input = {},
+  { prisma = defaultPrisma } = {}
+) {
+  const grade = normalizeGrade(input.grade);
+  if (!grade) {
+    const error = new Error("A valid student grade is required.");
+    error.code = "STUDENT_GRADE_INVALID";
+    throw error;
+  }
+  return prisma.student.update({
+    where: { id: studentId },
+    data: { grade }
+  });
+}
+
+export async function removeStudentAccess(
+  studentId,
+  { prisma = defaultPrisma, now = new Date() } = {}
+) {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.student.findUnique({
+      where: { id: studentId },
+      select: { id: true, deletedAt: true }
+    });
+    if (!existing) {
+      const error = new Error("Student not found.");
+      error.code = "STUDENT_NOT_FOUND";
+      throw error;
+    }
+    if (existing.deletedAt) {
+      const error = new Error("Student access was already removed.");
+      error.code = "STUDENT_ACCESS_ALREADY_REMOVED";
+      throw error;
+    }
+
+    const student = await tx.student.update({
+      where: { id: studentId },
+      data: { loginEnabled: false, enrollmentStatus: "WITHDRAWN", deletedAt: now }
+    });
+    await tx.studentAccessCode.updateMany({
+      where: { studentId, status: "ACTIVE" },
+      data: { status: "DISABLED", disabledAt: now }
+    });
     return student;
   });
 }

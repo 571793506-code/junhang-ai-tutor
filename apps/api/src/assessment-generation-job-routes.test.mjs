@@ -46,6 +46,17 @@ test("assessment routes normalize grade targets before validation and queueing",
   assert.match(source, /import \{ normalizeAssessmentTargetScope \} from "\.\/assessment-target-scope\.js"/);
   assert.match(source, /function assessmentDraftInputFromRequest\(req\) \{\s*return normalizeAssessmentTargetScope/);
   assert.match(source, /"requestedItemCount", "contentScope"/);
+  const requestStart = source.indexOf("function assessmentGenerationJobRequest");
+  const requestEnd = source.indexOf("\n}\n", requestStart) + 3;
+  assert.match(source.slice(requestStart, requestEnd), /"knowledgePoints"/);
+});
+
+test("assessment preparation rejects unsupported secondary grades before model calls", () => {
+  const preparationStart = source.indexOf("async function prepareAssessmentDraftInput");
+  const preparationEnd = source.indexOf("\nfunction assessmentGenerationJobRequest", preparationStart);
+  const preparationSource = source.slice(preparationStart, preparationEnd);
+  assert.match(source, /normalizeGradeLevel/);
+  assert.match(preparationSource, /ASSESSMENT_GRADE_NOT_SUPPORTED/);
 });
 
 test("textbook recovery repairs evidence without auto-approving it", () => {
@@ -77,6 +88,7 @@ test("teacher assignment records expose draft and completed export links", () =>
   const mapSource = source.slice(mapStart, mapEnd);
 
   assert.match(mapSource, /draftReviewAsset:/);
+  assert.match(mapSource, /knowledgePoints:/);
   assert.match(mapSource, /finalExportAssets:/);
   assert.match(mapSource, /studentPaper/);
   assert.match(mapSource, /answerAnalysis/);
@@ -118,7 +130,7 @@ test("bootstrap exposes one active-target contract for every client", () => {
   const mapEnd = source.indexOf("\n}\n\nfunction map", mapStart) + 2;
   const mapSource = source.slice(mapStart, mapEnd);
 
-  assert.match(mapSource, /canReceiveNewWork:\s*student\.loginEnabled && student\.enrollmentStatus !== "WITHDRAWN"/);
+  assert.match(mapSource, /canReceiveNewWork:\s*!student\.deletedAt && student\.loginEnabled && student\.enrollmentStatus !== "WITHDRAWN"/);
 });
 
 test("grading workbench supports server-side student, subject, kind, state, and pagination filters", () => {

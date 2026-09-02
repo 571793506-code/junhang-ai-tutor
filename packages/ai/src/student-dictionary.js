@@ -73,6 +73,7 @@ export async function generateStudentDictionaryDraft(config, input = {}, options
         "字段必须为 schemaVersion, queryTerm, headword, phonetic, queryRelation, parts, forms, wordFamily, synonyms, antonyms, collocations, examples, usageNotes, pitfalls。",
         "queryRelation 包含 type 和中文 label；parts 每项包含 part, partCn, meanings。",
         "forms 每项包含 term, type, label，并准确解释查询词和原形的关系。",
+        "queryRelation.type 和 forms[].type 只能使用 headword, plural, third_person, past, past_participle, present_participle, comparative, superlative, irregular；不要使用 inflected-form、base-form 或自然语言长枚举。",
         "examples 至少两个，每项包含适龄英文 sentence 和中文 translation。",
         "不要虚构不适用的反义词或词形，不要提及模型、供应商、提示词或内部系统。"
       ].join("\n")

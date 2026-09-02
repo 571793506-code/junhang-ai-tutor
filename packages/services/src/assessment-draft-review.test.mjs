@@ -454,6 +454,28 @@ test("draftAssessmentService forwards the authoritative textbook baseline in gen
   });
 });
 
+test("draftAssessmentService keeps teacher regeneration feedback in the request context", async () => {
+  let runnerInput = null;
+  await draftAssessmentService(
+    {},
+    {
+      subject: "数学",
+      kind: "小测",
+      grade: "七年级",
+      requirement: "有理数基础运算，题量适中。\n教师否决/重生成要求：减少计算题，补充概念判断。"
+    },
+    {
+      persist: false,
+      assessmentDraftRunner: async (_config, input) => {
+        runnerInput = input;
+        return fakeAssessmentResult();
+      }
+    }
+  );
+
+  assert.match(runnerInput.generationContext.request.requirement, /教师否决\/重生成要求：减少计算题/);
+});
+
 test("draftAssessmentService carries teacher-scoped student signals into generationContext", async () => {
   let runnerInput = null;
   await draftAssessmentService(
@@ -532,6 +554,84 @@ test("assessment blueprint scales an English quiz to the requested item count", 
   assert.equal(result.blueprint.maxItems, 12);
   assert.equal(result.blueprint.sections.reduce((sum, section) => sum + section.target, 0), 12);
   assert.equal(result.itemCount, 12);
+});
+
+test("builds a middle-school grade seven math blueprint and fallback content", () => {
+  const result = buildAssessmentBlueprintCheck({
+    subject: "数学",
+    kind: "小测",
+    grade: "七年级",
+    requirement: "有理数与整式基础"
+  });
+
+  assert.equal(result.gradeContext.stage, "middle");
+  assert.equal(result.gradeContext.level, 7);
+  assert.equal(result.blueprint.curriculumStage, "middle");
+  assert.match(result.blueprint.knowledgeThemes.join("、"), /有理数|整式/);
+  assert.ok(result.itemCount >= 16);
+});
+
+test("routes each grade seven math textbook chapter to chapter-specific fallback knowledge points", () => {
+  const chapters = [
+    ["上册", [
+      ["有理数", "数轴"], ["有理数的运算", "乘方"], ["代数式", "字母表示数"],
+      ["整式的加减", "同类项"], ["一元一次方程", "等式性质"], ["几何图形初步", "点、线、面、角"]
+    ]],
+    ["下册", [
+      ["相交线与平行线", "平行线"], ["实数", "平方根"], ["平面直角坐标系", "象限"],
+      ["二元一次方程组", "消元"], ["不等式与不等式组", "不等式"], ["数据的收集、整理与描述", "统计图"]
+    ]]
+  ];
+  for (const [volume, entries] of chapters) {
+    for (const [chapterTitle, distinctiveTheme] of entries) {
+      const result = buildAssessmentBlueprintCheck({
+        subject: "数学",
+        kind: "练习",
+        grade: "七年级",
+        textbookChapterTitle: chapterTitle
+      });
+      assert.equal(result.audit.status, "passed", `${chapterTitle} should pass the structural audit`);
+      assert.ok(
+        result.blueprint.knowledgeThemes.includes(distinctiveTheme),
+        `${volume}${chapterTitle} should expose a matching knowledge theme`
+      );
+      assert.ok(result.itemCount >= result.blueprint.minItems);
+    }
+  }
+});
+
+test("builds a four-page, 100-point grade seven math exam blueprint", () => {
+  const result = buildAssessmentBlueprintCheck({
+    subject: "数学",
+    kind: "试卷",
+    grade: "七年级",
+    textbookChapterTitle: "一元一次方程"
+  });
+
+  assert.equal(result.blueprint.curriculumStage, "middle");
+  assert.equal(result.blueprint.pages, 4);
+  assert.equal(result.totalScore, 100);
+  assert.ok(result.itemCount >= result.blueprint.minItems);
+  assert.ok(result.itemCount <= result.blueprint.maxItems);
+});
+
+test("rejects an unsupported grade before running assessment generation", async () => {
+  let runnerCalled = false;
+  await assert.rejects(
+    draftAssessmentService(
+      {},
+      { subject: "数学", kind: "小测", grade: "高中一年级", requirement: "基础" },
+      {
+        persist: false,
+        assessmentDraftRunner: async () => {
+          runnerCalled = true;
+          return fakeAssessmentResult();
+        }
+      }
+    ),
+    /UNSUPPORTED_GRADE/
+  );
+  assert.equal(runnerCalled, false);
 });
 
 test("draftAssessmentService keeps complete Weather model content and the requested 12 items", async () => {

@@ -198,6 +198,16 @@ export declare function callMiniMaxChat(config: RuntimeConfigLike, messages: Arr
 export declare function callGpt55Chat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>, options?: Record<string, unknown>): Promise<unknown>;
 export declare function callGpt56Chat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>, options?: Record<string, unknown>): Promise<unknown>;
 export declare function extractChatText(body: unknown): string;
+export declare function buildAssessmentPromptProfile(input?: { subject?: string; grade?: string; targetGrade?: string }): {
+  stage: "primary" | "middle";
+  role: string;
+  subjectRule: string;
+};
+export declare function buildGradingPromptProfile(input?: { subject?: string; grade?: string; targetGrade?: string }): {
+  stage: "primary" | "middle";
+  role: string;
+  guardrails: string;
+};
 export declare function inferClassroomQaMode(question?: string): QaMode;
 export declare function answerStudentQuestion(config: RuntimeConfigLike, input?: QaQuestionInput): Promise<QaRuntimeResult>;
 export declare function generateStudentDictionaryDraft(
