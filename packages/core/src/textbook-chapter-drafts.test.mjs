@@ -71,3 +71,31 @@ test("shared chapter drafts cover the teacher-confirmed 2022 grade seven math ca
   assert.ok(firstTerm.every((chapter) => chapter.focusItems.length > 0));
   assert.ok(secondTerm.every((chapter) => chapter.focusItems.length > 0));
 });
+
+test("shared chapter drafts match the confirmed 2022 elementary math catalogs", async () => {
+  const { chapterDraftsForTextbookAsset } = await import(moduleUrl);
+  const catalogs = [
+    {
+      asset: { id: "math-3a", subject: "数学", grade: "三年级", volume: "上册" },
+      units: ["第一单元", "第二单元", "第三单元", "数学实践活动一", "第四单元", "数学实践活动二", "第五单元", "第六单元", "第七单元"],
+      titles: ["观察物体", "混合运算", "毫米、分米和千米", "曹冲称象的故事", "多位数乘一位数", "数字编码", "线和角", "分数的初步认识", "复习与关联"]
+    },
+    {
+      asset: { id: "math-3b", subject: "数学", grade: "三年级", volume: "下册" },
+      units: ["第一单元", "第二单元", "第三单元", "第四单元", "第五单元", "数学实践活动一", "第六单元", "第七单元"],
+      titles: ["生活中的运动现象", "除数是一位数的除法", "长方形和正方形", "图形的面积", "数据的收集与整理", "年、月、日的秘密", "小数的初步认识", "复习与关联"]
+    },
+    {
+      asset: { id: "math-4a", subject: "数学", grade: "四年级", volume: "上册" },
+      units: ["第一单元", "数学实践活动一", "第二单元", "第三单元", "第四单元", "第五单元", "第六单元", "数学实践活动二", "第七单元"],
+      titles: ["万以上数的认识", "亿有多大", "角的度量", "多位数乘两位数", "加法模型和乘法模型", "平行四边形和梯形", "条形统计图", "寻找宝藏", "复习与关联"]
+    }
+  ];
+
+  for (const { asset, units, titles } of catalogs) {
+    const chapters = chapterDraftsForTextbookAsset(asset);
+    assert.deepEqual(chapters.map((chapter) => chapter.unit), units);
+    assert.deepEqual(chapters.map((chapter) => chapter.title), titles);
+    assert.ok(chapters.every((chapter) => chapter.id.startsWith(`${asset.id}-unit-`)));
+  }
+});
