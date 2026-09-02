@@ -33,6 +33,26 @@ test("stale generation history explains why a record cannot be opened", () => {
   assert.match(source, /generationDraftContextMatches/);
 });
 
+test("student access management supports removing permissions while retaining history", () => {
+  assert.match(source, /removeStudentAccessApi/);
+  assert.match(source, /删除学生权限/);
+  assert.match(source, /请输入学生姓名确认/);
+  assert.match(source, /accessRemovedAt/);
+  assert.match(source, /!student\.accessRemovedAt/);
+});
+
+test("student access management uses a compact responsive layout", () => {
+  assert.match(source, /student-access-controls/);
+  assert.match(source, /student-access-list/);
+  assert.match(source, /student-access-row/);
+  assert.match(source, /student-access-identity/);
+  assert.match(source, /student-access-actions/);
+  assert.match(styles, /\.student-access-row\s*\{[\s\S]{0,500}grid-template-columns:/);
+  assert.match(styles, /@media \(max-width: 640px\)[\s\S]{0,5000}\.student-access-row\s*\{[\s\S]{0,500}grid-template-columns:/);
+  assert.match(styles, /@media \(max-width: 640px\)[\s\S]{0,5000}\.student-registration-form[\s\S]{0,500}grid-template-columns: 1fr/);
+  assert.match(styles, /\.student-access-actions\s+\.secondary-button\s*\{[\s\S]{0,260}min-height: 32px/);
+});
+
 test("generation workbench keeps selectable options for preview-matched fields", () => {
   assert.match(source, /const practiceTrainingTargetOptions = \[/);
   assert.match(source, /const questionCountOptionsByMode: Record<GenerationMode, string\[]> = /);
@@ -53,6 +73,12 @@ test("generation workbench sends structured item count and chapter context", () 
   assert.match(source, /requestedItemCount:/);
   assert.match(source, /textbookChapterTitle:\s*generationTextbookContext\?\.chapter\?\.title/);
   assert.doesNotMatch(source, /textbookChapterTitle:[\s\S]{0,160}assessmentQuizChapter/);
+});
+
+test("generation workbench exposes chapter knowledge points and submits them structurally", () => {
+  assert.match(source, /focusItems/);
+  assert.match(source, /knowledgePoints:\s*generationKnowledgePoints/);
+  assert.match(source, /知识点选项/);
 });
 
 test("only textbook quizzes submit textbook evidence and expose scope confirmation at the action dock", () => {
@@ -218,14 +244,31 @@ test("generation review separates draft rejection from regeneration", () => {
 
   assert.ok(rejectStart >= 0);
   assert.ok(regenerateStart > rejectStart);
-  assert.match(rejectSource, /reviewAssessmentDraft\(assignmentId, "reject"\)/);
+  assert.match(rejectSource, /reviewAssessmentDraft\(assignmentId, "reject", normalizedFeedback\)/);
   assert.doesNotMatch(rejectSource, /createAssessment\(/);
   assert.match(source, /async function regenerateAssessmentDraft/);
-  assert.match(source, /await createAssessment\(draft\.request\)/);
+  assert.match(source, /await createAssessment\(\{[\s\S]{0,300}normalizedFeedback/);
   assert.match(source, /onAssessmentRegenerate/);
   assert.match(source, /否决草稿/);
   assert.match(source, /重新生成/);
   assert.match(source, /latestAssessmentDraft\.reviewStatus !== "rejected"/);
+});
+
+test("generation review collects feedback and carries it into regeneration", () => {
+  assert.match(source, /generationReviewFeedback/);
+  assert.match(source, /onAssessmentReject\(latestAssessmentDraft\.assignmentId, feedback\)/);
+  assert.match(source, /onAssessmentRegenerate\(latestAssessmentDraft\.assignmentId, feedback\)/);
+  assert.match(source, /reviewAssessmentDraft\(assignmentId, "reject", normalizedFeedback\)/);
+  assert.match(source, /教师否决\/重生成要求/);
+  assert.match(source, /requirement:.*normalizedFeedback/);
+});
+
+test("student access list exposes editable grade controls", () => {
+  assert.match(source, /onGradeUpdate/);
+  assert.match(source, /编辑年级/);
+  assert.match(source, /保存年级/);
+  assert.match(apiSource, /updateStudentProfileApi/);
+  assert.match(apiSource, /\/api\/students\/\$\{studentId\}\/profile/);
 });
 
 test("generation review exposes the selected draft's student and answer PDFs", () => {

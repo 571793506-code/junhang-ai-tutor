@@ -248,6 +248,28 @@ export async function updateStudentAccessStatusApi(studentId: string, input: Rec
   }>(response);
 }
 
+export async function updateStudentProfileApi(studentId: string, input: { grade: string }) {
+  const response = await fetch(`${API_BASE_URL}/api/students/${studentId}/profile`, {
+    method: "PATCH",
+    headers: jsonHeaders(),
+    body: JSON.stringify(input)
+  });
+  return readJson<{
+    ok: boolean;
+    student: StudentProfile;
+    historyRetained: boolean;
+  }>(response);
+}
+
+export async function removeStudentAccessApi(studentId: string, confirmationName: string) {
+  const response = await fetch(`${API_BASE_URL}/api/students/${studentId}/access`, {
+    method: "DELETE",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ confirmationName })
+  });
+  return readJson<{ ok: boolean; student: StudentProfile; historyRetained: boolean }>(response);
+}
+
 export async function aggregateStudentProfile(studentId: string) {
   const response = await fetch(`${API_BASE_URL}/api/students/${studentId}/profile/aggregate`, {
     method: "POST",
@@ -975,7 +997,9 @@ export type ContentIndexSummary = {
     id: string;
     title: string;
     sourceType?: string;
+    sourceUrl?: string;
     markdownPath?: string;
+    curriculumStandard?: string;
     summary?: string;
     subjects?: string[];
     grades?: string[];
@@ -1007,6 +1031,7 @@ export type KnowledgeSource = {
   textbookTitle: string;
   curriculumSeries: string;
   curriculumRegion: string;
+  curriculumStandard: string;
   metadata: Record<string, unknown>;
   chunkCount: number;
   createdAt: string;

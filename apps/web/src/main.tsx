@@ -89,11 +89,13 @@ import {
   reviewAssessmentDraft,
   rescanTextbooks,
   resetStudentAccessCodeApi,
+  removeStudentAccessApi,
   setClassroomDeviceLock,
   setSessionToken,
   syncKnowledgeSourcesFromIndex,
   type TermReportType,
   updateTextbookChapters,
+  updateStudentProfileApi,
   updateStudentAccessStatusApi,
   uploadTeachingMaterials,
   uploadSubmission
@@ -116,8 +118,8 @@ type ProfileDraft = { studentId: string; studentName: string; snapshot: Record<s
 type ProfilePeriodType = "weekly" | "monthly";
 type TermReportDraftState = { report: StudentReportCard; teacherText: string };
 type GenerationMode = "quiz" | "practice" | "exam";
-type AssessmentRequestInput = { targetScope?: "student" | "grade"; studentId?: string; targetGrade?: string; subject?: SubjectLabel; kind?: string; difficulty?: string; requirement?: string; requestedItemCount?: number; contentScope?: string; textbookAssetId?: string; textbookTitle?: string; textbookEdition?: string; textbookSeries?: string; textbookVolume?: string; textbookRegion?: string; textbookChapterId?: string; textbookChapterTitle?: string; generationBasis?: "textbook_reviewed" | "teacher_requirement" | "teacher_requirement_emergency"; recoveryReason?: string };
-type AssessmentDraftRef = { assignmentId: string; title: string; subject: SubjectLabel; kind: string; targetLabel: string; request: AssessmentRequestInput; draftAsset?: PrintAssetLink; finalExportAssets?: AssignmentCard["finalExportAssets"]; layoutValidation?: AssessmentLayoutValidation; reviewStatus: "pending" | "accepted" | "rejected" };
+type AssessmentRequestInput = { targetScope?: "student" | "grade"; studentId?: string; targetGrade?: string; subject?: SubjectLabel; kind?: string; difficulty?: string; requirement?: string; requestedItemCount?: number; contentScope?: string; knowledgePoints?: string[]; textbookAssetId?: string; textbookTitle?: string; textbookEdition?: string; textbookSeries?: string; textbookVolume?: string; textbookRegion?: string; textbookChapterId?: string; textbookChapterTitle?: string; generationBasis?: "textbook_reviewed" | "teacher_requirement" | "teacher_requirement_emergency"; recoveryReason?: string };
+type AssessmentDraftRef = { assignmentId: string; title: string; subject: SubjectLabel; kind: string; targetLabel: string; request: AssessmentRequestInput; draftAsset?: PrintAssetLink; finalExportAssets?: AssignmentCard["finalExportAssets"]; layoutValidation?: AssessmentLayoutValidation; reviewFeedback?: string; reviewStatus: "pending" | "accepted" | "rejected" };
 type StudentRegistrationInput = { displayName: string; grade: string; className: string; school: string; textbookVersion: string; guardianName: string; guardianPhone: string; notes: string; enrollmentStatus: string };
 type ReviewUploadSource = "taskEvidence" | "grading";
 type ReviewSubmissionBatch = {
@@ -186,6 +188,7 @@ function assessmentDraftRefFromAssignment(assignment: AssignmentCard): Assessmen
       requestedItemCount: assignment.audit?.itemCount
     },
     draftAsset: assignment.draftReviewAsset,
+    reviewFeedback: assignment.draftReviewFeedback || undefined,
     finalExportAssets: assignment.finalExportAssets,
     layoutValidation: assignment.layoutValidation as AssessmentLayoutValidation | undefined,
     reviewStatus
@@ -375,7 +378,7 @@ function profileDraftToPlainText(snapshot: Record<string, unknown>, studentName:
 }
 
 const subjects: SubjectLabel[] = ["语文", "数学", "英语"] as SubjectLabel[];
-const gradeOptions = ["三年级", "四年级", "五年级", "六年级"];
+const gradeOptions = ["三年级", "四年级", "五年级", "六年级", "七年级"];
 const practiceTrainingTargetOptions = ["错因纠正 + 同类变式", "基础巩固", "同类变式", "综合提升"];
 const questionCountOptionsByMode: Record<GenerationMode, string[]> = {
   quiz: ["8 题左右", "12 题左右", "16 题左右", "20 题左右"],
@@ -663,6 +666,7 @@ function App() {
       requirement,
       requestedItemCount: input?.requestedItemCount,
       contentScope: input?.contentScope,
+      knowledgePoints: input?.knowledgePoints,
       textbookAssetId: input?.textbookAssetId,
       textbookTitle: input?.textbookTitle,
       textbookEdition: input?.textbookEdition,
@@ -748,12 +752,17 @@ function App() {
     }
   }
 
-  async function rejectAssessmentDraft(assignmentId: string) {
+  async function rejectAssessmentDraft(assignmentId: string, feedback: string) {
     const draft = latestAssessmentDraft;
     if (!draft || draft.assignmentId !== assignmentId) return;
+    const normalizedFeedback = feedback.trim();
+    if (!normalizedFeedback) {
+      setSync({ busy: false, ok: false, message: "请填写否决原因" });
+      return;
+    }
     try {
-      await reviewAssessmentDraft(assignmentId, "reject");
-      setLatestAssessmentDraft({ ...draft, reviewStatus: "rejected" });
+      await reviewAssessmentDraft(assignmentId, "reject", normalizedFeedback);
+      setLatestAssessmentDraft({ ...draft, reviewStatus: "rejected", reviewFeedback: normalizedFeedback });
       setPrintAssets([]);
       setSync({ busy: false, ok: null, message: "已否决当前草稿。需要时可按原要求重新生成。" });
       await applyBootstrap();
@@ -762,11 +771,24 @@ function App() {
     }
   }
 
-  async function regenerateAssessmentDraft(assignmentId: string) {
+  async function regenerateAssessmentDraft(assignmentId: string, feedback: string) {
     const draft = latestAssessmentDraft;
     if (!draft || draft.assignmentId !== assignmentId || draft.reviewStatus !== "rejected") return;
-    setSync({ busy: true, ok: null, message: "正在按原要求创建新的生成任务..." });
-    await createAssessment(draft.request);
+    const normalizedFeedback = feedback.trim();
+    if (!normalizedFeedback) {
+      setSync({ busy: false, ok: false, message: "请填写本次重新生成要求" });
+      return;
+    }
+    setSync({ busy: true, ok: null, message: "正在按教师反馈创建新的生成任务..." });
+    try {
+      await reviewAssessmentDraft(assignmentId, "reject", normalizedFeedback);
+      await createAssessment({
+        ...draft.request,
+        requirement: `${draft.request.requirement || ""}\n教师否决/重生成要求：${normalizedFeedback}`.trim()
+      });
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `重新生成失败：${error instanceof Error ? error.message : String(error)}` });
+    }
   }
 
   async function uploadForReview(input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[]; assignmentId?: string; materialType?: "external_workbook" | "generated_assessment"; answerSourceMode?: "teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing"; answerKeyText?: string; referenceSourceId?: string }) {
@@ -1044,6 +1066,26 @@ function App() {
     }
   }
 
+  async function updateStudentGrade(studentId: string, grade: string) {
+    try {
+      await updateStudentProfileApi(studentId, { grade });
+      setSync({ busy: false, ok: true, message: "学生年级已更新，历史学习记录继续保留" });
+      await Promise.all([applyBootstrap(), refreshTeacherOps()]);
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `年级更新失败：${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
+  async function removeStudentAccess(studentId: string, confirmationName: string) {
+    try {
+      await removeStudentAccessApi(studentId, confirmationName);
+      setSync({ busy: false, ok: true, message: "学生权限已移除，历史学习数据继续保留" });
+      await Promise.all([applyBootstrap(), refreshTeacherOps()]);
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `移除学生权限失败：${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
   async function createStudentProfileDraft(studentId?: string, periodType: ProfilePeriodType = "weekly") {
     const student = students.find((item) => item.id === studentId) || currentStudent;
     try {
@@ -1219,7 +1261,7 @@ function App() {
             setLatestAssessmentDraft(draft);
             setPrintAssets([]);
           }
-        }} onAssessmentRegenerate={regenerateAssessmentDraft} onAssessmentReject={rejectAssessmentDraft} onConfirmTextbookGenerationScope={confirmTextbookGenerationScopeForTeacher} onContentIndexRebuild={rebuildTeachingContentIndex} onContentUpload={uploadTeachingContent} onExportPrint={exportLatestPrint} onKnowledgeRefresh={refreshKnowledgeLibrary} onKnowledgeReview={reviewKnowledgeLibrarySource} onKnowledgeSourceCreate={addKnowledgeSource} onKnowledgeSync={syncKnowledgeLibrary} onMarkReviewed={markReviewed} onOpenModule={(module) => selectModule(module, "teacher")} onOpenTextbook={openTextbookAsset} onProfileDraft={createStudentProfileDraft} onProfilePrint={generateStudentProfilePrintFile} onProfilePublish={publishStudentProfileDraft} onQuestionReview={reviewQuestion} onRecognize={recognizeSubmission} onRefreshOps={refreshReviewQueue} onRefreshTextbooks={refreshTextbookLibrary} onRepairTextbookChapterDrafts={repairTextbookChapterDraftsForTeacher} onRescanTextbooks={rescanTextbookLibrary} onResetCode={resetStudentCode} onSaveTextbookChapters={saveTextbookChapters} onSelectTextbookContext={setSelectedTextbookContext} onStudentAccess={updateStudentAccess} onStudentCreate={async (input) => {
+        }} onAssessmentRegenerate={regenerateAssessmentDraft} onAssessmentReject={rejectAssessmentDraft} onConfirmTextbookGenerationScope={confirmTextbookGenerationScopeForTeacher} onContentIndexRebuild={rebuildTeachingContentIndex} onContentUpload={uploadTeachingContent} onExportPrint={exportLatestPrint} onKnowledgeRefresh={refreshKnowledgeLibrary} onKnowledgeReview={reviewKnowledgeLibrarySource} onKnowledgeSourceCreate={addKnowledgeSource} onKnowledgeSync={syncKnowledgeLibrary} onMarkReviewed={markReviewed} onOpenModule={(module) => selectModule(module, "teacher")} onOpenTextbook={openTextbookAsset} onProfileDraft={createStudentProfileDraft} onProfilePrint={generateStudentProfilePrintFile} onProfilePublish={publishStudentProfileDraft} onQuestionReview={reviewQuestion} onRecognize={recognizeSubmission} onRefreshOps={refreshReviewQueue} onRefreshTextbooks={refreshTextbookLibrary} onRepairTextbookChapterDrafts={repairTextbookChapterDraftsForTeacher} onRescanTextbooks={rescanTextbookLibrary} onResetCode={resetStudentCode} onSaveTextbookChapters={saveTextbookChapters} onSelectTextbookContext={setSelectedTextbookContext} onStudentAccess={updateStudentAccess} onStudentGradeUpdate={updateStudentGrade} onStudentRemove={removeStudentAccess} onStudentCreate={async (input) => {
           const name = input.displayName.trim();
           if (!name || !input.guardianPhone.trim()) {
             setSync({ busy: false, ok: false, message: "请至少填写学生姓名和家长电话" });
@@ -1330,6 +1372,8 @@ function TeacherWorkspace({
   onSaveTextbookChapters,
   onSelectTextbookContext,
   onStudentAccess,
+  onStudentGradeUpdate,
+  onStudentRemove,
   onStudentCreate,
   onTermReportDraft,
   onTermReportPdf,
@@ -1370,8 +1414,8 @@ function TeacherWorkspace({
   onAssessmentJobSelect: (job: AssessmentGenerationJob) => void;
   onAssessmentRecovery: (input: AssessmentRequestInput) => Promise<void>;
   onAssessmentDraftSelect: (assignment: AssignmentCard) => void;
-  onAssessmentRegenerate: (assignmentId: string) => void;
-  onAssessmentReject: (assignmentId: string) => void;
+  onAssessmentRegenerate: (assignmentId: string, feedback: string) => void;
+  onAssessmentReject: (assignmentId: string, feedback: string) => void;
   onConfirmTextbookGenerationScope: (assetId: string, chapterIds: string[]) => Promise<void>;
   onContentIndexRebuild: () => void;
   onConfirmAnswerSource: (submissionId: string, input: { mode: "teacher_confirmed" | "teacher_selected_reference"; answerKeyText?: string; referenceSourceId?: string }) => void;
@@ -1398,6 +1442,8 @@ function TeacherWorkspace({
   onSaveTextbookChapters: (assetId: string, chapters: TextbookChapter[]) => void;
   onSelectTextbookContext: (context: { asset: TextbookAsset; chapter?: TextbookChapter } | null) => void;
   onStudentAccess: (studentId: string, enabled: boolean) => void;
+  onStudentGradeUpdate: (studentId: string, grade: string) => void;
+  onStudentRemove: (studentId: string, confirmationName: string) => void;
   onStudentCreate: (input: StudentRegistrationInput) => void;
   onTermReportDraft: (studentId: string, reportType: TermReportType, periodLabel: string) => Promise<StudentReportCard | null>;
   onTermReportPdf: (studentId: string, reportId: string, teacherText: string) => Promise<StudentReportCard | null>;
@@ -1422,6 +1468,8 @@ function TeacherWorkspace({
 }) {
   const [selectedStudentId, setSelectedStudentId] = useState(students.find((student) => student.canReceiveNewWork)?.id || "");
   const [generationStudentId, setGenerationStudentId] = useState(students.find((student) => student.canReceiveNewWork)?.id || "");
+  const [generationReviewAction, setGenerationReviewAction] = useState<"reject" | "regenerate" | null>(null);
+  const [generationReviewFeedback, setGenerationReviewFeedback] = useState("");
   const [isAssessmentRecoveryBusy, setIsAssessmentRecoveryBusy] = useState(false);
   const [taskSubject, setTaskSubject] = useState<SubjectLabel>("英语");
   const [taskMinutes, setTaskMinutes] = useState(12);
@@ -1539,13 +1587,6 @@ function TeacherWorkspace({
   const visibleGenerationStudents = generationTargetStudents;
   const generationSelectedStudent = visibleGenerationStudents.find((student) => student.id === generationStudentId) || visibleGenerationStudents[0];
   const generationTargetGrade = generationTargetScope === "student" ? generationSelectedStudent?.grade || targetGrade : targetGrade;
-  const generationDraftContextMatches = assessmentDraftMatchesGenerationContext(latestAssessmentDraft, {
-    targetScope: generationTargetScope,
-    studentId: generationTargetScope === "student" ? generationSelectedStudent?.id : undefined,
-    targetGrade: generationTargetGrade,
-    subject: assessmentSubject,
-    kind: assessmentKind
-  });
   const generationTextbookAssets = useMemo(() => textbooks.filter((asset) => (
     asset.subject === assessmentSubject
       && asset.grade === generationTargetGrade
@@ -1558,6 +1599,21 @@ function TeacherWorkspace({
     ? selectedTextbookContext
     : null;
   const generationTextbookChapters = generationTextbookContext?.asset.chapters || [];
+  const generationChapterKnowledgePoints = generationTextbookContext?.chapter?.focusItems || [];
+  const generationKnowledgePoints = useMemo(() => {
+    const defaultRange = "教材章节重点、课堂已讲知识点、当周易错概念";
+    const customPoints = assessmentKnowledgeRange.trim() === defaultRange
+      ? []
+      : assessmentKnowledgeRange.split(/[\n、，,；;]+/).map((item) => item.trim()).filter(Boolean);
+    return [...new Set(customPoints.length ? customPoints : generationChapterKnowledgePoints)];
+  }, [assessmentKnowledgeRange, generationChapterKnowledgePoints]);
+  const generationDraftContextMatches = assessmentDraftMatchesGenerationContext(latestAssessmentDraft, {
+    targetScope: generationTargetScope,
+    studentId: generationTargetScope === "student" ? generationSelectedStudent?.id : undefined,
+    targetGrade: generationTargetGrade,
+    subject: assessmentSubject,
+    kind: assessmentKind
+  });
   const matchingApprovedTextbookSources = useMemo(() => generationTextbookContext
     ? knowledgeSources.filter((source) => (
       source.reviewStatus === "APPROVED"
@@ -1682,6 +1738,7 @@ function TeacherWorkspace({
         ? `${requirement}\n生成依据：教师要求临时小测。教材资料待恢复，不得声称引用教材原文。`
         : requirement,
       requestedItemCount: Number.isFinite(requestedItemCount) ? requestedItemCount : undefined,
+      knowledgePoints: generationKnowledgePoints,
       contentScope: generationMode === "quiz"
         ? assessmentGenerationContentScope
         : generationMode === "practice"
@@ -1847,7 +1904,7 @@ function TeacherWorkspace({
         <span>后续可和课堂平板、电视、小程序共享同一任务状态</span>
       </div>
     </section>
-    <section className={moduleClass("学生权限", "panel full")}><PanelTitle icon={ShieldCheck} title="学生入学登记与权限" /><p className="muted-line">当前教师：{teacher.displayName}，教师码：{teacher.accessCode || "已隐藏"}。新学生由登记教师绑定，登记后生成学生专属码；退课后可停用登录码但保留学生档案。</p><div className="student-registration-card"><div className="review-card-head"><div><h3>新学生入学办理资料</h3><p>用于开通学生端和后续一对一学习归档。档案草稿生成已移至“学生档案”。</p></div><StatusPill label="登记后生成专属码" status="pending" /></div><div className="student-registration-form"><label>学生姓名<input value={studentRegistration.displayName} placeholder="例如：张思源" onChange={(event) => updateRegistration("displayName", event.target.value)} /></label><label>年级<select value={studentRegistration.grade} onChange={(event) => updateRegistration("grade", event.target.value)}>{gradeOptions.map((grade) => <option key={grade}>{grade}</option>)}</select></label><label>班级/分组<input value={studentRegistration.className} placeholder="例如：五年级 1 班 / 周六上午班" onChange={(event) => updateRegistration("className", event.target.value)} /></label><label>学校/来源<input value={studentRegistration.school} placeholder="例如：君航课堂 / XX小学" onChange={(event) => updateRegistration("school", event.target.value)} /></label><label>教材版本<input value={studentRegistration.textbookVersion} placeholder="贵州遵义教材基准" onChange={(event) => updateRegistration("textbookVersion", event.target.value)} /></label><label>入学状态<select value={studentRegistration.enrollmentStatus} onChange={(event) => updateRegistration("enrollmentStatus", event.target.value)}><option>在读</option><option>测试</option><option>暂停</option></select></label><label>家长姓名<input value={studentRegistration.guardianName} placeholder="例如：张女士" onChange={(event) => updateRegistration("guardianName", event.target.value)} /></label><label>家长电话<input value={studentRegistration.guardianPhone} placeholder="用于学生端登录校验" onChange={(event) => updateRegistration("guardianPhone", event.target.value)} /></label><label className="registration-notes">学习关注点/入学备注<textarea value={studentRegistration.notes} placeholder="例如：计算题速度偏慢，英语词汇拼写需要跟进。" onChange={(event) => updateRegistration("notes", event.target.value)} /></label></div><div className="button-row"><button className="primary-button" onClick={() => onStudentCreate(studentRegistration)}><Plus size={17} />登记学生并生成专属码</button><button className="secondary-button" onClick={() => setStudentRegistration({ displayName: "", grade: "三年级", className: "", school: "君航课堂", textbookVersion: "贵州遵义教材基准", guardianName: "", guardianPhone: "", notes: "", enrollmentStatus: "在读" })}><RotateCcw size={17} />清空表单</button></div></div><div className="template-controls"><label>操作已有学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label>{selectedStudent ? <button className="secondary-button" onClick={() => onResetCode(selectedStudent.id)}><RotateCcw size={17} />重置专属码</button> : null}</div><StudentList onAccess={onStudentAccess} students={students} /></section>
+    <section className={moduleClass("学生权限", "panel full")}><PanelTitle icon={ShieldCheck} title="学生入学登记与权限" /><p className="muted-line">当前教师：{teacher.displayName}，教师码：{teacher.accessCode || "已隐藏"}。新学生由登记教师绑定，登记后生成学生专属码；退课后可停用登录码但保留学生档案。</p><div className="student-registration-card"><div className="review-card-head"><div><h3>新学生入学办理资料</h3><p>用于开通学生端和后续一对一学习归档。档案草稿生成已移至“学生档案”。</p></div><StatusPill label="登记后生成专属码" status="pending" /></div><div className="student-registration-form"><label>学生姓名<input value={studentRegistration.displayName} placeholder="例如：张思源" onChange={(event) => updateRegistration("displayName", event.target.value)} /></label><label>年级<select value={studentRegistration.grade} onChange={(event) => updateRegistration("grade", event.target.value)}>{gradeOptions.map((grade) => <option key={grade}>{grade}</option>)}</select></label><label>班级/分组<input value={studentRegistration.className} placeholder="例如：五年级 1 班 / 周六上午班" onChange={(event) => updateRegistration("className", event.target.value)} /></label><label>学校/来源<input value={studentRegistration.school} placeholder="例如：君航课堂 / XX小学" onChange={(event) => updateRegistration("school", event.target.value)} /></label><label>教材版本<input value={studentRegistration.textbookVersion} placeholder="贵州遵义教材基准" onChange={(event) => updateRegistration("textbookVersion", event.target.value)} /></label><label>入学状态<select value={studentRegistration.enrollmentStatus} onChange={(event) => updateRegistration("enrollmentStatus", event.target.value)}><option>在读</option><option>测试</option><option>暂停</option></select></label><label>家长姓名<input value={studentRegistration.guardianName} placeholder="例如：张女士" onChange={(event) => updateRegistration("guardianName", event.target.value)} /></label><label>家长电话<input value={studentRegistration.guardianPhone} placeholder="用于学生端登录校验" onChange={(event) => updateRegistration("guardianPhone", event.target.value)} /></label><label className="registration-notes">学习关注点/入学备注<textarea value={studentRegistration.notes} placeholder="例如：计算题速度偏慢，英语词汇拼写需要跟进。" onChange={(event) => updateRegistration("notes", event.target.value)} /></label></div><div className="button-row"><button className="primary-button" onClick={() => onStudentCreate(studentRegistration)}><Plus size={17} />登记学生并生成专属码</button><button className="secondary-button" onClick={() => setStudentRegistration({ displayName: "", grade: "三年级", className: "", school: "君航课堂", textbookVersion: "贵州遵义教材基准", guardianName: "", guardianPhone: "", notes: "", enrollmentStatus: "在读" })}><RotateCcw size={17} />清空表单</button></div></div><div className="template-controls student-access-controls"><label>操作已有学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{students.filter((student) => !student.accessRemovedAt).map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label>{selectedStudent ? <button className="secondary-button" onClick={() => onResetCode(selectedStudent.id)}><RotateCcw size={17} />重置专属码</button> : null}</div><StudentList onAccess={onStudentAccess} onGradeUpdate={onStudentGradeUpdate} onRemove={onStudentRemove} students={students} /></section>
     <section className={moduleClass("今日任务", "panel full")}><PanelTitle badge="AI生成" icon={CalendarDays} title="生成今日任务" />{textbookHint ? <p className="context-note"><BookOpen size={15} />可引用教材位置：{textbookHint}</p> : null}<div className="template-controls"><label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{selectableStudents.map((student) => <option key={student.id} value={student.id}>{student.displayName}</option>)}</select></label><label>科目<select value={taskSubject} onChange={(event) => setTaskSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label><label>预计用时<input type="number" min={5} max={60} value={taskMinutes} onChange={(event) => setTaskMinutes(Number(event.target.value) || 10)} /></label></div><label className="field-label">任务内容<textarea className="wide-textarea" value={taskRequirement} onChange={(event) => setTaskRequirement(event.target.value)} /></label><p className="muted-line">建议：写清“复习点、完成物、订正方式、是否需要家长查看”。{textbookTaskSuggestion ? ` 教材建议：${textbookTaskSuggestion}` : "具体调控仍由教师端决定。"}</p><button className="primary-button" onClick={() => selectedStudent && onTask({ studentId: selectedStudent.id, subject: taskSubject, title: `${selectedStudent.displayName} 今日${taskSubject}任务`, requirement: `${taskRequirement}${textbookHint ? `\n教材位置：${textbookHint}` : ""}`, minutes: taskMinutes })}><Send size={17} />写入今日任务</button></section>
     <section className={moduleClass("今日任务", "panel full")}><PanelTitle icon={ListChecks} title="已发布今日任务完成情况" /><p className="muted-line">平板端或学生端标记完成后会同步到这里。底部可上传完成情况照片，进入批改/归档队列，后续用于学生档案分析。</p><div className="record-list">{tasks.length ? tasks.slice(0, 10).map((task) => <div className="record-row task-detail-row" key={task.id}><SubjectBadge subject={task.subject} /><div><strong>{task.title}</strong><span>{task.studentName} · {task.status} · {task.minutes}分钟</span><p>{task.summary || task.description || "暂无具体任务说明"}</p></div><StatusPill label={task.status} status={statusToProviderStatus(task.status)} /></div>) : <p className="review-empty">暂无已发布今日任务</p>}</div><div className="student-registration-card"><div className="review-card-head"><div><h3>今日任务完成情况拍照上传</h3><p>用于上传订正本、作业本、听写本等完成证据，后续进入学生归档分析。</p></div><StatusPill label="教师复核" status="pending" /></div><div className="template-controls"><label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{selectableStudents.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label><label>科目<select value={taskSubject} onChange={(event) => setTaskSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label></div><label className="field-label">记录标题<input value={taskEvidenceTitle} placeholder={selectedStudent ? `${selectedStudent.displayName} 今日任务完成情况` : "今日任务完成情况"} onChange={(event) => setTaskEvidenceTitle(event.target.value)} /></label><ReviewImagePicker files={taskEvidenceFiles} setFiles={setTaskEvidenceFiles} testId="task-evidence-image-picker" /><div className="review-upload-action"><button className="primary-button" disabled={!selectedStudent || !taskEvidenceFiles.length || isReviewUploading("taskEvidence")} onClick={() => selectedStudent && submitReviewUpload("taskEvidence", { studentId: selectedStudent.id, subject: taskSubject, kind: "作业", title: taskEvidenceTitle.trim() || `${selectedStudent.displayName} 今日任务完成情况`, images: taskEvidenceFiles })}><Upload size={17} />上传并写入归档队列</button>{renderReviewUploadStatus("taskEvidence")}</div></div></section>
     <section className={moduleClass("教材资料", "panel full")}><PanelTitle icon={BookOpen} title="教材库与章节索引" /><p className="muted-line">当前教材文件保留在本机原路径，系统只记录年级、科目、册次、哈希、打开路径和教师确认的章节索引。需要查看原教材时交给智慧中小学 App 或本机默认关联程序打开，不转换文件格式。</p><div className="template-controls textbook-filter-grid"><label>年级<select value={textbookGrade} onChange={(event) => setTextbookGrade(event.target.value)}><option value="">全部年级</option>{gradeOptions.map((grade) => <option key={grade}>{grade}</option>)}</select></label><label>科目<select value={textbookSubject} onChange={(event) => setTextbookSubject(event.target.value)}><option value="">全部科目</option>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label><label>册次<select value={textbookVolume} onChange={(event) => setTextbookVolume(event.target.value)}><option value="">全部册次</option><option>上册</option><option>下册</option></select></label><label>关键词<input value={textbookSearch} onChange={(event) => setTextbookSearch(event.target.value)} placeholder="教材名、版本或路径关键词" /></label></div><div className="button-row"><button className="primary-button" onClick={() => onRefreshTextbooks({ subject: textbookSubject, grade: textbookGrade, volume: textbookVolume, search: textbookSearch })}><Search size={17} />筛选教材</button><button className="secondary-button" onClick={onRescanTextbooks}><RefreshCw size={17} />重扫教材目录</button><button className="secondary-button" onClick={() => void onRepairTextbookChapterDrafts()}><ListChecks size={17} />补齐可用教材目录</button></div><ContentIndexPanel files={contentFiles} index={contentIndex} notice={contentFileNotice} onFiles={selectContentFiles} onRebuild={onContentIndexRebuild} onUpload={() => onContentUpload(contentFiles)} /><KnowledgeLibraryPanel grade={knowledgeGrade} onGrade={setKnowledgeGrade} onRefresh={onKnowledgeRefresh} onReview={onKnowledgeReview} onSourceCreate={(input) => { onKnowledgeSourceCreate(input); setKnowledgeTitle(""); setKnowledgeUrl(""); setKnowledgeSummary(""); }} onSubject={setKnowledgeSubject} onSync={onKnowledgeSync} selectedTextbook={selectedTextbookContext?.asset || null} sources={knowledgeSources} subject={knowledgeSubject} summary={knowledgeSummary} title={knowledgeTitle} url={knowledgeUrl} onSummary={setKnowledgeSummary} onTitle={setKnowledgeTitle} onUrl={setKnowledgeUrl} /><TextbookLibrary assets={textbooks} onConfirmGenerationScope={onConfirmTextbookGenerationScope} onOpen={onOpenTextbook} onSaveChapters={onSaveTextbookChapters} onSelectContext={onSelectTextbookContext} selectedContext={selectedTextbookContext} /></section>
@@ -1923,6 +1980,7 @@ function TeacherWorkspace({
               : null}
             {generationMode === "quiz" && generationTextbookContext && !generationTextbookChapters.length ? <div className="context-note blocked"><span>当前教材暂无章节索引；请先补齐目录草案并核对后再按章节生成。</span><button className="secondary-button" disabled={!chapterDraftsForTextbookAsset(generationTextbookContext.asset).length} onClick={() => onSaveTextbookChapters(generationTextbookContext.asset.id, chapterDraftsForTextbookAsset(generationTextbookContext.asset))} type="button"><FileText size={16} />建立章节草案</button></div> : null}
           <label className="wide-field">知识点 / 考查范围<input value={assessmentKnowledgeRange} placeholder={generationMode === "quiz" ? textbookHint || "可补充知识点或考查范围" : "可填写知识点或考查范围"} onChange={(event) => setAssessmentKnowledgeRange(event.target.value)} /></label>
+          {generationChapterKnowledgePoints.length ? <div className="generation-knowledge-point-options"><span>知识点选项</span><div>{generationChapterKnowledgePoints.map((point) => <button key={point} type="button" className={generationKnowledgePoints.includes(point) ? "active" : ""} onClick={() => setAssessmentKnowledgeRange((current) => current === "教材章节重点、课堂已讲知识点、当周易错概念" ? point : current.includes(point) ? current : `${current}；${point}`)}>{point}</button>)}</div></div> : null}
           </div>
           <div className="generation-section-box">
             <strong>{generationMode === "exam" ? "题型与分值结构" : generationMode === "practice" ? "训练结构" : "题型组成"}</strong>
@@ -1952,8 +2010,9 @@ function TeacherWorkspace({
             {latestAssessmentDraft && !generationDraftContextMatches ? <p className="context-note blocked"><ShieldCheck size={15} />当前表单上下文已变化，该草稿仅作为历史记录。请切回对应学生、年级、科目和生成类型后再复核或正式导出。</p> : null}
             {latestAssessmentDraft?.layoutValidation?.ok === false || (latestAssessmentDraft && !latestAssessmentDraft.layoutValidation) ? <p className="context-note blocked"><ShieldCheck size={15} />排版校验未通过：{latestAssessmentDraft.layoutValidation?.issues.join("；") || "缺少有效的页数和题目坐标校验，请重新导出草稿。"}</p> : null}
             <button className="primary-button" disabled={finalExportCompleted || !latestAssessmentDraft || !generationDraftContextMatches || latestAssessmentDraft.layoutValidation?.ok !== true} onClick={() => latestAssessmentDraft && generationDraftContextMatches && onExportPrint(latestAssessmentDraft.assignmentId)}><CheckCircle2 size={17} />确认正式导出</button>
-            <button className="secondary-button danger-button" disabled={!latestAssessmentDraft || !generationDraftContextMatches || latestAssessmentDraft.reviewStatus !== "pending"} onClick={() => latestAssessmentDraft && generationDraftContextMatches && onAssessmentReject(latestAssessmentDraft.assignmentId)} type="button"><CircleX size={17} />否决草稿</button>
-            <button className="secondary-button" disabled={!latestAssessmentDraft || !generationDraftContextMatches || latestAssessmentDraft.reviewStatus !== "rejected"} onClick={() => latestAssessmentDraft && generationDraftContextMatches && onAssessmentRegenerate(latestAssessmentDraft.assignmentId)} type="button"><RefreshCw size={17} />重新生成</button>
+            <button className="secondary-button danger-button" disabled={!latestAssessmentDraft || !generationDraftContextMatches || latestAssessmentDraft.reviewStatus !== "pending"} onClick={() => { if (!latestAssessmentDraft) return; setGenerationReviewAction("reject"); setGenerationReviewFeedback(latestAssessmentDraft.reviewFeedback || ""); }} type="button"><CircleX size={17} />否决草稿</button>
+            <button className="secondary-button" disabled={!latestAssessmentDraft || !generationDraftContextMatches || latestAssessmentDraft.reviewStatus !== "rejected"} onClick={() => { if (!latestAssessmentDraft) return; setGenerationReviewAction("regenerate"); setGenerationReviewFeedback(latestAssessmentDraft.reviewFeedback || ""); }} type="button"><RefreshCw size={17} />重新生成</button>
+            {generationReviewAction && latestAssessmentDraft ? <div className="generation-review-feedback-panel"><label className="field-label">{generationReviewAction === "reject" ? "否决原因" : "重新生成要求"}<textarea className="wide-textarea compact-textarea" autoFocus value={generationReviewFeedback} onChange={(event) => setGenerationReviewFeedback(event.target.value)} placeholder={generationReviewAction === "reject" ? "请说明题目范围、题量、难度或解析需要如何调整。" : "请补充需要修改的题型、范围、难度或解析要求。"} /></label><div className="button-row"><button className="primary-button" disabled={!generationReviewFeedback.trim()} onClick={() => { const feedback = generationReviewFeedback.trim(); if (generationReviewAction === "reject") onAssessmentReject(latestAssessmentDraft.assignmentId, feedback); else onAssessmentRegenerate(latestAssessmentDraft.assignmentId, feedback); setGenerationReviewAction(null); }} type="button">{generationReviewAction === "reject" ? "提交否决" : "按要求重新生成"}</button><button className="secondary-button" onClick={() => setGenerationReviewAction(null)} type="button">取消</button></div></div> : null}
             {latestAssessmentDraft?.finalExportAssets?.studentPaper || latestAssessmentDraft?.finalExportAssets?.answerAnalysis ? <div className="generation-final-assets"><strong>本任务正式导出</strong>{latestAssessmentDraft?.finalExportAssets?.studentPaper ? <a className="draft-pdf-link" href={latestAssessmentDraft.finalExportAssets.studentPaper.url} target="_blank" rel="noreferrer"><FileText size={17} />学生卷 PDF</a> : null}{latestAssessmentDraft?.finalExportAssets?.answerAnalysis ? <a className="draft-pdf-link" href={latestAssessmentDraft.finalExportAssets.answerAnalysis.url} target="_blank" rel="noreferrer"><FileText size={17} />答案解析 PDF</a> : null}</div> : null}
           </div>
           {generationFeedbackVisible ? <div className={`generation-inline-status ${generationFeedbackStatus}`}><StatusDot status={generationFeedbackStatus} /><span>{generationFeedbackMessage}</span></div> : null}
@@ -2645,12 +2704,19 @@ function FlowCard({ hint, icon: Icon, index, label, state, value }: { hint: stri
 function TaskList({ tasks }: { tasks: LearningTaskCard[] }) {
   return <div className="record-list">{tasks.length ? tasks.slice(0, 8).map((task) => {
     const detail = task.summary || task.description || task.knowledgePoints.join(" / ") || "老师暂未填写具体事项";
-    return <div className="record-row task-detail-row" key={task.id}><SubjectBadge subject={task.subject} /><div><strong>{task.title}</strong><span>{task.studentName} · {task.minutes}分钟 · {task.dueLabel}</span><p>{detail}</p></div><StatusPill label={task.status} status={statusToProviderStatus(task.status)} /></div>;
+    const description = task.description || detail;
+    return <div className="record-row task-detail-row" key={task.id}><SubjectBadge subject={task.subject} /><details className="task-details"><summary><strong>{task.title}</strong><span>{task.studentName} · {task.minutes}分钟 · {task.dueLabel}</span><span className="task-summary-text">{detail}</span></summary>{description !== detail ? <div className="task-detail-content"><p>{description}</p></div> : null}</details><StatusPill label={task.status} status={statusToProviderStatus(task.status)} /></div>;
   }) : <p className="review-empty">暂无任务</p>}</div>;
 }
 
-function StudentList({ onAccess, students }: { onAccess?: (studentId: string, enabled: boolean) => void; students: StudentProfile[] }) {
-  return <div className="record-list">{students.map((student) => <div className="record-row" key={student.id}><UsersRound size={17} /><div><strong>{student.displayName}</strong><span>{student.grade} · {student.guardianPhone} · {student.accessCode || "未开通"}</span></div><StatusPill label={student.loginEnabled ? "可登录" : "停用"} status={student.loginEnabled ? "ready" : "blocked"} />{onAccess ? <button className="secondary-button" onClick={() => onAccess(student.id, !student.loginEnabled)}>{student.loginEnabled ? "停用" : "开通"}</button> : null}</div>)}</div>;
+function StudentList({ onAccess, onGradeUpdate, onRemove, students }: { onAccess?: (studentId: string, enabled: boolean) => void; onGradeUpdate?: (studentId: string, grade: string) => void; onRemove?: (studentId: string, confirmationName: string) => void; students: StudentProfile[] }) {
+  const activeStudents = students.filter((student) => !student.accessRemovedAt);
+  const [editingStudentId, setEditingStudentId] = useState("");
+  const [editingGrade, setEditingGrade] = useState("");
+  return <div className="record-list student-access-list">{activeStudents.length ? activeStudents.map((student) => {
+    const editing = editingStudentId === student.id;
+    return <div className="student-access-row" key={student.id}><UsersRound size={17} /><div className="student-access-identity"><strong>{student.displayName}</strong>{editing ? <label className="student-grade-editor">年级<select aria-label={`${student.displayName}年级`} value={editingGrade} onChange={(event) => setEditingGrade(event.target.value)}>{gradeOptions.map((grade) => <option key={grade}>{grade}</option>)}</select></label> : <span>{student.grade} · {student.guardianPhone} · {student.accessCode || "未开通"}</span>}</div><StatusPill label={student.loginEnabled ? "可登录" : "停用"} status={student.loginEnabled ? "ready" : "blocked"} /><div className="student-access-actions">{onGradeUpdate ? editing ? <><button className="secondary-button" onClick={() => { onGradeUpdate(student.id, editingGrade); setEditingStudentId(""); }}>保存年级</button><button className="secondary-button" onClick={() => setEditingStudentId("")}>取消</button></> : <button className="secondary-button" onClick={() => { setEditingStudentId(student.id); setEditingGrade(student.grade); }}>编辑年级</button> : null}{onAccess ? <button className="secondary-button" onClick={() => onAccess(student.id, !student.loginEnabled)}>{student.loginEnabled ? "停用" : "开通"}</button> : null}{onRemove ? <button className="secondary-button danger-button" onClick={() => { if (!window.confirm(`移除 ${student.displayName} 的学生权限？历史学习数据会保留。`)) return; const confirmationName = window.prompt(`请输入学生姓名确认：${student.displayName}`)?.trim() || ""; if (confirmationName === student.displayName) onRemove(student.id, confirmationName); }} type="button">删除学生权限</button> : null}</div></div>;
+  }) : <p className="review-empty">暂无可操作学生</p>}</div>;
 }
 
 function reviewedQuestionReady(question: GradingWorkbench["questions"][number]) {

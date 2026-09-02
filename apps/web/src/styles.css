@@ -929,16 +929,107 @@ button:disabled {
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
+.student-access-list {
+  gap: 8px;
+}
+
+.student-access-row {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto minmax(0, auto);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.student-access-identity {
+  min-width: 0;
+}
+
+.student-grade-editor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  color: #657480;
+  font-size: 12px;
+}
+
+.student-grade-editor select {
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.student-access-identity strong,
+.student-access-identity span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.student-access-identity span {
+  margin-top: 3px;
+  color: #657480;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.student-access-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.student-access-actions .secondary-button {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.student-access-actions .danger-button {
+  color: #8a3524;
+  border-color: #f2c9bd;
+  background: transparent;
+}
+
 .task-detail-row {
   align-items: start;
 }
 
-.task-detail-row p {
+.task-details {
+  min-width: 0;
+}
+
+.task-details summary {
+  cursor: pointer;
+  list-style-position: outside;
+}
+
+.task-details summary::marker {
+  color: var(--accent);
+}
+
+.task-details .task-summary-text,
+.task-detail-content p {
+  display: block;
   margin: 8px 0 0;
   color: #4d6572;
   font-size: 13px;
   line-height: 1.55;
   white-space: pre-wrap;
+}
+
+.task-detail-content {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent-soft);
+  background: var(--surface);
 }
 
 .import-row {
@@ -1485,6 +1576,18 @@ button:disabled {
 .template-controls {
   display: grid;
   gap: 10px;
+}
+
+.student-access-controls {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  margin-bottom: 10px;
+}
+
+.student-access-controls .secondary-button {
+  min-height: 34px;
+  padding: 0 11px;
+  white-space: nowrap;
 }
 
 .template-controls label,
@@ -2440,6 +2543,38 @@ button:disabled {
   background: var(--accent-soft);
 }
 
+.generation-knowledge-point-options {
+  display: grid;
+  gap: 7px;
+  grid-column: 1 / -1;
+  color: #37566f;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.generation-knowledge-point-options > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.generation-knowledge-point-options button {
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #315a70;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.generation-knowledge-point-options button.active {
+  color: var(--accent-strong);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .generation-source-card,
 .generation-step-card,
 .generation-current-draft,
@@ -2482,6 +2617,19 @@ button:disabled {
   display: grid;
   gap: 8px;
   padding-top: 4px;
+}
+
+.generation-review-feedback-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #f0d0a1;
+  border-radius: 8px;
+  background: #fffaf2;
+}
+
+.generation-review-feedback-panel .button-row {
+  margin: 0;
 }
 
 .generation-action-dock button,
@@ -6325,11 +6473,42 @@ button:disabled {
     align-items: stretch;
   }
 
+  .student-access-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .student-access-controls .secondary-button {
+    justify-self: start;
+  }
+
+  .student-access-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+  }
+
+  .student-access-identity span {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .student-access-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    padding-left: 27px;
+  }
+
+  .student-access-actions .secondary-button {
+    min-height: 36px;
+  }
+
   .provider-strip {
     justify-content: flex-start;
   }
 
   .assignment-grid,
+  .student-registration-form,
   .grading-columns,
   .generation-command-center,
   .generation-command-metrics,
@@ -6352,6 +6531,10 @@ button:disabled {
   .report-columns,
   .signal-grid,
   .tag-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .student-registration-form {
     grid-template-columns: 1fr;
   }
 
