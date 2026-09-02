@@ -3,7 +3,7 @@ const guard = require("../../../utils/guard");
 
 Page({
   data: {
-    grades: ["三年级", "四年级", "五年级", "六年级"],
+    grades: ["三年级", "四年级", "五年级", "六年级", "七年级"],
     gradeIndex: 3,
     index: null,
     loading: false,

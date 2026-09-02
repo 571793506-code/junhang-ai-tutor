@@ -8,12 +8,16 @@
   <view class="card">
     <text class="section-title">任务列表</text>
     <view class="list">
-      <view wx:for="{{tasks}}" wx:key="id" class="list-item">
+      <view wx:for="{{tasks}}" wx:key="id" class="list-item task-item" data-id="{{item.id}}" bindtap="toggleTask">
         <view class="row between">
           <text class="item-title">{{item.title}}</text>
           <text class="pill">{{item.status}}</text>
         </view>
         <text class="item-meta">{{item.subject}} · {{item.minutes || 15}} 分钟 · {{item.dueLabel || '今日'}}</text>
+        <text class="task-summary">{{item.summary || item.description || '老师暂未填写具体事项'}}</text>
+        <view wx:if="{{expandedTaskId === item.id && item.description}}" class="task-detail-content">
+          <text>{{item.description}}</text>
+        </view>
       </view>
     </view>
     <text wx:if="{{!tasks.length}}" class="muted">今天暂时没有新任务。</text>

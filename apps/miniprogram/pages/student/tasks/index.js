@@ -4,7 +4,8 @@ const session = require("../../../utils/session");
 
 Page({
   data: {
-    tasks: []
+    tasks: [],
+    expandedTaskId: ""
   },
   async onShow() {
     const student = await guard.requireRole("student", this);
@@ -18,5 +19,9 @@ Page({
         });
       })
       .catch(() => wx.showToast({ title: "任务加载失败", icon: "none" }));
+  },
+  toggleTask(event) {
+    const taskId = event.currentTarget.dataset.id;
+    this.setData({ expandedTaskId: this.data.expandedTaskId === taskId ? "" : taskId });
   }
 });

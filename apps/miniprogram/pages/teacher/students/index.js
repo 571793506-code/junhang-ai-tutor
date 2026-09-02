@@ -15,7 +15,7 @@ Page({
       textbookVersion: ""
     },
     gradeIndex: 0,
-    grades: ["三年级", "四年级", "五年级", "六年级"],
+    grades: ["三年级", "四年级", "五年级", "六年级", "七年级"],
     students: []
   },
   async onShow() {
