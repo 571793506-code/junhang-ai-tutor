@@ -6,3 +6,5 @@ export * from "./import-plan.js";
 export * from "./startup-mode.js";
 export * from "./textbook-baseline.js";
 export * from "./textbook-chapter-drafts.js";
+export * from "./dialogue-grading-import.js";
+export * from "./module-capability-registry.js";

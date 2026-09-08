@@ -441,3 +441,63 @@ export declare function normalizeDisplayText(value: unknown): string;
 export declare function normalizeDisplayPayload<T>(value: T): T;
 export declare function inspectEncodingPayload(value: unknown, options?: { maxIssues?: number }): EncodingInspection;
 export declare function encodingGuardStatus(value: unknown): { ok: boolean; issueCount: number; checkedAt: string };
+
+export type ModuleCapabilityId =
+  | "generation"
+  | "grading"
+  | "teaching-materials"
+  | "student-profile";
+
+export interface ModuleCapabilityDefinition {
+  moduleId: ModuleCapabilityId;
+  triggers: string[];
+  dependencies: string[];
+  requestContract: {
+    requiredFields: string[];
+    optionalFields: string[];
+    serverDerivedFields: string[];
+    forbiddenClientFields: string[];
+  };
+  resultContract: {
+    teacherVisibleFields: string[];
+    studentVisibleFields: string[];
+    internalOnlyFields: string[];
+  };
+  modelPolicy: {
+    primaryTask: string;
+    primaryRoute: string;
+    supportRoutes: string[];
+    defaultReasoning: Record<string, string>;
+    escalation: {
+      allowedTriggerClasses: string[];
+      blockedTriggerClasses: string[];
+      maxAttemptsPerUnit: number;
+    };
+  };
+  reviewGate: "instant_safe_response" | "teacher_review" | "teacher_confirmation" | "blocked";
+  verification: {
+    tests: string[];
+    commands: string[];
+  };
+}
+
+export interface ModuleCapabilityStatus {
+  schemaVersion: "junhang-module-capability-v1";
+  generatedAt: string;
+  capabilities: Array<{
+    moduleId: ModuleCapabilityId;
+    status: "available" | "draft" | "review_required" | "blocked" | "failed";
+    dependencyStatus: "ready" | "review_required" | "blocked";
+    reviewGate: ModuleCapabilityDefinition["reviewGate"];
+    teacherMessage: string;
+    verification: ModuleCapabilityDefinition["verification"];
+  }>;
+}
+
+export declare const MODULE_CAPABILITY_SCHEMA_VERSION: "junhang-module-capability-v1";
+export declare const moduleCapabilityCatalog: readonly ModuleCapabilityDefinition[];
+export declare function listModuleCapabilities(): ModuleCapabilityDefinition[];
+export declare function getModuleCapability(moduleId: ModuleCapabilityId): ModuleCapabilityDefinition | undefined;
+export declare function validateModuleCapabilityRegistry(
+  registry?: ModuleCapabilityDefinition[] | readonly ModuleCapabilityDefinition[]
+): { ok: boolean; issues: string[] };
