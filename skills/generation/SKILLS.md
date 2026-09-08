@@ -57,6 +57,8 @@ Terra 对小测、普通练习和个性化练习使用 `medium`，正式试卷�
 - `check:content-context` 低预算 E2E 只作为 `link-guard` 链路守卫，证明资料上下文、预算退出、动态兜底、教师复核和导出链路能收口；不得用它判断题目原创性、教师要求贴合度、个性化程度、解析质量或 PDF 视觉质量。
 - `check:generation:quality:quiz` 和 `check:generation:quality:formal` 才用于真实模型生成内容质量样本；质量样本必须 `modelAvailable=true`、`usedDynamicFallback=false`，否则不能通过。
 - `check:generation:quality:sol` 强制以 Sol `high` 作为主调用运行同一组六个项目质量样本，并禁止内部再次升级；它证明 Sol 可用且能通过当前合成生成门禁，不代表真实批改正确率，批改准确率只能由教师确认的 gold 数据评估。
+- 生成质量样本必须同时带有预期的 `generationProfile`；缺少 profile、动态兜底或模型不可用时，质量检查失败。生成质量检查只评估结构化内容，不替代 `check:generation:layout` 的 PDF 版式检查，也不替代 `check:content-context` 的资料链路守卫。
+- 批改准确率使用 `cmd /c npm.cmd run check:grading:quality -- <gold-cases.json>` 评估；`fixtures/quality/grading-gold-cases.example.json` 只用于验证契约和指标路径，不能作为生产准确率证据。
 
 ## 教育规则 Skill 参考
 

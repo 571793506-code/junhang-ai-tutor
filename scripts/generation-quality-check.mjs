@@ -195,8 +195,8 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
   if (result.modelAvailable !== true) issues.push("质量样本必须来自可用模型。");
   if (result.usedDynamicFallback !== false) issues.push("质量样本必须来自真实模型生成，不能使用动态兜底。");
   if (!result.draftAvailable) issues.push("质量样本必须形成结构化草稿。");
-  if (model.generationProfile && model.generationProfile !== sample.generationProfile) {
-    issues.push(`生成 profile 应为 ${sample.generationProfile}，实际为 ${model.generationProfile}。`);
+  if (model.generationProfile !== sample.generationProfile) {
+    issues.push(`生成 profile 应为 ${sample.generationProfile}，实际为 ${model.generationProfile || "missing"}。`);
   }
   if (model.assessmentMaxTokens && Number(model.assessmentMaxTokens) < Number(sample.assessmentMaxTokens)) {
     issues.push(`模型 token 上限低于样本预算 ${sample.assessmentMaxTokens}。`);

@@ -224,6 +224,8 @@ cmd /c npm.cmd run check:encoding
 - `check:generation:blueprint`：生成模板、兜底内容、题型蓝图、分值和基础审查规则的轻量验证。
 - `check:generation:quality:quiz`：中预算真实模型小测质量样本，覆盖数学、语文、英语各 1 个小测；要求 `modelAvailable=true` 且 `usedDynamicFallback=false`，只评估结构化草稿内容质量，不导出 PDF。
 - `check:generation:quality:formal`：正式预算真实模型质量样本，覆盖小升初数学试卷、英语个性化练习和语文阅读表达练习；要求真实模型生成和服务层审查通过，不导出 PDF。
+- `check:grading:quality -- <gold-cases.json>`：先校验教师确认金标契约，再计算逐题准确率、状态一致率、分数误差、低置信召回率、高置信错误率和教师修改率。`fixtures/quality/grading-gold-cases.example.json` 只含合成内容，输出会明确 `productionAccuracyClaim=false`。
+- 金标契约要求 `caseId`、`sourceType`、`input`、`expected`、教师确认身份和时间；缺少教师确认、重复 case、非法状态、uncertain 缺原因或题目缺答案时，命令以 `GOLD_CASES_INVALID` 失败。
 - `check:content-upload-ui`：教师端上传面板、文件输入、导入按钮、`.edupdf` 前端过滤、生成上下文摘要和 Web API multipart 上传封装。
 - `check:content-context`：资料上下文链路守卫，包含资料转 Markdown、教师上传、`.edupdf` 拒绝、路径拒绝、教师登录、内容索引重建、索引同步到 `KnowledgeSource/KnowledgeChunk`、仅批准 E2E fixture、来源/chunk 命中断言、编码守卫、组卷草稿、上下文注入、草稿导出和复核/排版门禁。低预算草稿若通过 `layoutValidation`，链路继续验证教师确认和正式资产导出；若未通过，则验证 `ASSESSMENT_LAYOUT_INVALID` 正确阻断确认与正式导出。该命令允许低预算触发动态兜底，只证明链路能收口，不评估题目原创性、贴合教师要求、个性化程度、解析质量或 PDF 视觉质量。
 - `check:teaching-content` / `check:teaching-content:full`：会先执行 `api:start-if-needed`，再顺序执行上传 UI 合约和内容上下文 E2E，只适合大改、发布前或需要完整链路证明时使用。
@@ -231,6 +233,8 @@ cmd /c npm.cmd run check:encoding
 `check:teaching-content` 已加入步骤级进度输出和超时；如果运行时停在某一步，应优先看 stderr 中的 `start/done/fail` 阶段，而不是判断为“终端卡死”。每个子步骤会在最终 JSON 汇总中记录成功状态、耗时、stdout 和 stderr。
 
 `check:content-context` 内部 API 请求和导出请求已设置超时，并输出 `content-context-e2e` 阶段进度；生成草稿和 PDF 导出仍是重步骤，不应作为小范围模板修改的默认验证。它的 JSON 顶层 `verification.verificationScope` 固定为 `link-guard`，`assessesGenerationQuality=false`，因此不能作为中预算或正式预算生成质量样本。
+
+生成质量、资料链路和批改准确率是三类独立证据：生成质量检查要求真实模型、非动态兜底和正确 profile；资料上下文检查只证明链路能收口；批改生产准确率只能由单独的教师确认 gold 文件评估。Sol 可用、生成质量通过或 link-guard 通过都不能替代该 gold 证据。
 
 E2E 会清理并使用专用目录 `exports/markdown-ingestion-e2e`，避免把反复测试生成的 Markdown 混入教师真实资料目录 `exports/markdown-ingestion`。脚本还会清理旧版 E2E 留在默认 Markdown 目录和 API 上传目录中的 `content-context-upload-fixture` / `protected-textbook.edupdf` 测试产物，不清理其他教师资料。
 

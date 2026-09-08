@@ -83,6 +83,25 @@ test("generation quality verification rejects dynamic fallback samples", () => {
   assert.equal(check.detail.attempts[0].providerId, "gpt56");
 });
 
+test("generation quality verification rejects a missing generation profile", () => {
+  const sample = buildGenerationQualityCases("quiz")[0];
+  const check = evaluateGenerationQualityResult(sample, {
+    modelAvailable: true,
+    draftAvailable: true,
+    usedDynamicFallback: false,
+    totalScore: 60,
+    audit: { status: "passed", itemCount: 8, issues: [] },
+    generationPipeline: {
+      model: { assessmentTotalTimeoutMs: 120000, assessmentMaxTokens: 16000 },
+      repair: { itemCount: 8, totalScore: 60 }
+    },
+    draftItems: []
+  });
+
+  assert.equal(check.ok, false);
+  assert.ok(check.detail.issues.some((issue) => issue.includes("生成 profile 应为 quiz-standard")));
+});
+
 test("english quiz quality sample rejects full exam writing patterns", () => {
   const sample = buildGenerationQualityCases("quiz").find((item) => item.subject === "英语");
   const check = evaluateGenerationQualityResult(sample, {

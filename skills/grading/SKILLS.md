@@ -105,4 +105,5 @@ OCR 使用 MiniMax 视觉能力，主观批改和参考答案使用 Terra `high`
 - 修改 Web 批改原型时运行 `cmd /c npm.cmd run typecheck --workspace apps/web`。
 - 涉及小程序既有快照时运行 `cmd /c npm.cmd run check:miniprogram-js`，但当前阶段不新增小程序功能。
 - 修改中文提示词、批改文案或归档规则时运行 `cmd /c npm.cmd run check:encoding`。
-- 有教师确认金标样本时，运行 `cmd /c npm.cmd run check:grading:quality -- <gold-cases.json>`；没有金标结果前不得宣称批改正确率已达生产标准。
+- 金标文件必须由教师确认：每个 case 需要 `caseId`、`sourceType`、`input`、`expected` 和 `teacherReview`；`teacherReview` 必须包含 `confirmedBy`、ISO 格式 `confirmedAt` 和 `modifiedQuestionNos`，每道题必须有教师确认答案，或在 `status=uncertain` 时提供原因。先由 `quality-gold-contract.mjs` 校验，再运行 `cmd /c npm.cmd run check:grading:quality -- <gold-cases.json>`。
+- `fixtures/quality/grading-gold-cases.example.json` 是合成契约样本，只能证明 schema 和指标链路；报告中的 `productionAccuracyClaim` 默认必须为 `false`。没有真实教师确认 gold 文件和明确的生产评估标记前，不得宣称批改正确率已达生产标准。

@@ -2,36 +2,47 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { evaluateGradingCases } from "./grading-quality-check.mjs";
 
+function goldCase(overrides = {}) {
+  return {
+    caseId: "case-1",
+    sourceType: "generated_assessment",
+    input: { subject: "数学", kind: "练习" },
+    expected: {
+      score: 8,
+      needsTeacherReview: false,
+      questionResults: [
+        { questionNo: "1", status: "correct", correctAnswer: "2" },
+        { questionNo: "2", status: "partial", correctAnswer: "过程合理" }
+      ]
+    },
+    actual: {
+      score: 9,
+      quality: { lowConfidence: false },
+      questionResults: [
+        { questionNo: "1", status: "correct", confidence: 0.95 },
+        { questionNo: "2", status: "wrong", confidence: 0.9 }
+      ]
+    },
+    teacherReview: {
+      confirmedBy: "teacher-1",
+      confirmedAt: "2026-09-07T00:00:00.000Z",
+      modifiedQuestionNos: ["2"]
+    },
+    ...overrides
+  };
+}
+
 test("grading evaluator reports question, score, confidence, and teacher-edit metrics", () => {
   const report = evaluateGradingCases([
-    {
-      id: "case-1",
-      expected: {
-        score: 8,
-        needsTeacherReview: false,
-        questionResults: [
-          { questionNo: "1", status: "correct" },
-          { questionNo: "2", status: "partial" }
-        ]
-      },
-      actual: {
-        score: 9,
-        quality: { lowConfidence: false },
-        questionResults: [
-          { questionNo: "1", status: "correct", confidence: 0.95 },
-          { questionNo: "2", status: "wrong", confidence: 0.9 }
-        ]
-      },
-      teacherReview: { modifiedQuestionNos: ["2"] }
-    },
-    {
-      id: "case-2",
+    goldCase(),
+    goldCase({
+      caseId: "case-2",
       expected: {
         score: 4,
         needsTeacherReview: true,
         questionResults: [
-          { questionNo: "1", status: "wrong" },
-          { questionNo: "2", status: "uncertain" }
+          { questionNo: "1", status: "wrong", correctAnswer: "4" },
+          { questionNo: "2", status: "uncertain", reason: "图片中的作答区域不清晰" }
         ]
       },
       actual: {
@@ -42,8 +53,12 @@ test("grading evaluator reports question, score, confidence, and teacher-edit me
           { questionNo: "2", status: "uncertain", confidence: 0.4 }
         ]
       },
-      teacherReview: { modifiedQuestionNos: ["1"] }
-    }
+      teacherReview: {
+        confirmedBy: "teacher-1",
+        confirmedAt: "2026-09-07T00:00:00.000Z",
+        modifiedQuestionNos: ["1"]
+      }
+    })
   ]);
 
   assert.equal(report.schemaVersion, "grading-quality-v1");
@@ -57,24 +72,41 @@ test("grading evaluator reports question, score, confidence, and teacher-edit me
   assert.equal(report.metrics.teacherModificationRate, 0.5);
 });
 
-test("grading evaluator returns null for metrics without eligible gold evidence", () => {
+test("grading evaluator keeps null risk metrics when no low-confidence errors exist", () => {
   const report = evaluateGradingCases([
     {
-      id: "clean",
+      caseId: "clean",
+      sourceType: "generated_assessment",
+      input: { subject: "数学", kind: "练习" },
       expected: {
         score: 5,
         needsTeacherReview: false,
-        questionResults: [{ questionNo: "1", status: "correct" }]
+        questionResults: [{ questionNo: "1", status: "correct", correctAnswer: "5" }]
       },
       actual: {
         score: 5,
         quality: { lowConfidence: false },
         questionResults: [{ questionNo: "1", status: "correct", confidence: 0.95 }]
+      },
+      teacherReview: {
+        confirmedBy: "teacher-1",
+        confirmedAt: "2026-09-07T00:00:00.000Z",
+        modifiedQuestionNos: []
       }
     }
   ]);
 
   assert.equal(report.metrics.lowConfidenceRecall, null);
   assert.equal(report.metrics.unsafeHighConfidenceErrorRate, null);
-  assert.equal(report.metrics.teacherModificationRate, null);
+  assert.equal(report.metrics.teacherModificationRate, 0);
+});
+
+test("grading evaluator exposes the teacher-confirmed evidence boundary", () => {
+  const report = evaluateGradingCases([goldCase()]);
+
+  assert.equal(report.teacherConfirmedCaseCount, 1);
+  assert.equal(report.counts.teacherConfirmedCaseCount, 1);
+  assert.equal(report.evidenceBoundary.teacherConfirmed, true);
+  assert.equal(report.evidenceBoundary.productionEligible, false);
+  assert.equal(report.productionAccuracyClaim, false);
 });

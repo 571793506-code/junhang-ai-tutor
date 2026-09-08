@@ -1,0 +1,57 @@
+[
+  {
+    "caseId": "synthetic-generated-1",
+    "sourceType": "generated_assessment",
+    "input": {
+      "subject": "数学",
+      "kind": "练习",
+      "questionLayoutManifest": {
+        "questions": [
+          {
+            "questionNo": "1",
+            "prompt": "1+1=",
+            "correctAnswer": "2",
+            "maxScore": 5
+          }
+        ]
+      },
+      "ocrQuestions": [
+        {
+          "questionNo": "1",
+          "printedPrompt": "1+1=",
+          "studentAnswer": "2",
+          "confidence": 0.98
+        }
+      ]
+    },
+    "expected": {
+      "score": 5,
+      "needsTeacherReview": false,
+      "questionResults": [
+        {
+          "questionNo": "1",
+          "status": "correct",
+          "studentAnswer": "2",
+          "correctAnswer": "2",
+          "confidence": 0.98
+        }
+      ]
+    },
+    "actual": {
+      "score": 5,
+      "quality": { "lowConfidence": false },
+      "questionResults": [
+        {
+          "questionNo": "1",
+          "status": "correct",
+          "confidence": 0.98
+        }
+      ]
+    },
+    "teacherReview": {
+      "confirmedBy": "synthetic-teacher",
+      "confirmedAt": "2026-09-07T00:00:00.000Z",
+      "modifiedQuestionNos": []
+    }
+  }
+]

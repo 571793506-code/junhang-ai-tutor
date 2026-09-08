@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateGradingGoldCases } from "./quality-gold-contract.mjs";
 
 function roundMetric(value) {
   return Number(Number(value).toFixed(4));
@@ -14,7 +15,16 @@ function questionsByNo(result = {}) {
   return new Map((result.questionResults || []).map((item, index) => [String(item.questionNo || index + 1), item]));
 }
 
-export function evaluateGradingCases(cases = []) {
+function assertValidGoldCases(cases) {
+  const validation = validateGradingGoldCases(cases);
+  if (!validation.ok) {
+    throw new Error(["GOLD_CASES_INVALID", ...validation.issues.map((issue) => `- ${issue}`)].join("\n"));
+  }
+  return validation.normalizedCases;
+}
+
+export function evaluateGradingCases(cases = [], options = {}) {
+  const normalizedCases = assertValidGoldCases(cases);
   let questionCount = 0;
   let binaryCorrect = 0;
   let statusAgreements = 0;
@@ -28,7 +38,7 @@ export function evaluateGradingCases(cases = []) {
   let teacherModifiedQuestions = 0;
   let teacherReviewedQuestions = 0;
 
-  for (const sample of Array.isArray(cases) ? cases : []) {
+  for (const sample of normalizedCases) {
     const expected = sample.expected || {};
     const actual = sample.actual || {};
     const actualByNo = questionsByNo(actual);
@@ -66,16 +76,39 @@ export function evaluateGradingCases(cases = []) {
     }
   }
 
+  const teacherConfirmedCaseCount = normalizedCases.filter((sample) => Boolean(sample.teacherReview?.confirmedBy)).length;
+  const syntheticCaseCount = normalizedCases.filter((sample) => (
+    String(sample.caseId || "").toLowerCase().startsWith("synthetic-")
+    || String(sample.sourceType || "").toLowerCase().includes("synthetic")
+    || sample.input?.synthetic === true
+  )).length;
+  const productionEligible = teacherConfirmedCaseCount === normalizedCases.length
+    && normalizedCases.length > 0
+    && syntheticCaseCount === 0
+    && options.teacherReviewedReport === true;
+
   return {
     schemaVersion: "grading-quality-v1",
+    teacherConfirmedCaseCount,
     counts: {
-      cases: Array.isArray(cases) ? cases.length : 0,
+      cases: normalizedCases.length,
       questions: questionCount,
       scoreCases: scoreCaseCount,
       lowConfidenceGoldCases: lowConfidenceExpected,
       goldErrorQuestions: eligibleGoldErrors,
-      teacherReviewedQuestions
+      teacherReviewedQuestions,
+      teacherConfirmedCaseCount,
+      syntheticCaseCount
     },
+    evidenceBoundary: {
+      teacherConfirmed: teacherConfirmedCaseCount === normalizedCases.length && normalizedCases.length > 0,
+      synthetic: syntheticCaseCount > 0,
+      productionEligible,
+      note: productionEligible
+        ? "This report is explicitly marked as teacher-reviewed production evidence."
+        : "This report is a teacher-confirmed contract sample or synthetic probe; production accuracy is unverified."
+    },
+    productionAccuracyClaim: productionEligible && options.productionAccuracyClaim === true,
     metrics: {
       questionAccuracy: ratio(binaryCorrect, questionCount),
       statusAgreement: ratio(statusAgreements, questionCount),
