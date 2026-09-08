@@ -26,6 +26,16 @@
 | Prompt/Context 工程 | `docs/41-prompt-context-engineering-playbook.md` | 模型提示词、结构化上下文、输出修复和任务级复核边界 |
 | 方案拷问类 | `skills/project-grill-review/SKILLS.md` | Grill me、方案压力测试、计划审查、架构取舍和实施前追问 |
 
+## 模块意图路由
+
+路由按“意图 -> 首个 Skill -> 依赖 Skill -> 执行顺序 -> 验证命令”理解；跨模块任务同时读取对应模块 Playbook 和 `docs/41-prompt-context-engineering-playbook.md`。
+
+- 生成小测/练习/试卷：`teaching-materials`（只有声明教材或资料时加载） -> `prompt-context-engineering` -> `generation` -> 保留 `gradingSourcePackage` -> 教师复核；验证 `check:generation:blueprint`、`check:content-context`。
+- 已生成材料批改：`grading` -> 读取 `gradingSourcePackage` / `questionLayoutManifest` -> 教师逐题复核 -> 教师确认；验证 `check:api`、`check:grading:quality`。
+- 外部材料批改：`grading` -> 登记参考答案 -> OCR/题目复核 -> 教师确认；验证 `check:api`、`check:grading:quality`。
+- 资料上传/登记：`teaching-materials` -> 转换/索引 -> 来源审核 -> 注入 `generationContext.teaching.contentContext`；验证 `check:content-upload-ui`、`check:content-context`。
+- 周/月档案：`grading` 证据 -> `student-profile` -> 教师编辑 -> 教师确认 -> `publishedView` / `printView`；验证 `check:api` 和 Web typecheck。
+
 ## 全局规则
 
 - 核心逻辑必须沉淀到 API、服务层、脚本、共享工具或数据契约，不能只写在 Web 页面状态里。

@@ -9,6 +9,30 @@
 - 需要判断低置信结果是否允许出最终分或写入学生档案。
 - 需要生成图片上传后的老师侧待复核摘要。
 
+## 何时加载
+
+当意图是批改已生成材料、外部练习册、图片作业、OCR 结果或逐题分数时加载。已有生成记录优先读取 `gradingSourcePackage`；外部材料走独立参考答案登记路径。
+
+## 前置依赖
+
+服务端必须确认学生仍可接收新工作、图片页序和质量、题目布局、答案来源及教师权限。生成材料需要有效的 `gradingSourcePackage` 和 `questionLayoutManifest`；外部材料需要参考答案证据或明确进入待复核状态。
+
+## 输入契约
+
+批改上下文分开保存 `printedPrompt`、`studentAnswer`、`ocrQuestions`、答案来源、图片质量和教师修正。Web 不得提交 `finalScore`、`archiveEligible`、provider、model 或 raw；服务端确定题号对齐和允许发送给模型的未解决题目。
+
+## 输出契约
+
+教师端接收页质量、OCR 题目、答案来源、置信度、逐题状态、`archiveBlockers` 和 `workflowState`。学生端只接收教师确认后的分数与反馈；低置信、缺页、缺答案、冲突或未确认结果不得归档或进入 `profileEvidencePack`。
+
+## 执行顺序
+
+先验证来源包或登记外部参考答案，再按页序识别并对齐印刷题干和学生作答；客观题由服务层保守比较，未解决题目才发送 Terra，最后汇总逐题得分并等待教师逐题确认。
+
+## 模型与复核
+
+OCR 使用 MiniMax 视觉能力，主观批改和参考答案使用 Terra `high`。只有 evidence 充分且属于 availability 或 quality 故障才允许每题一次 Sol `high`；任何 `teacher_confirmation` 未完成的结果都保持草稿或 `review_required`。
+
 ## 核心原则
 
 - OCR、学生作答识别、标准答案和归档必须分层处理。

@@ -8,6 +8,30 @@
 - 需要区分小测、练习和试卷的结构、题型、页数和作答空间。
 - 需要审查生成内容是否原创、是否含答案解析、是否适合教师复核。
 
+## 何时加载
+
+当意图是生成小测、普通练习、个性化练习、试卷、教学任务或讲解草稿时加载。若请求声明教材、章节或资料，先加载 `teaching-materials`；若结果需要批改，保留 `gradingSourcePackage` 并让 `grading` 读取。
+
+## 前置依赖
+
+服务端必须先确认教师权限、学生或范围、`kind`、教材资产、章节范围、已审批资料和可用学生证据。教材请求没有真实资产或 `contentContext` 证据时，在模型调用前阻断。
+
+## 输入契约
+
+Web 只提交学科、年级、`kind`、目标范围、难度、题量、教师要求、知识点和教材标识。服务端组装 `generationContext`、`studentSignals`、`contentContext` 和生成预算；客户端不得提交 prompt、provider、model、raw 或内部预算。
+
+## 输出契约
+
+服务层返回结构化草稿、`generationPipeline`、审查结果、`gradingSourcePackage` 引用和 `teacher_review` 状态。学生卷与解析卷从答案包派生，未经过 parse、normalize、validate、repair 和教师复核的内容不得发布、归档或导出。
+
+## 执行顺序
+
+先按 `kind` 选择小测、练习或试卷蓝图，再组装上下文并分区生成；随后合并、结构修复、确定性审查、答案包校验、布局检查和教师复核。失败只重试失败分区，不能用页面状态重建第二套 prompt。
+
+## 模型与复核
+
+Terra 对小测、普通练习和个性化练习使用 `medium`，正式试卷使用 `high`；Sol 只对 availability 或证据充分的 quality 故障按失败分区升级一次。evidence/configuration 故障直接 `teacher_review`，DeepSeek 不进入默认文本链路，MiniMax 只承担 OCR/语音。
+
 ## 核心原则
 
 - 模型输出只是草稿，必须经过结构化、校验、修复和教师复核。

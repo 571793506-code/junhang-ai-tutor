@@ -14,6 +14,91 @@ export const REQUIRED_SKILL_ROUTES = {
   "prompt-context-engineering": "docs/41-prompt-context-engineering-playbook.md",
 };
 
+export const MODULE_PLAYBOOK_REQUIREMENTS = {
+  generation: {
+    path: "skills/generation/SKILLS.md",
+    route: ["teaching-materials", "prompt-context-engineering", "generation"],
+    tokens: ["generationContext", "gradingSourcePackage", "teacher_review", "check:generation:quality"]
+  },
+  grading: {
+    path: "skills/grading/SKILLS.md",
+    route: ["grading"],
+    tokens: ["gradingSourcePackage", "ocrQuestions", "teacher_confirmation", "check:grading:quality"]
+  },
+  "teaching-materials": {
+    path: "skills/teaching-materials/SKILLS.md",
+    route: ["teaching-materials"],
+    tokens: [".edupdf", "allowedForGeneration", "contentContext", "check:content-context"]
+  },
+  "student-profile": {
+    path: "skills/student-profile/SKILLS.md",
+    route: ["grading", "student-profile"],
+    tokens: ["profileEvidencePack", "blockedEvidence", "publishedView", "teacher_confirmation"]
+  }
+};
+
+const MODULE_PLAYBOOK_HEADINGS = [
+  "## 何时加载",
+  "## 前置依赖",
+  "## 输入契约",
+  "## 输出契约",
+  "## 执行顺序",
+  "## 模型与复核",
+  "## 验证"
+];
+
+function hasOrderedTokens(content, tokens) {
+  const source = typeof content === "string" ? content : "";
+  let cursor = 0;
+  for (const token of tokens) {
+    const index = source.indexOf(token, cursor);
+    if (index === -1) return false;
+    cursor = index + token.length;
+  }
+  return true;
+}
+
+export function validateModulePlaybookContracts({ rootSkills = "", playbooks = {} } = {}) {
+  const failures = [];
+  for (const [moduleId, requirement] of Object.entries(MODULE_PLAYBOOK_REQUIREMENTS)) {
+    const content = playbooks[moduleId];
+    if (typeof content !== "string") continue;
+
+    for (const heading of MODULE_PLAYBOOK_HEADINGS) {
+      if (!content.includes(heading)) {
+        failures.push({
+          code: "missing-module-playbook-section",
+          moduleId,
+          path: requirement.path,
+          heading,
+          message: `${moduleId} Playbook is missing ${heading}.`
+        });
+      }
+    }
+    for (const token of requirement.tokens) {
+      if (!content.includes(token)) {
+        failures.push({
+          code: "missing-module-playbook-token",
+          moduleId,
+          path: requirement.path,
+          token,
+          message: `${moduleId} Playbook is missing required token ${token}.`
+        });
+      }
+    }
+    if (!hasOrderedTokens(rootSkills, requirement.route)) {
+      failures.push({
+        code: "invalid-module-route",
+        moduleId,
+        path: "SKILLS.md",
+        route: requirement.route,
+        message: `Root Skills route for ${moduleId} does not preserve the required dependency order.`
+      });
+    }
+  }
+  return { ok: failures.length === 0, failures };
+}
+
 function toSystemPath(root, relativePath) {
   return path.join(root, ...relativePath.split("/"));
 }
@@ -701,6 +786,14 @@ export function validateSkillsWorkspace(root, options = {}) {
       addFailure,
     });
   }
+
+  const modulePlaybooks = {};
+  for (const [moduleId, requirement] of Object.entries(MODULE_PLAYBOOK_REQUIREMENTS)) {
+    const result = readTextFile(toSystemPath(workspaceRoot, requirement.path));
+    if (result.status === "ok") modulePlaybooks[moduleId] = result.content;
+  }
+  const moduleContracts = validateModulePlaybookContracts({ rootSkills, playbooks: modulePlaybooks });
+  failures.push(...moduleContracts.failures);
 
   return { ok: failures.length === 0, checkedSkills, failures };
 }

@@ -42,6 +42,26 @@ Minimum verification: \`${command}\`.
 `;
 }
 
+const MODULE_PLAYBOOK_SECTIONS = [
+  "## 何时加载",
+  "## 前置依赖",
+  "## 输入契约",
+  "## 输出契约",
+  "## 执行顺序",
+  "## 模型与复核",
+  "## 验证"
+];
+
+function modulePlaybook(name) {
+  const tokens = {
+    generation: "generationContext gradingSourcePackage teacher_review check:generation:quality",
+    grading: "gradingSourcePackage ocrQuestions teacher_confirmation check:grading:quality",
+    "teaching-materials": ".edupdf allowedForGeneration contentContext check:content-context",
+    "student-profile": "profileEvidencePack blockedEvidence publishedView teacher_confirmation"
+  }[name];
+  return `# ${name} Playbook\n${MODULE_PLAYBOOK_SECTIONS.map((section) => `${section}\n${tokens}\n`).join("\n")}`;
+}
+
 async function createFixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "skills-check-"));
   await write(
@@ -60,11 +80,17 @@ async function createFixture() {
   await write(
     root,
     "SKILLS.md",
-    `${Object.values(EXPECTED_ROUTES).map((route) => `- \`${route}\``).join("\n")}\n`,
+    `${Object.values(EXPECTED_ROUTES).map((route) => `- \`${route}\``).join("\n")}\n
+生成小测/练习/试卷 -> teaching-materials -> prompt-context-engineering -> generation -> gradingSourcePackage -> teacher review
+已生成材料批改 -> grading -> gradingSourcePackage/questionLayoutManifest -> teacher question review -> teacher confirmation
+外部材料批改 -> grading -> reference answer registration -> OCR/question review -> teacher confirmation
+资料上传/登记 -> teaching-materials -> conversion/index -> source review -> generation contentContext
+周/月档案 -> grading evidence -> student-profile -> teacher edit -> teacher confirmation -> publishedView/printView
+`,
   );
 
   for (const [name, route] of Object.entries(EXPECTED_ROUTES)) {
-    await write(root, route, `# ${name} Playbook\n`);
+    await write(root, route, MODULE_PLAYBOOK_SECTIONS.includes("## 何时加载") && ["generation", "grading", "teaching-materials", "student-profile"].includes(name) ? modulePlaybook(name) : `# ${name} Playbook\n`);
     await write(root, `.agents/skills/${name}/SKILL.md`, wrapper(name, route));
   }
 
@@ -95,6 +121,30 @@ test("accepts a complete skills workspace", async () => {
     assert.equal(result.ok, true);
     assert.deepEqual(result.checkedSkills, Object.keys(EXPECTED_ROUTES));
     assert.deepEqual(result.failures, []);
+  });
+});
+
+test("reports a missing module playbook section", async () => {
+  await withFixture(async (root) => {
+    const skillPath = "skills/generation/SKILLS.md";
+    const content = await readFile(path.join(root, ...skillPath.split("/")), "utf8");
+    await write(root, skillPath, content.replace("## 验证", ""));
+
+    const result = await validateSkillsWorkspace(root);
+
+    assert.ok(failureCodes(result).includes("missing-module-playbook-section"));
+  });
+});
+
+test("reports a generation route that skips prompt-context engineering", async () => {
+  await withFixture(async (root) => {
+    const rootSkills = await readFile(path.join(root, "SKILLS.md"), "utf8");
+    const invalidRootSkills = rootSkills.replaceAll("prompt-context-engineering", "ai-qa");
+    await write(root, "SKILLS.md", invalidRootSkills);
+
+    const result = await validateSkillsWorkspace(root);
+
+    assert.ok(failureCodes(result).includes("invalid-module-route"));
   });
 });
 
