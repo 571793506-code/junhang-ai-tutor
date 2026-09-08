@@ -10,7 +10,6 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import {
   buildAiStartupSnapshot,
-  buildModelOrchestrationPlan,
   createMiniMaxSpeechTask,
   draftStudentProfileNarrative
 } from "@junhang/ai";
@@ -51,6 +50,7 @@ import {
   draftTeacherTaskService,
   gradeSubmissionService,
   matchApprovedContentContext,
+  buildModuleCapabilityStatus,
   queryStudentDictionaryService,
   validateAssessmentContentContext
 } from "@junhang/services";
@@ -3384,7 +3384,6 @@ app.get("/api/status", asyncRoute(async (_req, res) => {
     ai: {
       generatedAt: snapshot.generatedAt,
       mode: snapshot.mode,
-      providers: [],
       features: snapshot.features.filter((feature) => feature.id !== "avatar-dialog").map((feature) => ({
         id: feature.id,
         label: feature.label,
@@ -3407,7 +3406,24 @@ app.post("/api/encoding/check", requireSession(config, ["teacher"]), (req, res) 
 });
 
 app.get("/api/ai/status", requireSession(config, ["teacher"]), (_req, res) => {
-  res.json({ ok: true, ai: buildAiStartupSnapshot(config), orchestration: buildModelOrchestrationPlan(config) });
+  const snapshot = buildAiStartupSnapshot(config);
+  res.json({
+    ok: true,
+    ai: {
+      generatedAt: snapshot.generatedAt,
+      mode: snapshot.mode,
+      features: snapshot.features
+        .filter((feature) => feature.id !== "avatar-dialog")
+        .map((feature) => ({
+          id: feature.id,
+          label: feature.label,
+          appSurface: feature.appSurface,
+          status: feature.status,
+          reason: feature.status === "ready" ? "AI生成可用" : "AI生成暂不可用"
+        }))
+    },
+    capabilities: buildModuleCapabilityStatus({ ...config, aiSnapshot: snapshot }, "teacher")
+  });
 });
 
 app.get("/api/session/verify", (req, res) => {

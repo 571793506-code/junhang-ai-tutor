@@ -25,6 +25,7 @@ import { buildQaLearningRecord, sanitizeQaAnswer } from "./qa-learning-record.js
 
 export { buildQaLearningRecord, sanitizeQaAnswer, sanitizeQaText } from "./qa-learning-record.js";
 export * from "./student-dictionary.js";
+export * from "./module-capability-status.js";
 
 function normalizeAssessmentKind(kind) {
   const text = String(kind || "");

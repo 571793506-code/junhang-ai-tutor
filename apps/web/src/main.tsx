@@ -37,7 +37,7 @@ import {
   UsersRound,
   Volume2
 } from "lucide-react";
-import type { AssignmentCard, ClassroomBroadcast, ClassroomDevice, CorrectionRecord, DictationTask, LearningLog, LearningTaskCard, ReadingTask, StudentProfile, StudentReportCard, SubjectLabel, TeacherProfile } from "@junhang/core";
+import type { AssignmentCard, ClassroomBroadcast, ClassroomDevice, CorrectionRecord, DictationTask, LearningLog, LearningTaskCard, ModuleCapabilityStatus, ReadingTask, StudentProfile, StudentReportCard, SubjectLabel, TeacherProfile } from "@junhang/core";
 import {
   askStudentQuestion,
   cancelAssessmentGenerationJob,
@@ -106,6 +106,7 @@ type Role = "student" | "teacher" | "classroom";
 type ProviderStatus = "ready" | "blocked" | "unavailable" | "pending";
 
 type AiSnapshot = Awaited<ReturnType<typeof getApiStatus>>["ai"];
+type ModuleCapability = ModuleCapabilityStatus["capabilities"][number];
 type Bootstrap = Awaited<ReturnType<typeof getBootstrapData>>;
 type ReviewSubmission = Awaited<ReturnType<typeof listReviewSubmissions>>["submissions"][number];
 type GradingWorkbench = Awaited<ReturnType<typeof listGradingWorkbenches>>["workbenches"][number];
@@ -445,6 +446,7 @@ function App() {
   const [auth, setAuth] = useState({ studentId: "", teacherId: "", deviceId: "" });
   const [sync, setSync] = useState<SyncState>(idleSync);
   const [ai, setAi] = useState<AiSnapshot | null>(null);
+  const [capabilities, setCapabilities] = useState<ModuleCapabilityStatus | null>(null);
   const [teachers, setTeachers] = useState<TeacherProfile[]>([]);
   const [students, setStudents] = useState<StudentProfile[]>([]);
   const [tasks, setTasks] = useState<LearningTaskCard[]>([]);
@@ -494,6 +496,7 @@ function App() {
     try {
       const status = await getApiStatus();
       setAi(status.ai);
+      setCapabilities(status.capabilities);
       setSync({ busy: false, ok: status.database?.ok ?? true, message: status.database?.ok === false ? `数据库不可用：${status.database.reason}` : "API 已连接" });
     } catch (error) {
       setSync({ busy: false, ok: false, message: `API 未连接：${error instanceof Error ? error.message : String(error)}` });
@@ -599,6 +602,7 @@ function App() {
       await refreshTeacherOps();
       const status = await getApiStatus();
       setAi(status.ai);
+      setCapabilities(status.capabilities);
       setAuth({ studentId: "", teacherId: response.teacher.id, deviceId: "" });
       setRole("teacher");
       setSync({ busy: false, ok: true, message: `教师端已登录：${response.teacher.displayName}` });
@@ -1255,7 +1259,7 @@ function App() {
       </aside>
       <main className="main">
         <header className="topbar"><div><p className="eyebrow">{roleLabel(role)}</p><h1>{role === "teacher" ? `教师端 · ${currentModule}` : role === "student" ? `学生端 · ${currentModule}` : `课堂平板 · ${currentModule}`}</h1></div><ApiSyncStatus state={syncForRole(sync, role)} /></header>
-        {role === "teacher" && auth.teacherId && currentTeacher ? <TeacherWorkspace activeModule={currentModule} ai={ai} assessmentJobs={assessmentJobs} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentCancel={cancelAssessmentGeneration} onAssessmentJobSelect={selectAssessmentGenerationJob} onAssessmentRecovery={recoverAssessmentGeneration} onAssessmentDraftSelect={(assignment) => {
+        {role === "teacher" && auth.teacherId && currentTeacher ? <TeacherWorkspace activeModule={currentModule} ai={ai} capabilities={capabilities} assessmentJobs={assessmentJobs} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentCancel={cancelAssessmentGeneration} onAssessmentJobSelect={selectAssessmentGenerationJob} onAssessmentRecovery={recoverAssessmentGeneration} onAssessmentDraftSelect={(assignment) => {
           const draft = assessmentDraftRefFromAssignment(assignment);
           if (draft) {
             setLatestAssessmentDraft(draft);
@@ -1328,6 +1332,7 @@ function extractReadingFocusDraft(passage: string, subject: "语文" | "英语",
 function TeacherWorkspace({
   activeModule,
   ai,
+  capabilities,
   assessmentJobs,
   assignments,
   audit,
@@ -1398,6 +1403,7 @@ function TeacherWorkspace({
 }: {
   activeModule: string;
   ai: AiSnapshot | null;
+  capabilities: ModuleCapabilityStatus | null;
   assessmentJobs: AssessmentGenerationJob[];
   assignments: AssignmentCard[];
   audit: AdminAudit | null;
@@ -1670,8 +1676,8 @@ function TeacherWorkspace({
   const activeStudents = selectableStudents.length;
   const selectedTabletDevice = devices.find((item) => item.id === tabletDeviceId) || devices[0];
   const pendingTasks = tasks.filter((item) => item.status !== "已完成").length;
-  const readyProviders = ai?.providers.filter((item) => item.status === "ready").length || 0;
-  const providerTotal = Math.max(ai?.providers.length || 0, 1);
+  const readyCapabilities = capabilities?.capabilities.filter((item) => item.status === "available").length || 0;
+  const capabilityTotal = Math.max(capabilities?.capabilities.length || 0, 1);
   const readyTabletDevices = devices.filter((item) => item.status === "已绑定").length;
   const filteredGenerationAssignments = assignments.filter((item) => {
     if (!["小测", "练习", "试卷"].includes(item.kind)) return false;
@@ -1849,7 +1855,7 @@ function TeacherWorkspace({
   };
   return <div className="page-grid">
     <section className={moduleClass("工作台", "hero-band teacher-flow-hero")}><div><p className="eyebrow">教师工作台</p><h2>从登记到归档的教学闭环</h2><p>按“学生权限、今日任务、生成打印、批改复核、学生档案、课堂设备”串起日常操作。先看状态，再进入对应动作。</p></div><div className="teacher-flow-summary"><Metric label="可登录学生" value={activeStudents} suffix="人" tone="blue" /><Metric label="待完成任务" value={pendingTasks} suffix="项" tone="amber" /><Metric label="生成记录" value={assignments.length} suffix="份" tone="green" /></div></section>
-    <section className={moduleClass("工作台", "panel full")}><PanelTitle icon={ClipboardList} title="教师端操作流程" /><div className="teacher-flow-grid"><FlowCard icon={UsersRound} index={1} label="学生权限" state={activeStudents ? "ready" : "blocked"} value={`${activeStudents}/${students.length}`} hint="登记学生、生成专属码、绑定负责老师。" /><FlowCard icon={CalendarDays} index={2} label="今日任务" state={pendingTasks ? "pending" : "ready"} value={`${pendingTasks}`} hint="按学生生成任务，家长端和平板端查看完成情况。" /><FlowCard icon={Printer} index={3} label="生成打印" state="pending" value={`${assignments.length}`} hint="小测、练习、试卷先审 PDF 草稿，再导出正式文件。" /><FlowCard icon={Upload} index={4} label="批改复核" state="pending" value={`${reviewSubmissions.length}`} hint="图片上传、AI初判、逐题复核和教师确认。" /><FlowCard icon={FileText} index={5} label="学生档案" state="ready" value="教师发布" hint="聚合任务、错题、问答、平板记录和阶段反馈。" /><FlowCard icon={TerminalSquare} index={6} label="课堂设备" state={readyTabletDevices ? "ready" : "pending"} value={`${readyTabletDevices}/${Math.max(devices.length, 1)}`} hint="控制平板、听写、跟读、播报和大屏连接。" /><FlowCard icon={Activity} index={7} label="系统状态" state={readyProviders === providerTotal ? "ready" : "blocked"} value={`${readyProviders}/${providerTotal}`} hint="教师端查看服务状态与审计记录。" /></div></section>
+    <section className={moduleClass("工作台", "panel full")}><PanelTitle icon={ClipboardList} title="教师端操作流程" /><div className="teacher-flow-grid"><FlowCard icon={UsersRound} index={1} label="学生权限" state={activeStudents ? "ready" : "blocked"} value={`${activeStudents}/${students.length}`} hint="登记学生、生成专属码、绑定负责老师。" /><FlowCard icon={CalendarDays} index={2} label="今日任务" state={pendingTasks ? "pending" : "ready"} value={`${pendingTasks}`} hint="按学生生成任务，家长端和平板端查看完成情况。" /><FlowCard icon={Printer} index={3} label="生成打印" state="pending" value={`${assignments.length}`} hint="小测、练习、试卷先审 PDF 草稿，再导出正式文件。" /><FlowCard icon={Upload} index={4} label="批改复核" state="pending" value={`${reviewSubmissions.length}`} hint="图片上传、AI初判、逐题复核和教师确认。" /><FlowCard icon={FileText} index={5} label="学生档案" state="ready" value="教师发布" hint="聚合任务、错题、问答、平板记录和阶段反馈。" /><FlowCard icon={TerminalSquare} index={6} label="课堂设备" state={readyTabletDevices ? "ready" : "pending"} value={`${readyTabletDevices}/${Math.max(devices.length, 1)}`} hint="控制平板、听写、跟读、播报和大屏连接。" /><FlowCard icon={Activity} index={7} label="系统状态" state={readyCapabilities === capabilityTotal ? "ready" : "blocked"} value={`${readyCapabilities}/${capabilityTotal}`} hint="教师端查看模块能力、复核门禁与审计记录。" /></div></section>
     <section className={moduleClass("工作台", "panel full")}><PanelTitle icon={MonitorCheck} title="展示与互动控制台" /><p className="muted-line">这块先作为方案原型：老师决定平板模式和互动插件状态，学生与家长只看到温和的使用结果，不看到排名、模型名称或隐私数据。</p><div className="teacher-display-console"><div className="display-control-card display-control-card-locked"><div className="display-control-head"><span><ScreenShare size={18} />电视公共屏</span><StatusPill label="已封锁" status="pending" /></div><strong>家长参观数据屏暂不开放</strong><p>公共屏内容先暂停操作和投放，后续确认独立全屏入口与展示规则后再重新开放。</p><div className="display-control-actions"><button className="secondary-button" disabled type="button"><Lock size={16} />暂不开放</button><button className="secondary-button" disabled type="button"><ScreenShare size={16} />地址暂停复制</button></div></div><div className="display-control-card"><div className="display-control-head"><span><TerminalSquare size={18} />平板展示模式</span><StatusPill label={`${readyTabletDevices}/${Math.max(devices.length, 1)} 已绑定`} status={readyTabletDevices ? "ready" : "pending"} /></div><div className="display-mode-grid"><span className="active">常规待机</span><span>家长参观</span><span>课堂互动</span><span>听写锁屏</span></div><p>共享平板只确认本次互动身份，拖拽头像进入学习光环后再选择插件。</p></div><div className="display-control-card"><div className="display-control-head"><span><Sparkles size={18} />互动插件开关</span><StatusPill label="状态展示" status="pending" /></div><div className="plugin-toggle-list">{["AI问答", "听写播报", "课文跟读", "课堂投票", "今日鼓励", "小组协作"].map((item, index) => <span key={item} className={index < 3 ? "ready" : "future"}>{item}<b>{index < 3 ? "可用" : "老师开启后"}</b></span>)}</div></div><div className="display-control-card"><div className="display-control-head"><span><ShieldCheck size={18} />迁移前配置</span><StatusPill label="先不迁移" status="pending" /></div><ul className="display-rule-list"><li>电视公共屏已封锁，暂不操作。</li><li>学生端先按模块入口迁移。</li><li>平板端确认拖拽交互后再迁移。</li><li>教师端控制入口最后接真实权限。</li></ul></div></div></section>
     <section className={moduleClass("课堂设备", "panel full")}><PanelTitle icon={TerminalSquare} title="课堂平板总控" /><p className="muted-line">平板端内容统一在教师端发布和控制。语音播报、听写、跟读由教师端下发，平板端只接收并执行；学生 AI 问答在平板端确认身份后使用。</p><div className="template-controls"><label>目标平板<select value={selectedTabletDevice?.id || ""} onChange={(event) => setTabletDeviceId(event.target.value)}>{devices.map((device) => <option key={device.id} value={device.id}>{device.label} · {device.grade || "未设年级"}</option>)}</select></label></div><div className="record-list">{devices.map((device) => <div className="record-row" key={device.id}><Volume2 size={17} /><div><strong>{device.label}</strong><span>{device.grade} · {device.className}</span></div><StatusPill label={device.status} status="ready" /></div>)}</div><div className="button-row"><button className="primary-button" onClick={() => onUnlock(true)}><Unlock size={17} />解锁平板</button><button className="secondary-button danger-button" onClick={() => onUnlock(false)}><Lock size={17} />锁定平板</button></div></section>
     <section className={moduleClass("课堂设备", "panel full")}>
@@ -2056,7 +2062,7 @@ function TeacherWorkspace({
     <section className={moduleClass("批改复核", "panel span-6")}><PanelTitle badge="AI生成" icon={Upload} title="拍照上传批改" /><div className="template-controls"><label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{selectableStudents.map((student) => <option key={student.id} value={student.id}>{student.displayName}</option>)}</select></label><label>材料类型<select value={uploadMaterialType} onChange={(event) => setUploadMaterialType(event.target.value as typeof uploadMaterialType)}><option value="external_workbook">外部练习册</option><option value="generated_assessment">系统生成材料</option></select></label><label>类型<select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option>作业</option><option>小测</option><option>试卷</option><option>听写</option></select></label><label>科目<select value={uploadSubject} onChange={(event) => setUploadSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label></div><label className="field-label">记录标题<input value={uploadTitle} placeholder="例如：三角形单元试卷批改、英语Unit 1听写批改" onChange={(event) => setUploadTitle(event.target.value)} /></label><ReviewImagePicker files={uploadFiles} setFiles={setUploadFiles} testId="teacher-grading-image-picker" /><p className="muted-line">外部练习册建议使用 iPad 连续拍摄多页清晰照片，按页序加入；系统只生成可追溯的识别/批改草稿，教师确认后才归档。</p>{uploadMaterialType === "external_workbook" ? <div className="external-answer-source-panel"><label>答案来源<select value={uploadAnswerSourceMode} onChange={(event) => setUploadAnswerSourceMode(event.target.value as typeof uploadAnswerSourceMode)}><option value="missing">暂未提供答案</option><option value="teacher_confirmed">教师已确认答案</option><option value="teacher_selected_reference">教师选择参考答案</option><option value="model_draft">系统生成参考答案草稿</option></select></label><label className="field-label">教师答案（可选）<textarea value={uploadAnswerKeyText} onChange={(event) => setUploadAnswerKeyText(event.target.value)} placeholder="例如：1.A 2.4 3.小数乘法" /></label><label className="field-label">参考资料 ID（可选）<input value={uploadReferenceSourceId} onChange={(event) => setUploadReferenceSourceId(event.target.value)} placeholder="教师确认的教材/练习册答案来源 ID" /></label></div> : null}<div className="review-upload-action"><button className="primary-button" disabled={!selectedStudent || !uploadFiles.length || isReviewUploading("grading")} onClick={() => selectedStudent && submitReviewUpload("grading", { studentId: selectedStudent.id, subject: uploadSubject, kind: uploadKind, title: uploadTitle.trim() || `${selectedStudent.displayName}${uploadKind}批改`, images: uploadFiles, materialType: uploadMaterialType, answerSourceMode: uploadAnswerSourceMode, answerKeyText: uploadAnswerKeyText, referenceSourceId: uploadReferenceSourceId })}><Upload size={17} />上传并批改</button>{renderReviewUploadStatus("grading")}</div></section>
     <section className={moduleClass("批改复核", "panel full")}><PanelTitle icon={ListChecks} title="批改工作台" /><div className="button-row"><button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新工作台</button></div><GradingWorkbenchPanel pageData={gradingWorkbenchPage} onConfirmAnswerSource={onConfirmAnswerSource} onMarkReviewed={onMarkReviewed} onQueryGradingWorkbenches={onQueryGradingWorkbenches} onQuestionReview={onQuestionReview} onRecognize={onRecognize} reviewSubmissions={reviewSubmissions} students={students} workbenches={gradingWorkbenches} /></section>
     <section className={moduleClass("电视动态屏", "tv-display-shell full")}>
-      <TvParentDisplay ai={ai} assignments={assignments} audit={audit} corrections={corrections} logs={logs} reports={reports} reviewSubmissions={reviewSubmissions} students={students} tasks={tasks} />
+      <TvParentDisplay capabilities={capabilities} assignments={assignments} audit={audit} corrections={corrections} logs={logs} reports={reports} reviewSubmissions={reviewSubmissions} students={students} tasks={tasks} />
     </section>
     <section className={moduleClass("学生档案", "panel full")}>
       <PanelTitle badge="AI生成" icon={FileText} title="学生档案草稿与发布" />
@@ -2125,7 +2131,7 @@ function TeacherWorkspace({
       </div>
       {selectedArchiveStudent ? <TeacherStudentArchivePanel assignments={assignments} audit={audit} corrections={corrections} logs={logs} reports={reports} student={selectedArchiveStudent} tasks={tasks} /> : null}
     </section>
-    <section className={moduleClass("系统状态", "panel full")}><PanelTitle icon={Settings2} title="服务状态" /><div className="feature-list">{(ai?.providers || []).map((item) => <div className="feature-row" key={item.id}><div><strong>{item.label}</strong><span>{item.model} · {item.capabilities.join(" / ")}</span></div><StatusPill label={item.status === "ready" ? "可用" : "不可用"} status={item.status} /></div>)}{(ai?.features || []).filter((item) => item.id !== "avatar-dialog").map((item) => <div className="feature-row" key={item.id}><div><strong>{item.label}</strong><span>{item.appSurface}</span></div><StatusPill label={item.status === "ready" ? "可用" : "不可用"} status={item.status} /></div>)}</div></section>
+    <section className={moduleClass("系统状态", "panel full")}><PanelTitle icon={Settings2} title="服务状态" /><div className="feature-list">{capabilities?.capabilities.map((item) => <div className="feature-row" key={item.moduleId}><div><strong>{moduleCapabilityLabel(item.moduleId)}</strong><span>{item.teacherMessage} · {moduleDependencyLabel(item.dependencyStatus)}</span></div><StatusPill label={moduleCapabilityStatusLabel(item.status)} status={moduleCapabilityStatusTone(item.status)} /></div>)}{(ai?.features || []).filter((item) => item.id !== "avatar-dialog").map((item) => <div className="feature-row" key={item.id}><div><strong>{item.label}</strong><span>{item.appSurface}</span></div><StatusPill label={item.status === "ready" ? "可用" : "不可用"} status={item.status === "ready" ? "ready" : "blocked"} /></div>)}{!capabilities?.capabilities.length ? <p className="review-empty">模块能力状态将在教师登录后同步。</p> : null}</div></section>
     <section className={moduleClass("系统状态", "panel full")}><PanelTitle icon={Activity} title="归档与审计" /><AuditPanel audit={audit} /></section>
   </div>;
 }
@@ -3689,12 +3695,12 @@ function AuditPanel({ audit }: { audit: AdminAudit | null }) {
   return <div className="teacher-flow-grid"><FlowCard icon={Activity} index={1} label="行为记录" state={events.length ? "ready" : "pending"} value={`${events.length}`} hint={events[0] ? `${events[0].feature || "记录"} · ${events[0].action || "更新"}` : "暂无近期行为"} /><FlowCard icon={Bot} index={2} label="模型调用" state={runs.length ? "ready" : "pending"} value={`${runs.length}`} hint={runs[0] ? `${runs[0].provider} · ${runs[0].status}` : "暂无调用记录"} /><FlowCard icon={Printer} index={3} label="打印资产" state={assets.length ? "ready" : "pending"} value={`${assets.length}`} hint={assets[0]?.title || "暂无导出资产"} /></div>;
 }
 
-function TvParentDisplay({ ai, assignments, audit, corrections, logs, reports, reviewSubmissions, students, tasks }: { ai: AiSnapshot | null; assignments: AssignmentCard[]; audit: AdminAudit | null; corrections: CorrectionRecord[]; logs: LearningLog[]; reports: StudentReportCard[]; reviewSubmissions: ReviewSubmission[]; students: StudentProfile[]; tasks: LearningTaskCard[] }) {
+function TvParentDisplay({ capabilities, assignments, audit, corrections, logs, reports, reviewSubmissions, students, tasks }: { capabilities: ModuleCapabilityStatus | null; assignments: AssignmentCard[]; audit: AdminAudit | null; corrections: CorrectionRecord[]; logs: LearningLog[]; reports: StudentReportCard[]; reviewSubmissions: ReviewSubmission[]; students: StudentProfile[]; tasks: LearningTaskCard[] }) {
   const totalLearningItems = tasks.length + assignments.length;
   const completedTasks = tasks.filter((item) => item.status === "已完成").length;
   const pendingReviews = reviewSubmissions.filter((item) => item.needsReview || item.status !== "已复核").length;
   const archivedReports = reports.length + students.filter((item) => item.publishedProfileText).length;
-  const aiReady = ai?.providers.some((item) => item.status === "ready") ?? false;
+  const aiReady = capabilities?.capabilities.some((item) => item.status === "available") ?? false;
   const gradeRows = gradeOptions.map((grade, index) => {
     const gradeStudents = students.filter((item) => item.grade === grade);
     const gradeStudentIds = new Set(gradeStudents.map((item) => item.id));
@@ -4184,6 +4190,34 @@ function StatusDot({ status }: { status: string }) {
 
 function StatusPill({ label, status }: { label: string; status: string }) {
   return <span className={`status-pill ${status}`}>{label}</span>;
+}
+
+function moduleCapabilityLabel(moduleId: ModuleCapability["moduleId"]) {
+  const labels: Record<ModuleCapability["moduleId"], string> = {
+    generation: "生成",
+    grading: "批改",
+    "teaching-materials": "教材资料",
+    "student-profile": "学生档案"
+  };
+  return labels[moduleId];
+}
+
+function moduleCapabilityStatusLabel(status: ModuleCapability["status"]) {
+  if (status === "available") return "可用";
+  if (status === "blocked") return "已阻断";
+  if (status === "failed") return "失败";
+  if (status === "draft") return "草稿";
+  return "待复核";
+}
+
+function moduleCapabilityStatusTone(status: ModuleCapability["status"]) {
+  return status === "available" ? "ready" : status === "blocked" || status === "failed" ? "blocked" : "pending";
+}
+
+function moduleDependencyLabel(status: ModuleCapability["dependencyStatus"]) {
+  if (status === "ready") return "依赖满足";
+  if (status === "blocked") return "依赖阻断";
+  return "依赖待复核";
 }
 
 function statusToProviderStatus(status: string) {

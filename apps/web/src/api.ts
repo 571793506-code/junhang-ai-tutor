@@ -6,6 +6,7 @@ import type {
   DictationTask,
   LearningLog,
   LearningTaskCard,
+  ModuleCapabilityStatus,
   ReadingTask,
   StudentProfile,
   StudentReportCard,
@@ -73,19 +74,9 @@ export async function getApiStatus() {
     ok: boolean;
     database?: { ok: boolean; reason: string };
     ai: {
-      providers?: Array<{
-        id: string;
-        label: string;
-        status: "ready" | "blocked" | "unavailable";
-        model: string;
-        baseUrl: string;
-        reason: string;
-        capabilities: string[];
-      }>;
       features: Array<{
         id: string;
         label: string;
-        providerId?: string;
         appSurface: string;
         status: "ready" | "blocked" | "unavailable";
         reason: string;
@@ -93,17 +84,15 @@ export async function getApiStatus() {
       generatedAt: string;
       mode: string;
     };
+    capabilities?: ModuleCapabilityStatus;
   }>(response);
   return {
     ...body,
     ai: {
       ...body.ai,
-      providers: body.ai.providers || [],
-      features: body.ai.features.map((feature) => ({
-        ...feature,
-        providerId: feature.providerId || (feature.id.includes("voice") || feature.id.includes("spoken") ? "minimax" : "gpt56")
-      }))
-    }
+      features: body.ai.features
+    },
+    capabilities: body.capabilities || null
   };
 }
 
