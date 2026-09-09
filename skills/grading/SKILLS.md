@@ -50,6 +50,7 @@ OCR 使用 MiniMax 视觉能力，主观批改和参考答案使用 Terra `high`
 - `gpt-5.6-terra` 的外部材料参考答案生成、主批改和高风险复判统一使用 `high`。configuration 故障不能升级；OCR、题干、学生作答或参考证据不足属于 evidence 故障，直接进入教师复核。
 - 每个失败题最多一次 Sol，局部参考答案或批改独立预算为 180 秒 / 12000 tokens。Sol 仍失败、结果冲突或质量门禁不通过时，只保留待复核结果。
 - `usedModelEscalation`、模型名、档位、触发原因和预算只属于内部运行元数据，不得展示给学生、家长、课堂平板或公共屏。Sol availability 和合成质量样本只证明链路可用，不能证明生产批改正确率；正确率必须使用教师确认的 gold 数据评估。
+- 采集真实批改质量样本时先运行 `cmd /c npm.cmd run collect:grading:gold` 做只读 dry-run；只有确认候选范围后，才用 `--write tmp/quality/grading-gold-cases.json` 写出脱敏样本。把待评估模型的 `actual` 结果合入评估副本后，再运行 `cmd /c npm.cmd run check:grading:quality -- tmp/quality/grading-gold-cases.json`。对话中已由教师确认并归档的生成批改，按 `gradingSourcePackage`、逐题确认和归档状态纳入；外部图片批改还必须有 OCR、答案来源和图片质量证据。
 
 ## 两条处理路径
 

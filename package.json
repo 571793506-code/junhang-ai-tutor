@@ -43,6 +43,7 @@
     "check:generation:quality:sol": "node scripts/run-with-env.mjs node scripts/sol-escalation-quality-check.mjs",
     "check:gpt56": "node scripts/gpt56-capability-check.mjs",
     "check:grading:quality": "node scripts/grading-quality-check.mjs",
+    "collect:grading:gold": "node scripts/run-with-env.mjs node scripts/collect-grading-gold.mjs",
     "check:generation:layout": "node scripts/generation-layout-check.mjs",
     "check:web:generation-workbench": "node scripts/web-generation-workbench-ui.test.mjs",
     "check:web:grading-upload": "node --test apps/web/src/review-image-picker.test.mjs",

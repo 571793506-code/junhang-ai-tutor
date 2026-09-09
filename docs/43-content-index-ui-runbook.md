@@ -49,6 +49,30 @@ cmd /c npm.cmd run check:generation:blueprint
 
 该命令只检查三科小测、练习、试卷的服务层蓝图、兜底题型、总分、题量和基础审查规则；不启动 API、不调用模型、不导出 PDF。修改生成模板、题型结构、默认页数、分值或审查规则时，应优先运行它，而不是直接跑完整 E2E。
 
+## 3.1 批改质量样本采集
+
+从本地数据库扫描教师确认的批改记录时，默认只输出脱敏统计和阻断原因，不写文件：
+
+```bash
+cmd /c npm.cmd run collect:grading:gold
+```
+
+对话中已经由教师确认并归档的生成批改，若逐题复核完整且存在完整 `gradingSourcePackage`，可以进入候选。外部图片批改还必须保留 OCR、答案来源、图片质量和逐题教师确认；缺少这些证据的记录只进入阻断报告。
+
+确认候选范围后，显式写出本地临时 gold 文件：
+
+```bash
+cmd /c npm.cmd run collect:grading:gold -- --write tmp\quality\grading-gold-cases.json
+```
+
+采集文件只保留题干、学生作答、教师确认后的状态/答案和评分字段；学生身份、联系方式、图片文件名、原始模型输出、供应商和内部标识不会写入。它是后续评估的 gold 基线，不包含待评估模型的 `actual` 结果；将 `actual` 合入评估副本后，再运行：
+
+```bash
+cmd /c npm.cmd run check:grading:quality -- tmp\quality\grading-gold-cases.json
+```
+
+采集数量和质量指标仍不等于生产准确率，正式结论必须由教师确认样本范围后单独标记。
+
 ## 3. API
 
 查看内容索引：
