@@ -59,6 +59,19 @@ test("external workbook upload exposes ordered iPad photo and answer-source cont
   assert.match(source, /accept="image\/\*"/);
 });
 
+test("generated assessment upload requires a selectable assignment source and forwards its id", () => {
+  assert.match(source, /关联生成作业/);
+  assert.match(source, /selectedGeneratedAssignmentId/);
+  assert.match(source, /assignmentId:\s*uploadMaterialType === "generated_assessment" \? selectedGeneratedAssignmentId/);
+});
+
+test("web grading workbench can register dialogue answer packages as shared sources", () => {
+  assert.match(source, /DialogueSourceRegistrationPanel/);
+  assert.match(source, /登记对话生成内容为统一批改来源/);
+  assert.match(source, /registerDialogueAnswerPackage/);
+  assert.match(source, /系统生成材料/);
+});
+
 test("external workbench displays original recognition evidence and blocks archive", () => {
   assert.match(source, /recognitionPacket/);
   assert.match(source, /archiveBlockers/);

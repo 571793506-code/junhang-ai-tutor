@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as gradingSourcePackage from "./grading-source-package.js";
 
-const { buildGradingSourcePackage } = gradingSourcePackage;
+const { buildGradingSourcePackage, normalizeImportedGradingSourcePackage } = gradingSourcePackage;
 
 const assignment = {
   id: "assignment-source-1",
@@ -99,4 +99,53 @@ test("rejects incomplete question answers, scores, and inconsistent total score"
   assert.ok(result.issues.includes("第 2 题缺少标准答案。"));
   assert.ok(result.issues.includes("第 2 题分值必须大于 0。"));
   assert.ok(result.issues.includes("题目分值合计 4 与总分 12 不一致。"));
+});
+
+test("normalizes a dialogue answer package without discarding its original fingerprint", () => {
+  const imported = {
+    schemaVersion: "junhang-grading-source-v1",
+    sourceId: "dialogue-assessment-1",
+    version: 1,
+    title: "四年级四则运算专项小测",
+    subject: "数学",
+    kind: "小测",
+    grade: "四年级",
+    totalScore: 2,
+    questions: [{
+      questionNo: 1,
+      prompt: "72＋18×4＝（　　）",
+      correctAnswer: 144,
+      maxScore: 2,
+      analysisSteps: ["先乘后加。"],
+      knowledgePoint: "四则混合运算",
+      commonMistake: "混淆运算顺序。",
+      rubric: "结果正确得2分。"
+    }],
+    baseScore: 2,
+    teacherReviewRequired: true,
+    fingerprint: "sha256:dialogue-original-fingerprint"
+  };
+
+  const result = normalizeImportedGradingSourcePackage(imported, { sourceId: "assignment-1" });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.originalFingerprint, imported.fingerprint);
+  assert.equal(result.originalSourceId, imported.sourceId);
+  assert.equal(result.package.sourceId, "assignment-1");
+  assert.equal(result.package.questions[0].correctAnswer, 144);
+  assert.equal(result.package.questions[0].maxScore, 2);
+  assert.equal(result.extensions.questions[0].commonMistake, "混淆运算顺序。");
+  assert.equal(gradingSourcePackage.validateGradingSourcePackage(result.package).ok, true);
+});
+
+test("rejects dialogue answer packages missing a question answer or score", () => {
+  const result = normalizeImportedGradingSourcePackage({
+    schemaVersion: "junhang-grading-source-v1",
+    sourceId: "dialogue-assessment-2",
+    title: "不完整答案包",
+    questions: [{ questionNo: 1, prompt: "1+1=?" }]
+  }, { sourceId: "assignment-2" });
+
+  assert.equal(result.ok, false);
+  assert.match(result.issues.join(";"), /标准答案|分值/);
 });

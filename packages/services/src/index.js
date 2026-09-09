@@ -22,10 +22,12 @@ import {
   recordVoiceInteraction
 } from "@junhang/db";
 import { buildQaLearningRecord, sanitizeQaAnswer } from "./qa-learning-record.js";
+import { buildGenerationContext, buildStudentProfileContext, buildSubmissionGradingContext } from "./context-engineering.js";
 
 export { buildQaLearningRecord, sanitizeQaAnswer, sanitizeQaText } from "./qa-learning-record.js";
 export * from "./student-dictionary.js";
 export * from "./module-capability-status.js";
+export * from "./context-engineering.js";
 
 function normalizeAssessmentKind(kind) {
   const text = String(kind || "");
@@ -1441,12 +1443,26 @@ function compareObjectiveAnswers(reference = {}, question = {}) {
   if (numberPattern.test(expectedClean) && numberPattern.test(actualClean)) {
     return Number(expectedClean) === Number(actualClean);
   }
+  if (numberPattern.test(expectedClean)) {
+    const finalNumericAnswer = extractFinalNumericAnswer(actualClean);
+    if (finalNumericAnswer != null) return Number(expectedClean) === Number(finalNumericAnswer);
+  }
   if (/^[a-z]$/i.test(expectedClean) && /^[a-z]$/i.test(actualClean)) {
     return expectedClean === actualClean;
   }
   const shortExactAnswer = expectedClean.length <= 24 && !/[。！？!?；;]/.test(expectedClean);
   if (!shortExactAnswer) return null;
   return expectedClean === actualClean;
+}
+
+function extractFinalNumericAnswer(value) {
+  const text = String(value || "").normalize("NFKC").trim();
+  const numeric = "[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)";
+  const explicitResults = [...text.matchAll(new RegExp(`(?:=|答案|结果)\\s*(${numeric})`, "gi"))];
+  if (explicitResults.length) return explicitResults.at(-1)[1];
+  const leading = text.match(new RegExp(`^\\s*[（(]?\\s*(${numeric})(?=\\s*(?:[）)]|$))`));
+  if (leading) return leading[1];
+  return null;
 }
 
 function buildDeterministicGradingPlan(input = {}, ocr = {}, referenceAnswers = []) {
@@ -4393,75 +4409,20 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     : matchApprovedContentContext(input, []);
   const generationBudget = resolveAssessmentGenerationBudget(input, config);
   const generationBasis = input.generationBasis || (input.textbookAssetId ? "textbook_reviewed" : "teacher_requirement");
-  const generationContext = {
-    ...(input.generationContext && typeof input.generationContext === "object" ? input.generationContext : {}),
-    request: {
-      requirement: input.requirement || input.specialRequirements || "",
-      kind: input.kind || null,
-      difficulty: input.difficulty || null,
-      generationBasis,
-      recoveryReason: input.recoveryReason || null
-    },
-    target: {
-      subject: input.subject || null,
-      grade: input.grade || input.targetGrade || null,
-      scope: input.targetScope || null,
-      studentId: input.studentId || null
-    },
-    studentSignals: Array.isArray(input.studentSignals) ? input.studentSignals.slice(0, 40) : [],
-    teaching: {
-      textbook: {
-        assetId: input.textbookAssetId || null,
-        title: input.textbookTitle || null,
-        edition: input.textbookEdition || null,
-        series: input.textbookSeries || null,
-        volume: input.textbookVolume || null,
-        region: input.textbookRegion || null,
-        chapterId: input.textbookChapterId || null,
-        chapterTitle: input.textbookChapterTitle || null
-      },
-      textbookAssetId: input.textbookAssetId || null,
-      textbookTitle: input.textbookTitle || null,
-      textbookEdition: input.textbookEdition || null,
-      textbookSeries: input.textbookSeries || null,
-      textbookVolume: input.textbookVolume || null,
-      textbookRegion: input.textbookRegion || null,
-      textbookChapterId: input.textbookChapterId || null,
-      textbookChapterTitle: input.textbookChapterTitle || null,
-      knowledgePoints: input.knowledgePoints || [],
-      contentContext,
-      evidence: {
-        basis: generationBasis,
-        recoveryReason: input.recoveryReason || null
-      }
-    },
-    output: {
-      paper: "A4",
-      kind: input.kind || null,
-      requestedItemCount: requestedAssessmentItemCount(input),
-      generationProfile: generationBudget.profile,
-      assessmentTotalTimeoutMs: generationBudget.assessmentTotalTimeoutMs,
-      assessmentMaxTokens: generationBudget.assessmentMaxTokens,
-      teacherReviewRequired: true,
-      includeAnswerAnalysis: true,
-      includeStructuredAnswerPackage: true
-    },
-    rules: {
-      repairRequired: true,
-      hideProviderFromStudentAndParent: true,
-      noDefaultBonusQuestions: true,
-      teacherRequirementEmergency: generationBasis === "teacher_requirement_emergency"
-    }
-  };
+  const requestId = input.requestId || randomUUID();
+  const { generationContext } = buildGenerationContext(
+    { ...input, requestId, generationBasis },
+    { contentContext, studentSignals: input.studentSignals, generationBudget }
+  );
   const modelInput = {
     ...input,
-    requestId: input.requestId || randomUUID(),
+    requestId,
     generationProfile: generationBudget.profile,
     assessmentTotalTimeoutMs: generationBudget.assessmentTotalTimeoutMs,
     assessmentMaxTokens: generationBudget.assessmentMaxTokens,
     generationBudget,
     generationContext,
-    contentContext
+    contentContext: generationContext.teaching.contentContext
   };
   if (input.generationTimeoutMs != null) {
     modelInput.generationTimeoutMs = input.generationTimeoutMs;
@@ -4632,6 +4593,12 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
   const ocr = enrichSubmissionOcr(input, baseOcr, reference.referenceAnswers || []);
   const questionLayoutManifest = buildSubmissionQuestionLayoutManifest(input, ocr, reference.referenceAnswers || []);
   const deepAuditRequired = shouldRunDeepGradingAudit(config, input, options);
+  const contextBundle = buildSubmissionGradingContext({
+    ...input,
+    ocrQuestions: Array.isArray(input.ocrQuestions) ? input.ocrQuestions : ocr.questions || [],
+    referenceAnswers: reference.referenceAnswers || [],
+    questionLayoutManifest
+  }, { questionLayoutManifest, deepAuditRequired });
   const gradingInput = {
     ...input,
     ocrText: input.ocrText || ocr.text || "",
@@ -4639,6 +4606,8 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
     printedText: input.printedText || ocr.printedText || "",
     ocrQuestions: Array.isArray(input.ocrQuestions) ? input.ocrQuestions : ocr.questions || [],
     questionLayoutManifest,
+    gradingSourcePackage: contextBundle.gradingInput.gradingSourcePackage,
+    remoteQuestionNos: contextBundle.unresolvedQuestionNos,
     answerKey: input.answerKey || reference.answerKey || null,
     referenceAnswers: reference.referenceAnswers || [],
     referenceAnswerMode: reference.mode,

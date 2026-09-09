@@ -36,6 +36,31 @@ test("fully objective grading uses known answers without remote grading", async 
   assert.deepEqual(result.structured.questionResults.map((item) => item.status), ["correct", "correct"]);
 });
 
+test("objective grading extracts the final numeric answer from calculation work", async () => {
+  let gradingCalls = 0;
+  const result = await gradeSubmissionService(
+    {},
+    {
+      subject: "数学",
+      kind: "小测",
+      totalScore: 2,
+      referenceAnswers: [{ questionNo: "1", prompt: "360÷6+85 = ___", correctAnswer: "145", score: 2, confidence: 1 }],
+      ocrQuestions: [{ questionNo: "1", printedText: "360÷6+85 = ___", studentAnswer: "360÷6=60；60+85=145", confidence: 0.95 }]
+    },
+    {
+      persist: false,
+      gradingRunner: async () => {
+        gradingCalls += 1;
+        throw new Error("remote grading should not run");
+      }
+    }
+  );
+
+  assert.equal(gradingCalls, 0);
+  assert.equal(result.structured.questionResults[0].status, "correct");
+  assert.equal(result.structured.questionResults[0].score, 2);
+});
+
 test("low-confidence generated references retry once with Sol only when printed evidence exists", async () => {
   const executions = [];
   const referenceAnswerRunner = async (_config, _input, execution) => {

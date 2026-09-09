@@ -269,6 +269,7 @@ export async function aggregateStudentProfile(studentId: string) {
     ok: boolean;
     student: StudentProfile;
     snapshot: Record<string, unknown>;
+    publishGate: { ok: boolean; blockers: string[]; excludedEvidenceRefs: string[] };
   }>(response);
 }
 
@@ -282,6 +283,7 @@ export async function draftStudentProfile(studentId: string, periodType: "weekly
     ok: boolean;
     student: StudentProfile;
     snapshot: Record<string, unknown>;
+    publishGate: { ok: boolean; blockers: string[]; excludedEvidenceRefs: string[] };
   }>(response);
 }
 
@@ -289,12 +291,13 @@ export async function publishStudentProfile(studentId: string, snapshot: Record<
   const response = await fetch(`${API_BASE_URL}/api/students/${studentId}/profile/publish`, {
     method: "POST",
     headers: jsonHeaders(),
-    body: JSON.stringify({ snapshot, text })
+    body: JSON.stringify({ snapshot, text, confirmTeacherReview: true })
   });
   return readJson<{
     ok: boolean;
     student: StudentProfile;
     snapshot: Record<string, unknown>;
+    publishGate: { ok: boolean; blockers: string[]; excludedEvidenceRefs: string[] };
   }>(response);
 }
 
@@ -378,6 +381,28 @@ export async function loginClassroom(input: { bindingCode: string }) {
   return readJson<{ ok: boolean; sessionToken: string; device: ClassroomDevice }>(response);
 }
 
+export type GradingSourceReference = { sourceId: string; version: number; fingerprint: string; questionCount?: number };
+export type GenerationContextSummary = {
+  basis: string;
+  target: { scope: string | null; studentId: string | null; grade: string | null; subject: string };
+  textbook: { assetId: string | null; title: string | null; chapterId: string | null; chapterTitle: string | null };
+  knowledgePoints: string[];
+  contentContext: { status: string; sourceCount: number; sourceIds: string[] };
+  studentSignalCount: number;
+  reviewRequired: boolean;
+};
+export type AssessmentGenerationResult = {
+  available: boolean;
+  draftText?: string;
+  parsedDraft?: Record<string, unknown> | null;
+  draftItems?: Array<Record<string, unknown>>;
+  audit?: Record<string, unknown> | null;
+  generationPipeline?: Record<string, unknown> | null;
+  generationContext?: Record<string, unknown> | null;
+  contentContext?: Record<string, unknown> | null;
+  persisted?: { modelRunId?: string | null; assignmentId?: string | null };
+};
+
 export async function draftAssessment(input: Record<string, unknown>) {
   const response = await fetch(`${API_BASE_URL}/api/assessments/draft`, {
     method: "POST",
@@ -387,10 +412,27 @@ export async function draftAssessment(input: Record<string, unknown>) {
   return readJson<{
     ok: boolean;
     persistence: { active: boolean; reason: string };
-    result: {
-      available: boolean;
-      draftText: string;
-      persisted?: { modelRunId?: string | null; assignmentId?: string | null };
+    result: AssessmentGenerationResult;
+  }>(response);
+}
+
+export async function previewAssessmentContentContext(input: Record<string, unknown>) {
+  const response = await fetch(`${API_BASE_URL}/api/content/context/preview`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(input)
+  });
+  return readJson<{
+    ok: boolean;
+    context: {
+      status: string;
+      reason: string | null;
+      approvedOnly: boolean;
+      sourceCount: number;
+      sourceIds: string[];
+      matchedCount: number;
+      textbookContext: Record<string, unknown>;
+      matches: Array<Record<string, unknown>>;
     };
   }>(response);
 }
@@ -728,8 +770,8 @@ export async function listReviewSubmissions() {
 }
 
 export type ExternalGradingAnswerSource = {
-  mode: "teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing";
-  status: "confirmed" | "needs_teacher_review" | "missing";
+  mode: "teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing" | "gradingSourcePackage" | "referenceAnswers";
+  status: "confirmed" | "needs_teacher_review" | "missing" | "available" | "draft";
   answers: Record<string, string>;
 };
 
@@ -770,6 +812,7 @@ export type GradingWorkbench = {
   kind: string;
   materialType: "external_workbook" | "generated_assessment";
   status: string;
+  workflowState: "draft" | "review_required" | "blocked" | "failed" | "archived";
   score: number | null;
   provisionalScore?: number | null;
   needsTeacherReview: boolean;
@@ -875,6 +918,44 @@ export async function getGradingWorkbench(submissionId: string) {
     headers: authHeaders()
   });
   return readJson<{ ok: boolean; workbench: GradingWorkbench }>(response);
+}
+
+export async function importDialogueAnswerPackage(submissionId: string, answerPackage: unknown) {
+  const response = await fetch(`${API_BASE_URL}/api/grading/workbench/${submissionId}/dialogue-answer-package`, {
+    method: "PATCH",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ answerPackage })
+  });
+  return readJson<{
+    ok: boolean;
+    regraded: boolean;
+    imported: { originalSourceId: string | null; originalFingerprint: string | null; fingerprint: string; questionCount: number };
+    workbench: GradingWorkbench;
+  }>(response);
+}
+
+export async function registerDialogueAnswerPackage(input: {
+  answerPackage: unknown;
+  assignmentId?: string;
+  title?: string;
+  subject?: string;
+  kind?: string;
+  grade?: string;
+  targetGrade?: string;
+  studentId?: string;
+  difficulty?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/api/grading/source-packages/dialogue`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(input)
+  });
+  return readJson<{
+    ok: boolean;
+    assignment: Record<string, unknown>;
+    gradingSource: { sourceId: string; version: number; fingerprint: string };
+    imported: { originalSourceId: string | null; originalFingerprint: string | null; fingerprint: string; questionCount: number };
+  }>(response);
 }
 
 export async function patchGradingWorkbenchQuestion(submissionId: string, questionId: string, input: Record<string, unknown>) {

@@ -48,6 +48,29 @@ test("approved content resolver queries only generation-approved sources", async
   assert.equal(result.matchedCount, 1);
 });
 
+test("context preview exposes bounded source metadata but never raw chunks", async () => {
+  const { summarizeApprovedAssessmentContentContext } = await import(moduleUrl);
+  const result = summarizeApprovedAssessmentContentContext({
+    available: true,
+    approvedOnly: true,
+    matchedCount: 1,
+    textbookContext: { resolved: true, assetId: "tb_1", chapterId: "ch_1", chapterTitle: "分数加减" },
+    matches: [{
+      id: "src_1",
+      title: "五年级数学单元资料",
+      sourceType: "markdown",
+      subject: "数学",
+      grade: "五年级",
+      summary: "分数加减",
+      chunks: [{ id: "chunk_1", text: "private markdown" }]
+    }]
+  });
+  assert.equal(result.status, "approved");
+  assert.deepEqual(result.sourceIds, ["src_1"]);
+  assert.equal("chunks" in result.matches[0], false);
+  assert.equal("markdownPath" in result.matches[0], false);
+});
+
 test("approved content resolver uses server-side textbook and chapter metadata", async () => {
   const { resolveApprovedAssessmentContentContext } = await import(moduleUrl);
   let textbookQuery = null;

@@ -13,6 +13,14 @@ function uniqueText(values) {
   return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
 }
 
+function boundedText(value, max = 240) {
+  return String(value || "").trim().slice(0, max);
+}
+
+function boundedList(value, max = 20) {
+  return uniqueText(Array.isArray(value) ? value : []).slice(0, max).map((item) => boundedText(item, 160));
+}
+
 async function resolveTextbookInput(prisma, input) {
   const hasTextbookIntent = Boolean(
     input.textbookAssetId
@@ -165,5 +173,52 @@ export async function resolveApprovedAssessmentContentContext(prisma, input = {}
   return {
     ...matchApprovedContentContext(resolvedTextbook.input, sources),
     textbookContext: resolvedTextbook.textbookContext
+  };
+}
+
+export function summarizeApprovedAssessmentContentContext(contentContext = {}) {
+  const source = safeMetadata(contentContext);
+  const textbookContext = safeMetadata(source.textbookContext);
+  const matches = (Array.isArray(source.matches) ? source.matches : []).slice(0, 8).map((match) => {
+    const item = safeMetadata(match);
+    return {
+      sourceId: boundedText(item.id || item.sourceId, 180),
+      title: boundedText(item.title, 240),
+      sourceType: boundedText(item.sourceType, 120),
+      subject: boundedText(item.subject, 80),
+      grade: boundedText(item.grade, 80),
+      edition: boundedText(item.edition, 120),
+      volume: boundedText(item.volume, 80),
+      curriculumSeries: boundedText(item.curriculumSeries, 120),
+      curriculumRegion: boundedText(item.curriculumRegion, 120),
+      textbookAssetId: boundedText(item.textbookAssetId, 180) || null,
+      knowledgePoints: boundedList(item.knowledgePoints),
+      chunkCount: Number(item.chunkCount || item.chunks?.length || 0) || 0,
+      summary: boundedText(item.summary, 600)
+    };
+  });
+  const status = source.available === true || matches.length
+    ? "approved"
+    : boundedText(source.reason || "missing", 80);
+  return {
+    status,
+    reason: source.reason ? boundedText(source.reason, 160) : null,
+    approvedOnly: source.approvedOnly === true,
+    sourceCount: Number(source.approvedSourceCount ?? source.sourceCount ?? matches.length) || 0,
+    sourceIds: matches.map((match) => match.sourceId).filter(Boolean),
+    matchedCount: Number(source.matchedCount ?? matches.length) || 0,
+    textbookContext: {
+      resolved: textbookContext.resolved === true,
+      assetId: boundedText(textbookContext.assetId, 180) || null,
+      title: boundedText(textbookContext.title, 240) || null,
+      subject: boundedText(textbookContext.subject, 80) || null,
+      grade: boundedText(textbookContext.grade, 80) || null,
+      edition: boundedText(textbookContext.edition, 120) || null,
+      volume: boundedText(textbookContext.volume, 80) || null,
+      chapterId: boundedText(textbookContext.chapterId, 180) || null,
+      chapterTitle: boundedText(textbookContext.chapterTitle, 240) || null,
+      knowledgePoints: boundedList(textbookContext.knowledgePoints)
+    },
+    matches
   };
 }

@@ -100,6 +100,19 @@ export declare function solEscalationEnabled(runtime?: {
   gpt56ReasoningEffortEnabled?: boolean;
   gpt56SolModel?: string;
 }): boolean;
+export declare function resolveTaskModelPolicy(
+  task: string,
+  config?: RuntimeConfigLike,
+  input?: Record<string, unknown>
+): Record<string, unknown>;
+export declare function classifyTaskFailure(
+  error?: unknown,
+  context?: Record<string, unknown>
+): {
+  triggerClass: "availability" | "quality" | "configuration" | "evidence";
+  allowedToEscalate: boolean;
+  code: string;
+};
 export declare function validateAssessmentPartition(
   parsed?: Record<string, unknown>,
   partition?: { id?: string; itemTypes?: string[] }

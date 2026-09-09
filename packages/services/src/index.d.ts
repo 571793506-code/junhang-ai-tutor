@@ -86,6 +86,20 @@ export declare function validateAssessmentContentContext(
   contentContext?: Record<string, unknown>
 ): Record<string, unknown>;
 
+export declare function buildGenerationContext(
+  input?: Record<string, unknown>,
+  options?: Record<string, unknown>
+): Record<string, unknown>;
+
+export declare function buildSubmissionGradingContext(
+  input?: Record<string, unknown>,
+  options?: Record<string, unknown>
+): Record<string, unknown>;
+
+export declare function buildStudentProfileContext(
+  input?: Record<string, unknown>
+): Record<string, unknown>;
+
 export declare function buildAssessmentBlueprintCheck(
   input?: Record<string, unknown>
 ): Record<string, unknown>;

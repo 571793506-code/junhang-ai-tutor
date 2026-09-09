@@ -1,5 +1,9 @@
 export type SubjectLabel = "语文" | "数学" | "英语";
 
+export declare function validateGradingSourcePackage(
+  sourcePackage?: Record<string, unknown>
+): { ok: boolean; issues: string[] };
+
 export interface EntityBlueprint {
   name: string;
   keyFields: string[];
@@ -152,6 +156,17 @@ export interface AssignmentCard {
     mistakes: string[];
     nextPractice: string;
   } | null;
+  gradingSource?: { sourceId: string; version: number; fingerprint: string; questionCount?: number } | null;
+  gradingSourceQuestionCount?: number;
+  generationContextSummary?: {
+    basis: string;
+    target: { scope: string | null; studentId: string | null; grade: string | null; subject: SubjectLabel };
+    textbook: { assetId: string | null; title: string | null; chapterId: string | null; chapterTitle: string | null };
+    knowledgePoints: string[];
+    contentContext: { status: string; sourceCount: number; sourceIds: string[] };
+    studentSignalCount: number;
+    reviewRequired: boolean;
+  };
   draftReviewStatus?: "pending_teacher_review" | "accepted" | "rejected" | null;
   draftReviewFeedback?: string | null;
   draftReviewAsset?: {

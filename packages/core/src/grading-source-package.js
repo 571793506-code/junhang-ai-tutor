@@ -167,6 +167,85 @@ export function buildGradingSourcePackage(assignment = {}, options = {}) {
   };
 }
 
+// Dialogue-generated answer files may contain useful review fields and a fingerprint
+// produced by a different writer. Normalize only the grading contract, while returning
+// the original identity and extensions for auditability.
+export function normalizeImportedGradingSourcePackage(sourcePackage = {}, options = {}) {
+  const source = asRecord(sourcePackage);
+  const issues = [];
+  const originalSourceId = normalizedText(source.sourceId);
+  const originalFingerprint = normalizedText(source.fingerprint);
+  const sourceId = normalizedText(options.sourceId || originalSourceId);
+  if (source.schemaVersion !== GRADING_SOURCE_PACKAGE_SCHEMA_VERSION) issues.push("答案包版本不受支持。");
+  if (!sourceId) issues.push("答案包缺少来源 ID。");
+  const rawQuestions = Array.isArray(source.questions) ? source.questions : [];
+  if (!rawQuestions.length) issues.push("答案包至少需要一题。");
+  const extensions = {
+    baseScore: source.baseScore,
+    bonusScore: source.bonusScore,
+    pages: source.pages,
+    difficulty: source.difficulty,
+    teacherReviewRequired: source.teacherReviewRequired,
+    coverage: Array.isArray(source.coverage) ? source.coverage : [],
+    questions: []
+  };
+  const questions = rawQuestions.map((item, index) => {
+    const raw = asRecord(item);
+    const questionNo = normalizedText(raw.questionNo ?? raw.no ?? raw.orderIndex ?? index + 1) || String(index + 1);
+    const prompt = normalizedText(raw.prompt ?? raw.question ?? raw.printedPrompt);
+    const correctAnswer = normalizeJsonValue(raw.correctAnswer ?? raw.answer ?? raw.standardAnswer ?? raw.expectedAnswer ?? "");
+    const maxScore = numberFromMetadata(raw, "maxScore", "score", "points");
+    const analysisSteps = analysisStepsForQuestion(raw, {});
+    const knowledgePoint = normalizedText(raw.knowledgePoint ?? raw.point ?? raw.skill);
+    const rubric = normalizeJsonValue(raw.rubric ?? "");
+    const extension = {
+      questionNo,
+      commonMistake: normalizedText(raw.commonMistake),
+      metadata: normalizeJsonValue(raw.metadata ?? {})
+    };
+    extensions.questions.push(extension);
+    if (!prompt) issues.push(`第 ${questionNo} 题缺少题干。`);
+    if (!hasMeaningfulValue(correctAnswer)) issues.push(`第 ${questionNo} 题缺少标准答案。`);
+    if (maxScore == null || maxScore <= 0) issues.push(`第 ${questionNo} 题分值必须大于 0。`);
+    return {
+      questionNo,
+      prompt,
+      correctAnswer,
+      maxScore,
+      analysisSteps,
+      knowledgePoint,
+      rubric: hasMeaningfulValue(rubric) ? rubric : ""
+    };
+  });
+  const questionNos = questions.map((question) => question.questionNo);
+  if (new Set(questionNos).size !== questionNos.length) issues.push("题号不能重复。");
+  const summedScore = questions.reduce((sum, question) => sum + Number(question.maxScore || 0), 0);
+  const declaredTotalScore = numberFromMetadata(source, "totalScore", "fullScore", "maxScore");
+  if (declaredTotalScore != null && Math.abs(summedScore - declaredTotalScore) > 0.001) {
+    issues.push(`题目分值合计 ${summedScore} 与总分 ${declaredTotalScore} 不一致。`);
+  }
+  const payload = {
+    schemaVersion: GRADING_SOURCE_PACKAGE_SCHEMA_VERSION,
+    sourceId,
+    version: positiveNumber(source.version) || 1,
+    title: normalizedText(source.title),
+    subject: normalizedText(source.subject),
+    kind: normalizedText(source.kind),
+    grade: normalizedText(source.grade),
+    totalScore: declaredTotalScore ?? summedScore,
+    questions
+  };
+  const packageWithFingerprint = { ...payload, fingerprint: fingerprintFor(payload) };
+  return {
+    ok: issues.length === 0,
+    package: packageWithFingerprint,
+    issues,
+    originalSourceId: originalSourceId || null,
+    originalFingerprint: originalFingerprint || null,
+    extensions
+  };
+}
+
 export function gradingSourceQuestionMap(sourcePackage = {}) {
   const questions = Array.isArray(sourcePackage.questions) ? sourcePackage.questions : [];
   return new Map(questions.map((question) => [String(question.questionNo || ""), question]));

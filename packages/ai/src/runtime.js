@@ -6,6 +6,7 @@ import {
   solEscalationEnabled,
   validateAssessmentPartition
 } from "./model-escalation.js";
+import { classifyTaskFailure, resolveTaskModelPolicy } from "./model-policy.js";
 import {
   QA_BLOCKED_ANSWER,
   QA_LEARNING_SIGNAL_SCHEMA_VERSION,
@@ -562,6 +563,7 @@ function fallbackUnavailable(providerId, reason, fallback) {
 }
 
 export async function answerStudentQuestion(config, input = {}) {
+  const taskPolicy = resolveTaskModelPolicy("qa", config, input);
   const snapshot = buildAiStartupSnapshot(config);
   const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const mode = input.mode === "GUIDED_THINKING" || input.mode === "KNOWLEDGE_EXPLANATION"
@@ -658,7 +660,7 @@ studentAnswer 必须只含学生可见内容，不得出现供应商、模型、
       outputSummary: normalized.studentAnswer.slice(0, 240),
       status: result.status,
       latencyMs: result.latencyMs,
-      metadata: { mode, subject: input.subject || null }
+      metadata: { mode, subject: input.subject || null, taskPolicy }
     }
   };
 }
@@ -713,6 +715,7 @@ function hasUsableGradingQuestionStructure(parsed = {}) {
 }
 
 export async function draftTeacherTask(config, input = {}) {
+  const taskPolicy = resolveTaskModelPolicy("task-draft", config, input);
   const snapshot = buildAiStartupSnapshot(config);
   const provider = snapshot.providers.find((item) => item.id === "gpt56");
   if (provider?.status !== "ready") {
@@ -760,7 +763,7 @@ export async function draftTeacherTask(config, input = {}) {
       outputSummary: text.slice(0, 240),
       status: result.status,
       latencyMs: result.latencyMs,
-      metadata: { studentId: input.studentId || null, subject: input.subject || null }
+        metadata: { studentId: input.studentId || null, subject: input.subject || null, taskPolicy }
     }
   };
 }
@@ -769,6 +772,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
   const snapshot = buildAiStartupSnapshot(config);
   const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const runtime = normalizeRuntimeConfig(config);
+  const taskPolicy = resolveTaskModelPolicy("assessment-draft", config, input);
   if (provider?.status !== "ready") {
     return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       draftText: "",
@@ -917,7 +921,7 @@ export async function draftAssessment(config, input = {}, execution = {}) {
   const primaryModel = execution.model || runtime.gpt56Model;
   const primaryReasoningEffort = primaryModel === runtime.gpt56SolModel
     ? "high"
-    : execution.reasoningEffort || (kind === "试卷" ? "high" : "medium");
+    : execution.reasoningEffort || taskPolicy.primary.reasoningEffort;
   const solGateOpen = (
     solEscalationEnabled(runtime) &&
     execution.disableSolEscalation !== true &&
@@ -1056,18 +1060,20 @@ export async function draftAssessment(config, input = {}, execution = {}) {
     } else if (!parsed) {
       const issues = [`partition:${entry.partition.id}:malformed_json`];
       validation = { valid: false, codes: ["malformed_json"], issues };
+      const failure = classifyTaskFailure({ code: "malformed_json" }, { evidenceSufficient: true });
       trigger = {
-        allowed: true,
-        triggerClass: "quality",
+        ...failure,
+        allowed: failure.allowedToEscalate,
         triggerCode: "partition_validation",
         issues
       };
     } else {
       validation = validateAssessmentPartition(parsed, entry.partition);
       if (!validation.valid) {
+        const failure = classifyTaskFailure({ code: "invalid_structure" }, { evidenceSufficient: true });
         trigger = {
-          allowed: true,
-          triggerClass: "quality",
+          ...failure,
+          allowed: failure.allowedToEscalate,
           triggerCode: "partition_validation",
           issues: validation.issues
         };
@@ -1230,7 +1236,8 @@ export async function draftAssessment(config, input = {}, execution = {}) {
         fallbackProvider,
         attempts,
         primaryError,
-        secondaryError: null
+         secondaryError: null,
+         taskPolicy
       }
     }
   };
@@ -1240,10 +1247,11 @@ export async function generateSubmissionReferenceAnswers(config, input = {}, exe
   const snapshot = buildAiStartupSnapshot(config);
   const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const runtime = normalizeRuntimeConfig(config);
+  const taskPolicy = resolveTaskModelPolicy("reference-answer", config, input);
   const referenceModel = execution.model || runtime.gpt56Model;
   const primaryReasoningEffort = referenceModel === runtime.gpt56SolModel
     ? "high"
-    : execution.reasoningEffort || "high";
+    : execution.reasoningEffort || taskPolicy.primary.reasoningEffort;
   if (provider?.status !== "ready") {
     return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       referenceText: "",
@@ -1367,7 +1375,8 @@ export async function generateSubmissionReferenceAnswers(config, input = {}, exe
         imageCount: input.imageNames?.length || 0,
         solAttempted,
         usedModelEscalation,
-        attempts
+         attempts,
+         taskPolicy
       }
     }
   };
@@ -1377,10 +1386,11 @@ export async function gradeSubmissionText(config, input = {}, execution = {}) {
   const snapshot = buildAiStartupSnapshot(config);
   const provider = snapshot.providers.find((item) => item.id === "gpt56");
   const runtime = normalizeRuntimeConfig(config);
+  const taskPolicy = resolveTaskModelPolicy("submission-grading", config, input);
   const gradingModel = execution.model || runtime.gpt56Model;
   const primaryReasoningEffort = gradingModel === runtime.gpt56SolModel
     ? "high"
-    : execution.reasoningEffort || "high";
+    : execution.reasoningEffort || taskPolicy.primary.reasoningEffort;
   if (provider?.status !== "ready") {
     return fallbackUnavailable("gpt56", provider?.reason || "GPT-5.6 unavailable", {
       gradingText: "",
@@ -1486,13 +1496,15 @@ export async function gradeSubmissionText(config, input = {}, execution = {}) {
         imageCount: input.imageNames?.length || 0,
         solAttempted,
         usedModelEscalation,
-        attempts
+         attempts,
+         taskPolicy
       }
     }
   };
 }
 
 export async function draftStudentProfileNarrative(config, input = {}) {
+  const taskPolicy = resolveTaskModelPolicy("student-profile", config, input);
   const snapshot = buildAiStartupSnapshot(config);
   const provider = snapshot.providers.find((item) => item.id === "gpt56");
   if (provider?.status !== "ready") {
@@ -1542,7 +1554,8 @@ export async function draftStudentProfileNarrative(config, input = {}) {
       latencyMs: result.latencyMs,
       metadata: {
         studentId: input.studentId || null,
-        periodKey: input.periodKey || null
+         periodKey: input.periodKey || null,
+         taskPolicy
       }
     }
   };

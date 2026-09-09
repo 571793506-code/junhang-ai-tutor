@@ -15,6 +15,7 @@ import {
 } from "@junhang/ai";
 import {
   classifyTextbookBaseline,
+  normalizeImportedDialogueGradingResult,
   inspectEncodingPayload,
   matchesTextbookAssetSearch,
   mergeTextbookChapterDrafts,
@@ -23,6 +24,7 @@ import {
 import {
   GRADING_SOURCE_PACKAGE_SCHEMA_VERSION,
   gradingSourceQuestionMap,
+  normalizeImportedGradingSourcePackage,
   validateGradingSourcePackage
 } from "@junhang/core/grading-source-package";
 import { recognizeImages } from "@junhang/ai/ocr-node";
@@ -51,12 +53,16 @@ import {
   gradeSubmissionService,
   matchApprovedContentContext,
   buildModuleCapabilityStatus,
+  buildStudentProfileContext,
   queryStudentDictionaryService,
   validateAssessmentContentContext
 } from "@junhang/services";
 import { checkDatabaseStatus, persistenceOptions, requireDatabase } from "./db-status.js";
 import { cleanStudentDictionaryEntry } from "./student-dictionary-response.js";
-import { resolveApprovedAssessmentContentContext } from "./approved-content-context.js";
+import {
+  resolveApprovedAssessmentContentContext,
+  summarizeApprovedAssessmentContentContext
+} from "./approved-content-context.js";
 import { assessmentPageBalanceFillRatio, buildAssessmentLayoutValidation } from "./assessment-layout-validation.js";
 import { createAssessmentGenerationJobs } from "./assessment-generation-jobs.js";
 import { prepareTeacherRequirementEmergency, TEACHER_REQUIREMENT_EMERGENCY } from "./assessment-generation-emergency.js";
@@ -89,6 +95,10 @@ import {
   renderStudentGrowthProfilePrintHtml,
   selectProfileSnapshotForRole
 } from "./student-growth-profile.js";
+import {
+  evaluateStudentProfilePublish,
+  markStudentProfileTeacherConfirmation
+} from "./student-profile-publish-gate.js";
 import {
   buildTermReportDraft,
   mapTermReportForRole,
@@ -245,7 +255,7 @@ async function analyzeSubmissionImageQuality(imageFiles = []) {
       warnings: []
     };
   }
-  const scriptPath = path.resolve(process.cwd(), "scripts", "analyze-submission-images.py");
+  const scriptPath = path.resolve(workspaceRoot, "scripts", "analyze-submission-images.py");
   if (!fs.existsSync(scriptPath)) {
     return {
       available: false,
@@ -333,7 +343,14 @@ async function buildSubmissionGradeInputFromRecord(submission, recognition = nul
   const content = safeJson(submission.content, {});
   const assignment = submission.assignment || {};
   const assignmentMetadata = safeJson(assignment.metadata, {});
+  const dialogueAnswerPackage = safeJson(content.dialogueAnswerPackage, null);
   const gradingSourcePackage = gradingSourcePackageForAssignment(assignment);
+  const importedSourcePackage = dialogueAnswerPackage && validateGradingSourcePackage(dialogueAnswerPackage).ok
+    ? dialogueAnswerPackage
+    : null;
+  // Assignment is the single source of truth. The submission copy remains a
+  // legacy fallback for records created before shared package persistence.
+  const authoritativeSourcePackage = gradingSourcePackage || importedSourcePackage;
   const gradingResult = safeJson(submission.grading?.result, {});
   const questionLayoutManifest =
     safeJson(assignmentMetadata.questionLayoutManifest, null) ||
@@ -376,8 +393,8 @@ async function buildSubmissionGradeInputFromRecord(submission, recognition = nul
     manualText: ocr.manualText || content.manualText || null,
     pageNumber: ocr.pageNumber ?? content.pageNumber ?? null,
     questionRange: ocr.questionRange ?? content.questionRange ?? null,
-    assignmentItems: gradingSourcePackage
-      ? gradingSourcePackage.questions.map((question) => ({
+    assignmentItems: authoritativeSourcePackage
+      ? authoritativeSourcePackage.questions.map((question) => ({
           questionNo: question.questionNo,
           prompt: question.prompt,
           answer: question.correctAnswer,
@@ -395,8 +412,8 @@ async function buildSubmissionGradeInputFromRecord(submission, recognition = nul
           rubric: item.rubric,
           metadata: item.metadata || {}
         })) || [],
-    answerKey: gradingSourcePackage
-      ? Object.fromEntries(gradingSourcePackage.questions.map((question) => [question.questionNo, question.correctAnswer]))
+    answerKey: authoritativeSourcePackage
+      ? Object.fromEntries(authoritativeSourcePackage.questions.map((question) => [question.questionNo, question.correctAnswer]))
       : assignmentMetadata.answerKey || null,
     questionLayoutManifest,
     assignmentAnalysis: {
@@ -404,7 +421,7 @@ async function buildSubmissionGradeInputFromRecord(submission, recognition = nul
       kind: assignmentMetadata.kind || null,
       difficulty: assignment.difficulty || null,
       questionLayoutManifest,
-      gradingSource: gradingSourceReference(gradingSourcePackage)
+      gradingSource: gradingSourceReference(authoritativeSourcePackage)
     }
   };
 }
@@ -720,6 +737,23 @@ async function assertTeacherStudentScope(req, res, studentId) {
   if (req.session?.role !== "teacher" || !studentId) return true;
   if (await teacherCanAccessStudent(req.session.teacherId, studentId)) return true;
   forbidden(res, "TEACHER_STUDENT_SCOPE_MISMATCH", "当前教师无权访问该学生。");
+  return false;
+}
+
+async function assertAssignmentStudentScope(req, res, assignment, studentId) {
+  if (!assignment || !studentId) return true;
+  const metadata = safeJson(assignment.metadata, {});
+  const targetStudentId = optionalText(metadata.targetStudentId);
+  if (targetStudentId) {
+    if (targetStudentId === studentId) return true;
+    res.status(400).json({ ok: false, error: "ASSIGNMENT_STUDENT_MISMATCH", message: "生成作业与当前选择的学生不匹配。" });
+    return false;
+  }
+  const targetGrade = optionalText(metadata.targetGrade || assignment.grade);
+  if (!targetGrade) return true;
+  const student = await prisma.student.findUnique({ where: { id: studentId }, select: { grade: true } });
+  if (!student?.grade || student.grade === targetGrade) return true;
+  res.status(400).json({ ok: false, error: "ASSIGNMENT_GRADE_MISMATCH", message: "生成作业与当前学生年级不匹配。" });
   return false;
 }
 
@@ -1322,6 +1356,7 @@ function mapTask(task) {
 
 function mapAssignment(assignment, options = {}) {
   const metadata = safeJson(assignment.metadata, {});
+  const gradingSourcePackage = gradingSourcePackageForAssignment(assignment);
   const submission = assignment.submissions?.[0] || null;
   const grading = submission?.grading?.result || metadata.grading || null;
   const kind = readableKind(metadata.kind, "练习");
@@ -1331,6 +1366,30 @@ function mapAssignment(assignment, options = {}) {
   const generationTeaching = safeJson(generationContext.teaching, {});
   const generationTextbook = safeJson(generationTeaching.textbook, {});
   const generationOutput = safeJson(generationContext.output, {});
+  const generationContextSummary = {
+    basis: readableText(metadata.generationBasis || generationContext.request?.generationBasis, "teacher_requirement"),
+    target: {
+      scope: metadata.targetScope || generationContext.target?.scope || null,
+      studentId: metadata.targetStudentId || generationContext.target?.studentId || null,
+      grade: metadata.targetGrade || generationContext.target?.grade || assignment.grade || null,
+      subject: subject
+    },
+    textbook: {
+      assetId: readableText(metadata.textbookAssetId || generationTextbook.assetId || generationTeaching.textbookAssetId, "") || null,
+      title: readableText(metadata.textbookTitle || generationTextbook.title || generationTeaching.textbookTitle, "") || null,
+      chapterId: readableText(metadata.textbookChapterId || generationTextbook.chapterId || generationTeaching.textbookChapterId, "") || null,
+      chapterTitle: readableText(metadata.textbookChapterTitle || generationTextbook.chapterTitle || generationTeaching.textbookChapterTitle, "") || null
+    },
+    knowledgePoints: (Array.isArray(generationTeaching.knowledgePoints) ? generationTeaching.knowledgePoints : []).slice(0, 30),
+    contentContext: {
+      status: readableText(generationTeaching.contentContext?.status || generationTeaching.contentContext?.reason, "missing"),
+      sourceCount: Number(generationTeaching.contentContext?.sourceCount ?? generationTeaching.contentContext?.matchedCount ?? 0) || 0,
+      sourceIds: (Array.isArray(generationTeaching.contentContext?.matches) ? generationTeaching.contentContext.matches : [])
+        .slice(0, 8).map((item) => readableText(item?.sourceId || item?.id, "")).filter(Boolean)
+    },
+    studentSignalCount: Array.isArray(generationContext.studentSignals) ? generationContext.studentSignals.length : 0,
+    reviewRequired: generationContext.output?.teacherReviewRequired !== false
+  };
   const pipelineAssets = safeJson(safeJson(metadata.generationPipeline, {}).assets, {});
   const draftReviewAssetId = readableText(metadata.draftReviewAssetId || pipelineAssets.draftReviewAssetId, "");
   const draftReviewUrl = readableText(pipelineAssets.draftReviewUrl, "");
@@ -1376,6 +1435,9 @@ function mapAssignment(assignment, options = {}) {
     submissionImageNames: submission?.content?.imageNames || metadata.submissionImageNames || [],
     score: submission?.grading?.score ?? null,
     totalScore: metadata.totalScore || (kind === "试卷" ? 100 : 60),
+    gradingSource: gradingSourceReference(gradingSourcePackage),
+    gradingSourceQuestionCount: gradingSourcePackage?.questions?.length || 0,
+    generationContextSummary,
     items: assignment.items?.map((item) => item.prompt) || [],
     draftReviewStatus: metadata.draftReviewStatus || null,
     draftReviewFeedback: metadata.draftReviewFeedback || null,
@@ -1869,13 +1931,16 @@ function fallbackProfileNarrative(student, snapshot) {
 }
 
 async function buildStudentProfileNarrative(student, snapshot) {
+  const profileContext = buildStudentProfileContext({
+    student,
+    snapshot,
+    profileEvidencePack: snapshot.profileEvidencePack
+  });
   const result = await draftStudentProfileNarrative(config, {
+    ...profileContext,
     studentId: student.id,
     studentName: student.displayName,
-    grade: student.grade,
-    className: student.className,
-    periodKey: snapshot.period?.label || new Date().toISOString().slice(0, 10),
-    snapshot
+    periodKey: snapshot.period?.label || new Date().toISOString().slice(0, 10)
   });
   let modelRun = null;
   if (result.modelRun) {
@@ -3066,7 +3131,10 @@ function mapReviewSubmission(submission) {
   const assignmentMetadata = safeJson(submission.assignment?.metadata, {});
   const content = safeJson(submission.content, {});
   const rawResult = safeJson(submission.grading?.result, {});
+  const gradingSourcePackage = safeJson(assignmentMetadata.gradingSourcePackage, null);
   const externalGradingRecognition = safeJson(content.externalGradingRecognition, null);
+  const materialType = content.materialType || externalGradingRecognition?.materialType ||
+    (assignmentMetadata.source === "photo-upload" || assignmentMetadata.source === "photo-upload-batch" ? "external_workbook" : "generated_assessment");
   const { result, score } = normalizeReviewResultForDisplay(rawResult, submission.grading?.score ?? null);
   const kind = readableKind(assignmentMetadata.kind, "图片批改");
   const subject = readableText(submission.assignment?.subject?.name || assignmentMetadata.subject || content.subject, "未标科目");
@@ -3096,6 +3164,7 @@ function mapReviewSubmission(submission) {
     studentName: submission.student?.displayName || "",
     subject,
     kind,
+    materialType,
     status: submission.status,
     needsReview: submission.status !== "GRADED" || Boolean(submission.grading?.needsReview),
     score,
@@ -3131,6 +3200,7 @@ function mapReviewSubmission(submission) {
       questionLayoutManifest: result.questionLayoutManifest || content.questionLayoutManifest || null,
       quality: result.quality || null,
       externalGradingRecognition
+      ,answerSource: externalGradingRecognition?.answerSource || (gradingSourcePackage?.questions?.length ? { mode: "gradingSourcePackage", status: "available" } : result.referenceAnswer?.available ? { mode: "referenceAnswers", status: "draft" } : null)
     },
     submittedAt: submission.submittedAt.toISOString()
   };
@@ -3291,6 +3361,10 @@ function mapGradingWorkbench(submission) {
   )
     .map((question, index) => normalizeQuestionWorkbenchItem(question, index, markers));
   const questionReviewState = gradingQuestionReviewState(questions);
+  const answerSource = grading.answerSource || null;
+  if (!answerSource) archiveBlockers.push("答案来源缺失");
+  if (pages.some((page) => ["poor", "needs_review"].includes(page.qualityStatus))) archiveBlockers.push("图片质量需复核");
+  if (questionReviewState.unresolved > 0) archiveBlockers.push("存在未确认题目");
   return {
     id: review.batchId || review.id,
     submissionId: review.id,
@@ -3300,14 +3374,14 @@ function mapGradingWorkbench(submission) {
     studentName: review.studentName,
     subject: review.subject,
     kind: review.kind,
-    materialType: recognitionPacket?.materialType || "generated_assessment",
+    materialType: review.materialType || recognitionPacket?.materialType || "generated_assessment",
     status: review.needsReview ? "reviewing" : "archived",
     score: grading.score ?? review.score ?? null,
     provisionalScore: grading.provisionalScore ?? null,
     needsTeacherReview: Boolean(grading.needsTeacherReview || review.needsReview),
     archiveEligible: Boolean(grading.archiveEligible) && archiveBlockers.length === 0,
     archiveBlockers,
-    answerSource: recognitionPacket?.answerSource || null,
+    answerSource,
     recognitionPacket,
     ocrStatusLabel: review.ocrStatusLabel || "",
     quality: grading.quality || null,
@@ -3320,6 +3394,7 @@ function mapGradingWorkbench(submission) {
     pendingQuestionCount: questionReviewState.unresolved,
     reviewedQuestionCount: questionReviewState.reviewed,
     questionReviewReady: questionReviewState.readyForArchive,
+    workflowState: archiveBlockers.length ? "review_required" : review.needsReview ? "draft" : "archived",
     reviewedQuestionScore: questionReviewState.score,
     uploadedBy: review.uploadedBy,
     submittedAt: review.submittedAt
@@ -3681,7 +3756,20 @@ app.patch("/api/tasks/:taskId/complete", requireDatabase, requireSession(config,
 }));
 
 function assessmentDraftInputFromRequest(req) {
-  return normalizeAssessmentTargetScope({ ...getBody(req), teacherId: sessionTeacherId(req, req.body?.teacherId) });
+  return normalizeAssessmentTargetScope({ ...allowlistedAssessmentInput(getBody(req)), teacherId: sessionTeacherId(req, req.body?.teacherId) });
+}
+
+function allowlistedAssessmentInput(body = {}) {
+  const input = {};
+  for (const key of [
+    "targetScope", "studentId", "targetGrade", "grade", "subject", "kind", "difficulty", "requirement",
+    "specialRequirements", "requestedItemCount", "contentScope", "knowledgePoints", "textbookAssetId",
+    "textbookTitle", "textbookEdition", "textbookEditionDisplay", "textbookSeries", "textbookVolume",
+    "textbookRegion", "textbookChapterId", "textbookChapterTitle", "generationBasis", "recoveryReason"
+  ]) {
+    if (body[key] !== undefined) input[key] = body[key];
+  }
+  return input;
 }
 
 function buildAssessmentStudentSignals(student) {
@@ -3893,6 +3981,16 @@ app.post("/api/assessments/generation-recovery", requireDatabase, requireSession
     }
   });
   res.json({ ok: true, recovery });
+}));
+
+app.post("/api/content/context/preview", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  const input = assessmentDraftInputFromRequest(req);
+  const context = await resolveApprovedAssessmentContentContext(prisma, input);
+  const validation = validateAssessmentContentContext(input, context);
+  if (!validation.ok) {
+    return res.status(422).json({ ok: false, ...assessmentContentContextFailure(context, validation) });
+  }
+  res.json({ ok: true, context: summarizeApprovedAssessmentContentContext(context) });
 }));
 
 app.post("/api/assessments/draft", requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
@@ -4268,23 +4366,30 @@ app.post(
         where: { id: input.assignmentId },
         include: { subject: true, items: { orderBy: { orderIndex: "asc" } } }
       });
-      if (sourceAssignment) {
-        const metadata = safeJson(sourceAssignment.metadata, {});
-        input.assignmentTitle = sourceAssignment.title;
-        input.assignmentItems = sourceAssignment.items.map((item) => ({
-          questionNo: item.orderIndex,
-          prompt: item.prompt,
-          answer: item.answer,
-          rubric: item.rubric,
-          metadata: item.metadata || {}
-        }));
-        input.answerKey = metadata.answerKey || null;
-        input.assignmentAnalysis = {
-          subject: sourceAssignment.subject?.name || metadata.subject || input.subject || null,
-          kind: metadata.kind || input.kind || null,
-          difficulty: sourceAssignment.difficulty || null
-        };
+      if (!sourceAssignment) {
+        return res.status(404).json({ ok: false, error: "ASSIGNMENT_NOT_FOUND", message: "未找到要关联的生成作业。" });
       }
+      const sourceMetadata = safeJson(sourceAssignment.metadata, {});
+      if (!(await assertAssignmentStudentScope(req, res, sourceAssignment, input.studentId))) return;
+      if (req.session.role === "teacher" && sourceMetadata.teacherId && sourceMetadata.teacherId !== req.session.teacherId) {
+        return res.status(403).json({ ok: false, error: "ASSIGNMENT_TEACHER_SCOPE_MISMATCH", message: "当前教师无权使用该生成作业。" });
+      }
+      input.assignmentTitle = sourceAssignment.title;
+      input.assignmentItems = sourceAssignment.items.map((item) => ({
+        questionNo: item.orderIndex,
+        prompt: item.prompt,
+        answer: item.answer,
+        rubric: item.rubric,
+        metadata: item.metadata || {}
+      }));
+      input.answerKey = sourceMetadata.answerKey || null;
+      input.assignmentAnalysis = {
+        subject: sourceAssignment.subject?.name || sourceMetadata.subject || input.subject || null,
+        kind: sourceMetadata.kind || input.kind || null,
+        difficulty: sourceAssignment.difficulty || null
+      };
+    } else if (input.materialType === "generated_assessment") {
+      return res.status(400).json({ ok: false, error: "GENERATED_ASSIGNMENT_REQUIRED", message: "系统生成材料必须关联对应的生成作业。" });
     }
 
     const submission = await createQueuedPhotoSubmission(input);
@@ -4716,6 +4821,230 @@ app.get("/api/grading/workbench/:submissionId", requireDatabase, requireSession(
   }
   if (!(await assertTeacherStudentScope(req, res, submission.studentId))) return;
   res.json({ ok: true, workbench: mapGradingWorkbench(submission) });
+}));
+
+app.post("/api/grading/source-packages/dialogue", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  const body = getBody(req);
+  let imported = body.answerPackage || body.sourcePackage || body;
+  if (typeof imported === "string") {
+    try {
+      imported = JSON.parse(imported);
+    } catch {
+      return res.status(400).json({ ok: false, error: "ANSWER_PACKAGE_JSON_INVALID", message: "对话答案包不是有效的 JSON。" });
+    }
+  }
+  const assignmentId = optionalText(body.assignmentId) || `dialogue-${randomUUID()}`;
+  if (body.assignmentId) {
+    const existing = await prisma.assignment.findUnique({ where: { id: assignmentId }, select: { id: true } });
+    if (existing) return res.status(409).json({ ok: false, error: "GRADING_SOURCE_ALREADY_EXISTS", message: "该统一答案来源已经存在，请直接在原批改记录中导入更新。" });
+  }
+  const normalized = normalizeImportedGradingSourcePackage(imported, { sourceId: assignmentId });
+  if (!normalized.ok) {
+    return res.status(422).json({ ok: false, error: "ANSWER_PACKAGE_INVALID", message: normalized.issues.join("；"), issues: normalized.issues });
+  }
+  const studentId = optionalText(body.studentId);
+  if (studentId) {
+    if (!(await assertTeacherStudentScope(req, res, studentId))) return;
+    if (!(await assertTeacherActiveStudentTarget(req, res, studentId))) return;
+  }
+  const targetGrade = optionalText(body.targetGrade || body.grade || normalized.package.grade);
+  const sourceMetadata = {
+    source: "dialogue-import",
+    teacherId: req.session.teacherId,
+    targetStudentId: studentId || null,
+    targetGrade: targetGrade || null,
+    targetScope: studentId ? "student" : targetGrade ? "grade" : "teacher",
+    subject: optionalText(body.subject || normalized.package.subject) || null,
+    kind: optionalText(body.kind || normalized.package.kind) || "练习",
+    dialogueAnswerPackageOrigin: {
+      source: "dialogue-attachment",
+      originalSourceId: normalized.originalSourceId || null,
+      originalFingerprint: normalized.originalFingerprint || null,
+      importedAt: new Date().toISOString(),
+      rawPayload: imported,
+      extensions: normalized.extensions || null
+    },
+    totalScore: normalized.package.totalScore,
+    gradingSourcePackageRequested: true
+  };
+  const assignment = await createAssignmentDraft({
+    id: assignmentId,
+    title: optionalText(body.title || normalized.package.title) || "对话生成内容",
+    subject: sourceMetadata.subject,
+    grade: targetGrade || normalized.package.grade || null,
+    difficulty: optionalText(body.difficulty) || null,
+    metadata: sourceMetadata,
+    items: normalized.package.questions.map((question) => ({
+      itemType: optionalText(question.itemType) || "question",
+      prompt: question.prompt,
+      answer: question.correctAnswer,
+      rubric: question.rubric || undefined,
+      metadata: {
+        score: question.maxScore,
+        analysisSteps: question.analysisSteps,
+        knowledgePoint: question.knowledgePoint
+      }
+    }))
+  });
+  await auditEvent(req, {
+    studentId: studentId || null,
+    feature: "grading-source-package",
+    action: "register-dialogue-answer-package",
+    metadata: {
+      assignmentId: assignment.id,
+      sourceId: normalized.originalSourceId || null,
+      fingerprint: normalized.package.fingerprint,
+      questionCount: normalized.package.questions.length
+    }
+  });
+  res.status(201).json({
+    ok: true,
+    assignment: mapAssignment({ ...assignment, subject: assignment.subject || null, submissions: [] }),
+    gradingSource: gradingSourceReference(normalized.package),
+    imported: {
+      originalSourceId: normalized.originalSourceId || null,
+      originalFingerprint: normalized.originalFingerprint || null,
+      fingerprint: normalized.package.fingerprint,
+      questionCount: normalized.package.questions.length
+    }
+  });
+}));
+
+app.patch("/api/grading/workbench/:submissionId/dialogue-answer-package", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
+  const submission = await prisma.submission.findUnique({
+    where: { id: req.params.submissionId },
+    include: {
+      student: true,
+      grading: true,
+      assignment: { include: { subject: true } }
+    }
+  });
+  if (!submission?.grading) {
+    return res.status(404).json({ ok: false, error: "WORKBENCH_NOT_FOUND", message: "未找到批改工作台记录。" });
+  }
+  if (!(await assertTeacherStudentScope(req, res, submission.studentId))) return;
+
+  const body = getBody(req);
+  let imported = body.answerPackage || body.gradingResult;
+  if (typeof imported === "string") {
+    try {
+      imported = JSON.parse(imported);
+    } catch {
+      return res.status(400).json({ ok: false, error: "ANSWER_PACKAGE_JSON_INVALID", message: "对话答案包不是有效的 JSON。" });
+    }
+  }
+  const dialogueResultImport = imported && Array.isArray(imported.questionResults) && !Array.isArray(imported.questions)
+    ? normalizeImportedDialogueGradingResult(imported)
+    : null;
+  const normalized = dialogueResultImport || normalizeImportedGradingSourcePackage(imported, { sourceId: submission.assignmentId });
+  if (!normalized.ok) {
+    return res.status(422).json({ ok: false, error: dialogueResultImport ? "DIALOGUE_GRADING_RESULT_INVALID" : "ANSWER_PACKAGE_INVALID", message: normalized.issues.join("；"), issues: normalized.issues });
+  }
+
+  // An answer package is the shared source for every client. Keep the
+  // assignment package canonical; the submission still retains the import
+  // origin for audit and teacher review.
+  if (!dialogueResultImport) {
+    const assignmentMetadata = safeJson(submission.assignment?.metadata, {});
+    await prisma.assignment.update({
+      where: { id: submission.assignmentId },
+      data: {
+        metadata: {
+          ...assignmentMetadata,
+          subject: assignmentMetadata.subject || normalized.package.subject || null,
+          kind: assignmentMetadata.kind || normalized.package.kind || "练习",
+          grade: assignmentMetadata.grade || normalized.package.grade || null,
+          totalScore: normalized.package.totalScore,
+          gradingSourcePackage: normalized.package,
+          dialogueAnswerPackageOrigin: {
+            source: "dialogue-attachment",
+            originalSourceId: normalized.originalSourceId || null,
+            originalFingerprint: normalized.originalFingerprint || null,
+            importedAt: new Date().toISOString(),
+            type: "answer-package",
+            rawPayload: imported,
+            extensions: normalized.extensions || null
+          }
+        }
+      }
+    });
+  }
+
+  const content = safeJson(submission.content, {});
+  const updated = await prisma.submission.update({
+    where: { id: submission.id },
+    data: {
+      status: "SUBMITTED",
+      content: {
+        ...content,
+        materialType: "generated_assessment",
+        ...(dialogueResultImport ? { dialogueGradingResult: normalized.result } : { dialogueAnswerPackage: normalized.package }),
+        dialogueAnswerPackageOrigin: {
+          source: "dialogue-attachment",
+          originalSourceId: normalized.originalSourceId || null,
+          originalFingerprint: normalized.originalFingerprint || null,
+          importedAt: new Date().toISOString(),
+          type: dialogueResultImport ? "grading-result" : "answer-package",
+          rawPayload: imported,
+          extensions: normalized.extensions || null
+        }
+      },
+      grading: {
+        update: {
+          score: null,
+          needsReview: true,
+          result: dialogueResultImport ? normalized.result : {
+            score: null,
+            summary: "已导入对话答案包，正在按原始答案重新批改。",
+            strengths: [],
+            mistakes: [],
+            questionResults: [],
+            annotationMarkers: [],
+            nextPractice: "完成逐题复核后再归档。",
+            needsTeacherReview: true,
+            reviewStatus: "regrading_with_dialogue_package",
+            aiGenerated: false,
+            available: false
+          }
+        }
+      }
+    },
+    include: { student: true, grading: true, assignment: { include: { subject: true, items: { orderBy: { orderIndex: "asc" } } } } }
+  });
+
+  let processed = null;
+  if (!dialogueResultImport) {
+    try {
+      processed = await recognizeAndGradeSubmissionRecord(updated.id, { force: false });
+    } catch (error) {
+      console.error("[submission-grading] dialogue answer package regrade failed", { submissionId: updated.id, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  const finalSubmission = processed?.updated || updated;
+  await auditEvent(req, {
+    studentId: finalSubmission.studentId,
+    feature: "grading-workbench",
+    action: "import-dialogue-answer-package",
+    metadata: {
+      submissionId: finalSubmission.id,
+      assignmentId: finalSubmission.assignmentId,
+      originalSourceId: normalized.originalSourceId || null,
+      originalFingerprint: normalized.originalFingerprint || null,
+      regraded: Boolean(processed)
+    }
+  });
+  res.json({
+    ok: true,
+    regraded: Boolean(processed),
+    imported: {
+      originalSourceId: normalized.originalSourceId || null,
+      originalFingerprint: normalized.originalFingerprint || null,
+      fingerprint: normalized.package?.fingerprint || null,
+      questionCount: normalized.package?.questions.length || normalized.result?.questionResults.length || 0,
+      type: dialogueResultImport ? "grading-result" : "answer-package"
+    },
+    workbench: mapGradingWorkbench(finalSubmission)
+  });
 }));
 
 app.patch("/api/grading/workbench/:submissionId/questions/:questionId", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
@@ -5329,6 +5658,7 @@ app.post("/api/students/:studentId/profile/draft", requireDatabase, requireSessi
     draftStatus: "draft",
     draftGeneratedAt: new Date().toISOString()
   };
+  const publishGate = evaluateStudentProfilePublish(snapshot);
 
   await auditEvent(req, {
     studentId: student.id,
@@ -5344,7 +5674,8 @@ app.post("/api/students/:studentId/profile/draft", requireDatabase, requireSessi
   res.json({
     ok: true,
     student: mapStudent({ ...student, profiles: [{ snapshot }] }),
-    snapshot: filterStudentProfileSnapshot(snapshot, "teacher")
+    snapshot: filterStudentProfileSnapshot(snapshot, "teacher"),
+    publishGate
   });
 }));
 
@@ -5375,23 +5706,43 @@ app.post("/api/students/:studentId/profile/publish", requireDatabase, requireSes
     publishedAt: new Date().toISOString(),
     publishedByTeacherId: req.session.teacherId
   };
+  const publishCandidate = body.confirmTeacherReview === true
+    ? markStudentProfileTeacherConfirmation(snapshot, req.session.teacherId)
+    : snapshot;
+  const publishGate = evaluateStudentProfilePublish(publishCandidate);
+  if (!publishGate.ok) {
+    return res.status(409).json({
+      ok: false,
+      error: "PROFILE_TEACHER_CONFIRMATION_REQUIRED",
+      blockers: publishGate.blockers,
+      excludedEvidenceRefs: publishGate.excludedEvidenceRefs
+    });
+  }
+  const confirmedSnapshot = {
+    ...markStudentProfileTeacherConfirmation(snapshot, req.session.teacherId),
+    teacherReview: {
+      ...publishCandidate.teacherReview,
+      excludedEvidenceRefs: publishGate.excludedEvidenceRefs
+    }
+  };
 
-  await prisma.studentProfile.create({ data: { studentId: student.id, snapshot } });
+  await prisma.studentProfile.create({ data: { studentId: student.id, snapshot: confirmedSnapshot } });
   await auditEvent(req, {
     studentId: student.id,
     feature: "student-profile",
     action: "publish-profile",
     metadata: {
       studentId: student.id,
-      sourceCounts: snapshot.sourceCounts || null,
-      weeklyScore: snapshot.weeklyScore || null
+      sourceCounts: confirmedSnapshot.sourceCounts || null,
+      weeklyScore: confirmedSnapshot.weeklyScore || null
     }
   });
 
   res.json({
     ok: true,
-    student: mapStudent({ ...student, profiles: [{ snapshot }] }),
-    snapshot: filterStudentProfileSnapshot(snapshot, "teacher")
+    student: mapStudent({ ...student, profiles: [{ snapshot: confirmedSnapshot }] }),
+    snapshot: filterStudentProfileSnapshot(confirmedSnapshot, "teacher"),
+    publishGate
   });
 }));
 
@@ -5502,6 +5853,7 @@ app.post("/api/students/:studentId/profile/aggregate", requireDatabase, requireS
     draftStatus: "draft",
     draftGeneratedAt: new Date().toISOString()
   };
+  const publishGate = evaluateStudentProfilePublish(snapshot);
   await prisma.studentProfile.create({ data: { studentId: student.id, snapshot } });
   await auditEvent(req, {
     studentId: student.id,
@@ -5517,7 +5869,8 @@ app.post("/api/students/:studentId/profile/aggregate", requireDatabase, requireS
   res.json({
     ok: true,
     student: mapStudent({ ...student, profiles: [{ snapshot }] }, "teacher"),
-    snapshot: filterStudentProfileSnapshot(snapshot, "teacher")
+    snapshot: filterStudentProfileSnapshot(snapshot, "teacher"),
+    publishGate
   });
 }));
 
@@ -5541,10 +5894,14 @@ app.get("/api/students/:studentId/profile", requireDatabase, requireSession(conf
     return res.status(404).json({ ok: false, error: "STUDENT_NOT_FOUND", message: "未找到学生档案。" });
   }
   const snapshot = selectProfileSnapshotForRole(student.profiles, req.session.role);
+  const publishGate = req.session.role === "teacher" && snapshot
+    ? evaluateStudentProfilePublish(snapshot)
+    : undefined;
   res.json({
     ok: true,
     student: mapStudent(student, req.session.role),
     snapshot: filterStudentProfileSnapshot(snapshot, req.session.role),
+    ...(publishGate ? { publishGate } : {}),
     reports: student.reports.map((report) => mapReport(report, req.session.role)).filter(Boolean),
     unresolvedMistakes: student.mistakes.filter((item) => !item.masteryResolved).map(mapCorrection)
   });

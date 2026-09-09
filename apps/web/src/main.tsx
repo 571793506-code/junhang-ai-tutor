@@ -61,6 +61,8 @@ import {
   getBootstrapData,
   getContentIndex,
   archiveGradingWorkbench,
+  importDialogueAnswerPackage,
+  registerDialogueAnswerPackage,
   listGradingWorkbenches,
   type GradingWorkbenchFilters,
   listAssessmentGenerationJobs,
@@ -77,6 +79,7 @@ import {
   openTextbook,
   markStudentTermReportSent,
   patchGradingWorkbenchQuestion,
+  previewAssessmentContentContext,
   publishClassroomBroadcast,
   publishDictation,
   publishReading,
@@ -115,12 +118,13 @@ type AdminAudit = Awaited<ReturnType<typeof getAdminAudit>>;
 type TextbookAsset = Awaited<ReturnType<typeof listTextbooks>>["assets"][number];
 type TextbookChapter = NonNullable<TextbookAsset["chapters"]>[number];
 type PrintAssetLink = { id: string; title: string; url: string };
-type ProfileDraft = { studentId: string; studentName: string; snapshot: Record<string, unknown>; text: string };
+type ProfilePublishGate = { ok: boolean; blockers: string[]; excludedEvidenceRefs: string[] };
+type ProfileDraft = { studentId: string; studentName: string; snapshot: Record<string, unknown>; text: string; publishGate?: ProfilePublishGate };
 type ProfilePeriodType = "weekly" | "monthly";
 type TermReportDraftState = { report: StudentReportCard; teacherText: string };
 type GenerationMode = "quiz" | "practice" | "exam";
 type AssessmentRequestInput = { targetScope?: "student" | "grade"; studentId?: string; targetGrade?: string; subject?: SubjectLabel; kind?: string; difficulty?: string; requirement?: string; requestedItemCount?: number; contentScope?: string; knowledgePoints?: string[]; textbookAssetId?: string; textbookTitle?: string; textbookEdition?: string; textbookSeries?: string; textbookVolume?: string; textbookRegion?: string; textbookChapterId?: string; textbookChapterTitle?: string; generationBasis?: "textbook_reviewed" | "teacher_requirement" | "teacher_requirement_emergency"; recoveryReason?: string };
-type AssessmentDraftRef = { assignmentId: string; title: string; subject: SubjectLabel; kind: string; targetLabel: string; request: AssessmentRequestInput; draftAsset?: PrintAssetLink; finalExportAssets?: AssignmentCard["finalExportAssets"]; layoutValidation?: AssessmentLayoutValidation; reviewFeedback?: string; reviewStatus: "pending" | "accepted" | "rejected" };
+type AssessmentDraftRef = { assignmentId: string; title: string; subject: SubjectLabel; kind: string; targetLabel: string; request: AssessmentRequestInput; draftAsset?: PrintAssetLink; finalExportAssets?: AssignmentCard["finalExportAssets"]; layoutValidation?: AssessmentLayoutValidation; generationContextSummary?: AssignmentCard["generationContextSummary"]; gradingSource?: AssignmentCard["gradingSource"]; reviewFeedback?: string; reviewStatus: "pending" | "accepted" | "rejected" };
 type StudentRegistrationInput = { displayName: string; grade: string; className: string; school: string; textbookVersion: string; guardianName: string; guardianPhone: string; notes: string; enrollmentStatus: string };
 type ReviewUploadSource = "taskEvidence" | "grading";
 type ReviewSubmissionBatch = {
@@ -192,6 +196,8 @@ function assessmentDraftRefFromAssignment(assignment: AssignmentCard): Assessmen
     reviewFeedback: assignment.draftReviewFeedback || undefined,
     finalExportAssets: assignment.finalExportAssets,
     layoutValidation: assignment.layoutValidation as AssessmentLayoutValidation | undefined,
+    generationContextSummary: assignment.generationContextSummary,
+    gradingSource: assignment.gradingSource,
     reviewStatus
   };
 }
@@ -823,7 +829,7 @@ function App() {
     }
   }
 
-  async function uploadStudentSubmission(input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[] }) {
+  async function uploadStudentSubmission(input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[]; assignmentId?: string }) {
     if (!input.images.length) {
       setSync({ busy: false, ok: false, message: "请先拍照或选择需要提交的图片" });
       return;
@@ -831,6 +837,7 @@ function App() {
     try {
       const response = await uploadSubmission({
         studentId: input.studentId,
+        assignmentId: input.assignmentId,
         subject: input.subject,
         kind: input.kind,
         title: input.title,
@@ -895,6 +902,39 @@ function App() {
       setSync({ busy: false, ok: true, message: "答案来源已由教师明确确认，仍需逐题复核后归档" });
     } catch (error) {
       setSync({ busy: false, ok: false, message: `答案来源确认失败：${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
+  async function importDialoguePackage(submissionId: string, answerPackageText: string) {
+    try {
+      const answerPackage = JSON.parse(answerPackageText);
+      const response = await importDialogueAnswerPackage(submissionId, answerPackage);
+      setGradingWorkbenches((items) => items.map((item) => (item.submissionId === submissionId ? response.workbench : item)));
+      await refreshTeacherOps();
+      setSync({ busy: false, ok: true, message: response.regraded ? "对话答案包已导入并完成重新批改，请逐题复核" : "对话答案包已保存，等待重新批改" });
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `导入对话答案包失败：${error instanceof Error ? error.message : String(error)}` });
+      throw error;
+    }
+  }
+
+  async function registerDialoguePackage(input: { answerPackageText: string; title: string; subject: string; kind: string; grade: string; studentId?: string }) {
+    try {
+      const answerPackage = JSON.parse(input.answerPackageText);
+      const response = await registerDialogueAnswerPackage({
+        answerPackage,
+        title: input.title.trim() || undefined,
+        subject: input.subject || undefined,
+        kind: input.kind || undefined,
+        grade: input.grade.trim() || undefined,
+        targetGrade: input.grade.trim() || undefined,
+        studentId: input.studentId || undefined
+      });
+      await Promise.all([applyBootstrap(), refreshTeacherOps()]);
+      setSync({ busy: false, ok: true, message: `已登记统一答案来源：${response.assignment?.title || "对话生成内容"}，后续上传批改时直接选择该内容` });
+    } catch (error) {
+      setSync({ busy: false, ok: false, message: `登记统一答案来源失败：${error instanceof Error ? error.message : String(error)}` });
+      throw error;
     }
   }
 
@@ -1099,7 +1139,8 @@ function App() {
         studentId: student.id,
         studentName: student.displayName,
         snapshot: response.snapshot,
-        text: profileDraftToPlainText(response.snapshot, student.displayName)
+        text: profileDraftToPlainText(response.snapshot, student.displayName),
+        publishGate: response.publishGate
       };
       setProfileDraft(draft);
       setSync({ busy: false, ok: true, message: `${student.displayName} ${periodTypeLabel(periodType)}草稿已生成，请先复核再发布` });
@@ -1115,7 +1156,7 @@ function App() {
       const snapshot = profileDraft?.studentId === input.studentId ? profileDraft.snapshot : {};
       const response = await publishStudentProfile(input.studentId, snapshot, input.text);
       setStudents((items) => items.map((item) => (item.id === input.studentId ? response.student : item)));
-      setProfileDraft({ studentId: input.studentId, studentName: response.student.displayName, snapshot: response.snapshot, text: input.text });
+      setProfileDraft({ studentId: input.studentId, studentName: response.student.displayName, snapshot: response.snapshot, text: input.text, publishGate: response.publishGate });
       await applyBootstrap();
       setSync({ busy: false, ok: true, message: `${response.student.displayName} 档案已发布至学生端` });
     } catch (error) {
@@ -1288,11 +1329,11 @@ function App() {
           } catch (error) {
             setSync({ busy: false, ok: false, message: `学生登记失败：${error instanceof Error ? error.message : String(error)}` });
           }
-        }} onTermReportDraft={createStudentTermReportDraft} onTermReportPdf={generateStudentTermReportPdfFile} onTermReportSent={markStudentTermReportManuallySent} onTabletBroadcast={publishTabletBroadcast} onTabletDictation={publishTabletDictation} onTabletReading={publishTabletReading} onTask={createTask} onUnlock={async (unlocked) => {
+        }} onRegisterDialoguePackage={registerDialoguePackage} onTermReportDraft={createStudentTermReportDraft} onTermReportPdf={generateStudentTermReportPdfFile} onTermReportSent={markStudentTermReportManuallySent} onTabletBroadcast={publishTabletBroadcast} onTabletDictation={publishTabletDictation} onTabletReading={publishTabletReading} onTask={createTask} onUnlock={async (unlocked) => {
           if (!currentDevice?.id) return;
           await setClassroomDeviceLock(currentDevice.id, unlocked);
           setSync({ busy: false, ok: true, message: unlocked ? "平板已解锁" : "平板已锁定" });
-        }} gradingWorkbenchPage={gradingWorkbenchPage} gradingWorkbenches={gradingWorkbenches} onConfirmAnswerSource={confirmAnswerSource} onQueryGradingWorkbenches={queryGradingWorkbenches} onUploadReview={uploadForReview} printAssets={printAssets} profileDraft={profileDraft} reports={reports} reviewSubmissions={reviewSubmissions} selectedTextbookContext={selectedTextbookContext} students={students} sync={sync} tasks={tasks} teacher={currentTeacher} termReportDraft={termReportDraft} textbooks={textbooks} /> : null}
+        }} gradingWorkbenchPage={gradingWorkbenchPage} gradingWorkbenches={gradingWorkbenches} onConfirmAnswerSource={confirmAnswerSource} onImportDialoguePackage={importDialoguePackage} onQueryGradingWorkbenches={queryGradingWorkbenches} onUploadReview={uploadForReview} printAssets={printAssets} profileDraft={profileDraft} reports={reports} reviewSubmissions={reviewSubmissions} selectedTextbookContext={selectedTextbookContext} students={students} sync={sync} tasks={tasks} teacher={currentTeacher} termReportDraft={termReportDraft} textbooks={textbooks} /> : null}
         {role === "student" && auth.studentId && currentStudent ? <StudentWorkspace activeModule={currentModule} answer={answer} assignments={assignments} corrections={corrections} isLoggedIn logs={logs} onAsk={askQa} onLogin={handleStudentLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, student: module }))} onUploadReview={uploadStudentSubmission} qaBusy={qaBusy} question={question} reports={reports} setGuardianPhone={setGuardianPhone} setQuestion={setQuestion} setStudentCode={setStudentCode} setStudentName={setStudentName} student={currentStudent} tasks={tasks} /> : null}
         {role === "classroom" && auth.deviceId && currentDevice ? <ClassroomWorkspace activeModule={currentModule} classroomBroadcasts={classroomBroadcasts} device={currentDevice} devices={devices} dictationTasks={dictationTasks} onAsk={askClassroomQa} onLogin={handleClassroomLogin} onModuleOpen={(module) => setActiveModule((value) => ({ ...value, classroom: module }))} onTaskComplete={completeTaskFromTablet} readingTasks={readingTasks} setDeviceCode={setDeviceCode} students={students} tasks={tasks} /> : null}
         {role === "teacher" && !auth.teacherId ? <LoginPanel code={teacherCode} onCode={setTeacherCode} onLogin={handleTeacherLogin} onPhone={setTeacherPhone} phone={teacherPhone} title="教师端登录" /> : null}
@@ -1353,6 +1394,8 @@ function TeacherWorkspace({
   onAssessmentReject,
   onConfirmTextbookGenerationScope,
   onConfirmAnswerSource,
+  onImportDialoguePackage,
+  onRegisterDialoguePackage,
   onContentIndexRebuild,
   onContentUpload,
   onExportPrint,
@@ -1425,6 +1468,8 @@ function TeacherWorkspace({
   onConfirmTextbookGenerationScope: (assetId: string, chapterIds: string[]) => Promise<void>;
   onContentIndexRebuild: () => void;
   onConfirmAnswerSource: (submissionId: string, input: { mode: "teacher_confirmed" | "teacher_selected_reference"; answerKeyText?: string; referenceSourceId?: string }) => void;
+  onImportDialoguePackage: (submissionId: string, answerPackageText: string) => Promise<void>;
+  onRegisterDialoguePackage: (input: { answerPackageText: string; title: string; subject: string; kind: string; grade: string; studentId?: string }) => Promise<void>;
   onContentUpload: (files: File[]) => void;
   onExportPrint: (assignmentId: string) => void;
   onKnowledgeRefresh: () => void;
@@ -1459,7 +1504,7 @@ function TeacherWorkspace({
   onTabletReading: (input: Record<string, unknown>) => void;
   onTask: (input: { studentId?: string; subject?: SubjectLabel; title?: string; requirement?: string; minutes?: number }) => void;
   onUnlock: (unlocked: boolean) => void;
-  onUploadReview: (input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[]; materialType?: "external_workbook" | "generated_assessment"; answerSourceMode?: "teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing"; answerKeyText?: string; referenceSourceId?: string }) => Promise<Awaited<ReturnType<typeof uploadSubmission>> | undefined>;
+  onUploadReview: (input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[]; assignmentId?: string; materialType?: "external_workbook" | "generated_assessment"; answerSourceMode?: "teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing"; answerKeyText?: string; referenceSourceId?: string }) => Promise<Awaited<ReturnType<typeof uploadSubmission>> | undefined>;
   printAssets: PrintAssetLink[];
   profileDraft: ProfileDraft | null;
   reports: StudentReportCard[];
@@ -1503,6 +1548,7 @@ function TeacherWorkspace({
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadMaterialType, setUploadMaterialType] = useState<"external_workbook" | "generated_assessment">("external_workbook");
+  const [selectedGeneratedAssignmentId, setSelectedGeneratedAssignmentId] = useState("");
   const [uploadAnswerSourceMode, setUploadAnswerSourceMode] = useState<"teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing">("missing");
   const [uploadAnswerKeyText, setUploadAnswerKeyText] = useState("");
   const [uploadReferenceSourceId, setUploadReferenceSourceId] = useState("");
@@ -1533,6 +1579,8 @@ function TeacherWorkspace({
   const [textbookSearch, setTextbookSearch] = useState("");
   const [contentFiles, setContentFiles] = useState<File[]>([]);
   const [contentFileNotice, setContentFileNotice] = useState("");
+  const [contentContextPreview, setContentContextPreview] = useState<Awaited<ReturnType<typeof previewAssessmentContentContext>>["context"] | null>(null);
+  const [contentContextPreviewBusy, setContentContextPreviewBusy] = useState(false);
   const [knowledgeTitle, setKnowledgeTitle] = useState("");
   const [knowledgeUrl, setKnowledgeUrl] = useState("");
   const [knowledgeSummary, setKnowledgeSummary] = useState("");
@@ -1582,6 +1630,17 @@ function TeacherWorkspace({
   }, [selectedStudentId, termReportDraft]);
 
   const selectedStudent = useMemo(() => selectableStudents.find((item) => item.id === selectedStudentId) || selectableStudents[0], [selectedStudentId, selectableStudents]);
+  const generatedAssessmentAssignments = useMemo(() => assignments.filter((assignment) => (
+    assignment.items.length > 0
+      && assignment.subject === uploadSubject
+      && assignment.kind === uploadKind
+      && (assignment.studentId === selectedStudent?.id || (assignment.targetScope === "grade" && assignment.targetGrade === selectedStudent?.grade))
+  )), [assignments, selectedStudent?.grade, selectedStudent?.id, uploadKind, uploadSubject]);
+  useEffect(() => {
+    if (!generatedAssessmentAssignments.some((assignment) => assignment.id === selectedGeneratedAssignmentId)) {
+      setSelectedGeneratedAssignmentId(generatedAssessmentAssignments[0]?.id || "");
+    }
+  }, [generatedAssessmentAssignments, selectedGeneratedAssignmentId]);
   const selectedArchiveStudent = useMemo(() => students.find((item) => item.id === selectedStudentId) || activeArchiveStudents[0], [activeArchiveStudents, selectedStudentId, students]);
   const selectedTermReport = termReportDraft?.report.studentId === selectedStudentId ? termReportDraft.report : reports.find((item) => item.studentId === selectedStudentId && item.reportType);
   const selectedTermReportText = termReportText || selectedTermReport?.teacherEditedText || selectedTermReport?.summary || "";
@@ -1630,9 +1689,41 @@ function TeacherWorkspace({
         && matchesTeacherConfirmedTextbookChapterScope(source, generationTextbookContext?.chapter?.id)
     ))
     : [], [generationTextbookContext, knowledgeSources]);
-  const hasApprovedTextbookSource = matchingApprovedTextbookSources.length > 0;
+  useEffect(() => {
+    if (generationMode !== "quiz" || !generationTextbookContext?.asset.id) {
+      setContentContextPreview(null);
+      setContentContextPreviewBusy(false);
+      return;
+    }
+    let cancelled = false;
+    setContentContextPreviewBusy(true);
+    void previewAssessmentContentContext({
+      targetScope: generationTargetScope,
+      studentId: generationTargetScope === "student" ? generationSelectedStudent?.id : undefined,
+      targetGrade: generationTargetGrade,
+      subject: assessmentSubject,
+      kind: assessmentKind,
+      textbookAssetId: generationTextbookContext.asset.id,
+      textbookChapterId: generationTextbookContext.chapter?.id,
+      textbookChapterTitle: generationTextbookContext.chapter?.title,
+      knowledgePoints: generationKnowledgePoints,
+      requirement: assessmentRequirement
+    }).then((response) => {
+      if (!cancelled) setContentContextPreview(response.context);
+    }).catch(() => {
+      if (!cancelled) setContentContextPreview(null);
+    }).finally(() => {
+      if (!cancelled) setContentContextPreviewBusy(false);
+    });
+    return () => { cancelled = true; };
+  }, [assessmentKind, assessmentRequirement, assessmentSubject, generationKnowledgePoints, generationMode, generationSelectedStudent?.id, generationTargetGrade, generationTargetScope, generationTextbookContext?.asset.id, generationTextbookContext?.chapter?.id, generationTextbookContext?.chapter?.title]);
+  const hasApprovedTextbookSource = contentContextPreview
+    ? contentContextPreview.status === "approved" && contentContextPreview.matchedCount > 0
+    : matchingApprovedTextbookSources.length > 0;
   const quizGenerationBlockReason = generationMode !== "quiz"
     ? ""
+    : contentContextPreviewBusy
+      ? "正在检查当前教材章节的已复核资料。"
     : !generationTextbookContext
       ? "请先选择与当前年级、科目一致的贵州遵义教材基准。"
       : !hasApprovedTextbookSource
@@ -1793,7 +1884,7 @@ function TeacherWorkspace({
   const generationFeedbackVisible = activeAssessmentJobs.length > 0 || sync.message.includes("生成任务") || sync.message.startsWith("生成失败");
   const generationFeedbackMessage = activeAssessmentJobs[0]?.message || sync.message;
   const generationFeedbackStatus = activeAssessmentJobs.length ? "pending" : sync.ok === false ? "blocked" : sync.ok ? "ready" : "pending";
-  const finalExportCompleted = Boolean(latestAssessmentDraft?.finalExportAssets?.studentPaper || latestAssessmentDraft?.finalExportAssets?.answerAnalysis);
+  const finalExportCompleted = Boolean(latestAssessmentDraft?.finalExportAssets?.studentPaper || latestAssessmentDraft?.finalExportAssets?.answerAnalysis) || latestAssessmentDraft?.reviewStatus !== "accepted";
   const copyTermReportMessage = async () => {
     const message = selectedTermReport?.wechatMessage || "您好，老师已将阶段成长报告发送给您，请查收。";
     try {
@@ -1817,7 +1908,7 @@ function TeacherWorkspace({
   const scheduleReviewRefresh = () => {
     [1200, 5000, 15000, 30000].forEach((delay) => window.setTimeout(() => onRefreshOps(), delay));
   };
-  const submitReviewUpload = async (source: ReviewUploadSource, input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[]; materialType?: "external_workbook" | "generated_assessment"; answerSourceMode?: "teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing"; answerKeyText?: string; referenceSourceId?: string }) => {
+  const submitReviewUpload = async (source: ReviewUploadSource, input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[]; assignmentId?: string; materialType?: "external_workbook" | "generated_assessment"; answerSourceMode?: "teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing"; answerKeyText?: string; referenceSourceId?: string }) => {
     if (!input.images.length) {
       setReviewUploadStatus({ source, state: "failed", message: "请先选择照片", detail: "可一次上传多张图片，上传数量不设上限。" });
       return;
@@ -1997,7 +2088,7 @@ function TeacherWorkspace({
           </div>
           <label className="field-label">教师补充要求<textarea className="wide-textarea compact-textarea" value={assessmentRequirement} onChange={(event) => setAssessmentRequirement(event.target.value)} /></label>
           <p className="context-note"><ShieldCheck size={15} />排版规则已按当前题型自动优化：学生卷不出现答案，解析卷包含答案、步骤和易错提醒。</p>
-          {generationMode === "quiz" ? <div className="generation-source-card"><strong>教材资料状态<StatusPill label={hasApprovedTextbookSource ? "可生成" : generationTextbookContext ? "待确认" : "待选择"} status={hasApprovedTextbookSource ? "ready" : "pending"} /></strong><span>{generationTextbookContext ? hasApprovedTextbookSource ? `已找到 ${matchingApprovedTextbookSources.length} 份已确认且允许生成的范围来源。` : "请由教师确认当前教材章节范围；这只恢复小测的范围依据，不转写教材正文。" : `当前年级和科目下有 ${generationTextbookAssets.length} 本可选教材。`}</span>{!hasApprovedTextbookSource ? <div className="button-row"><button className="secondary-button" disabled={isAssessmentRecoveryBusy} onClick={() => void recoverAssessmentEvidence()} type="button"><RefreshCw size={16} />{isAssessmentRecoveryBusy ? "正在修复教材依据" : "修复教材依据"}</button>{generationTextbookContext?.chapter ? <button className="primary-button" onClick={() => void onConfirmTextbookGenerationScope(generationTextbookContext.asset.id, [generationTextbookContext.chapter?.id || ""])} type="button"><ShieldCheck size={16} />确认当前教材章节范围并恢复小测</button> : null}<button className="primary-button" onClick={submitTeacherRequirementEmergencyDraft} type="button"><ShieldCheck size={16} />按教师要求生成临时草稿</button><button className="secondary-button" onClick={() => onOpenModule("教材资料")} type="button"><BookOpen size={16} />前往教材资料审核</button></div> : null}</div> : null}
+           {generationMode === "quiz" ? <div className="generation-source-card"><strong>教材资料状态<StatusPill label={hasApprovedTextbookSource ? "可生成" : generationTextbookContext ? "待确认" : "待选择"} status={hasApprovedTextbookSource ? "ready" : "pending"} /></strong><span>{generationTextbookContext ? hasApprovedTextbookSource ? `已找到 ${contentContextPreview?.matchedCount || matchingApprovedTextbookSources.length} 份已确认且允许生成的范围来源。` : "请由教师确认当前教材章节范围；这只恢复小测的范围依据，不转写教材正文。" : `当前年级和科目下有 ${generationTextbookAssets.length} 本可选教材。`}</span>{contentContextPreview?.matches?.length ? <small>预览来源：{contentContextPreview.matches.slice(0, 3).map((item) => String(item.title || item.sourceId || "资料")).join("、")}</small> : null}{!hasApprovedTextbookSource ? <div className="button-row"><button className="secondary-button" disabled={isAssessmentRecoveryBusy} onClick={() => void recoverAssessmentEvidence()} type="button"><RefreshCw size={16} />{isAssessmentRecoveryBusy ? "正在修复教材依据" : "修复教材依据"}</button>{generationTextbookContext?.chapter ? <button className="primary-button" onClick={() => void onConfirmTextbookGenerationScope(generationTextbookContext.asset.id, [generationTextbookContext.chapter?.id || ""])} type="button"><ShieldCheck size={16} />确认当前教材章节范围并恢复小测</button> : null}<button className="primary-button" onClick={submitTeacherRequirementEmergencyDraft} type="button"><ShieldCheck size={16} />按教师要求生成临时草稿</button><button className="secondary-button" onClick={() => onOpenModule("教材资料")} type="button"><BookOpen size={16} />前往教材资料审核</button></div> : null}</div> : null}
           {assessmentGenerationBlockReason ? <p className="context-note blocked"><ShieldCheck size={15} />{assessmentGenerationBlockReason}</p> : null}
         </section>
 
@@ -2015,14 +2106,14 @@ function TeacherWorkspace({
             {latestAssessmentDraft?.draftAsset ? <a className="draft-pdf-link" href={latestAssessmentDraft.draftAsset.url} target="_blank" rel="noreferrer"><FileText size={17} />{generationDraftContextMatches ? "打开审查 PDF" : "打开历史审查 PDF"}</a> : <button className="secondary-button" disabled type="button"><FileText size={17} />打开审查 PDF</button>}
             {latestAssessmentDraft && !generationDraftContextMatches ? <p className="context-note blocked"><ShieldCheck size={15} />当前表单上下文已变化，该草稿仅作为历史记录。请切回对应学生、年级、科目和生成类型后再复核或正式导出。</p> : null}
             {latestAssessmentDraft?.layoutValidation?.ok === false || (latestAssessmentDraft && !latestAssessmentDraft.layoutValidation) ? <p className="context-note blocked"><ShieldCheck size={15} />排版校验未通过：{latestAssessmentDraft.layoutValidation?.issues.join("；") || "缺少有效的页数和题目坐标校验，请重新导出草稿。"}</p> : null}
-            <button className="primary-button" disabled={finalExportCompleted || !latestAssessmentDraft || !generationDraftContextMatches || latestAssessmentDraft.layoutValidation?.ok !== true} onClick={() => latestAssessmentDraft && generationDraftContextMatches && onExportPrint(latestAssessmentDraft.assignmentId)}><CheckCircle2 size={17} />确认正式导出</button>
+            <button className="primary-button" disabled={finalExportCompleted || !latestAssessmentDraft || !generationDraftContextMatches || latestAssessmentDraft.layoutValidation?.ok !== true} onClick={() => latestAssessmentDraft && generationDraftContextMatches && latestAssessmentDraft.reviewStatus === "accepted" && onExportPrint(latestAssessmentDraft.assignmentId)}><CheckCircle2 size={17} />确认正式导出</button>
             <button className="secondary-button danger-button" disabled={!latestAssessmentDraft || !generationDraftContextMatches || latestAssessmentDraft.reviewStatus !== "pending"} onClick={() => { if (!latestAssessmentDraft) return; setGenerationReviewAction("reject"); setGenerationReviewFeedback(latestAssessmentDraft.reviewFeedback || ""); }} type="button"><CircleX size={17} />否决草稿</button>
             <button className="secondary-button" disabled={!latestAssessmentDraft || !generationDraftContextMatches || latestAssessmentDraft.reviewStatus !== "rejected"} onClick={() => { if (!latestAssessmentDraft) return; setGenerationReviewAction("regenerate"); setGenerationReviewFeedback(latestAssessmentDraft.reviewFeedback || ""); }} type="button"><RefreshCw size={17} />重新生成</button>
             {generationReviewAction && latestAssessmentDraft ? <div className="generation-review-feedback-panel"><label className="field-label">{generationReviewAction === "reject" ? "否决原因" : "重新生成要求"}<textarea className="wide-textarea compact-textarea" autoFocus value={generationReviewFeedback} onChange={(event) => setGenerationReviewFeedback(event.target.value)} placeholder={generationReviewAction === "reject" ? "请说明题目范围、题量、难度或解析需要如何调整。" : "请补充需要修改的题型、范围、难度或解析要求。"} /></label><div className="button-row"><button className="primary-button" disabled={!generationReviewFeedback.trim()} onClick={() => { const feedback = generationReviewFeedback.trim(); if (generationReviewAction === "reject") onAssessmentReject(latestAssessmentDraft.assignmentId, feedback); else onAssessmentRegenerate(latestAssessmentDraft.assignmentId, feedback); setGenerationReviewAction(null); }} type="button">{generationReviewAction === "reject" ? "提交否决" : "按要求重新生成"}</button><button className="secondary-button" onClick={() => setGenerationReviewAction(null)} type="button">取消</button></div></div> : null}
             {latestAssessmentDraft?.finalExportAssets?.studentPaper || latestAssessmentDraft?.finalExportAssets?.answerAnalysis ? <div className="generation-final-assets"><strong>本任务正式导出</strong>{latestAssessmentDraft?.finalExportAssets?.studentPaper ? <a className="draft-pdf-link" href={latestAssessmentDraft.finalExportAssets.studentPaper.url} target="_blank" rel="noreferrer"><FileText size={17} />学生卷 PDF</a> : null}{latestAssessmentDraft?.finalExportAssets?.answerAnalysis ? <a className="draft-pdf-link" href={latestAssessmentDraft.finalExportAssets.answerAnalysis.url} target="_blank" rel="noreferrer"><FileText size={17} />答案解析 PDF</a> : null}</div> : null}
           </div>
           {generationFeedbackVisible ? <div className={`generation-inline-status ${generationFeedbackStatus}`}><StatusDot status={generationFeedbackStatus} /><span>{generationFeedbackMessage}</span></div> : null}
-          {latestAssessmentDraft ? <div className="generation-current-draft"><strong>{latestAssessmentDraft.targetLabel} · {latestAssessmentDraft.subject} · {latestAssessmentDraft.kind}</strong><StatusPill label={latestAssessmentDraft.reviewStatus === "accepted" ? "已确认" : latestAssessmentDraft.reviewStatus === "rejected" ? "已否决" : "待审查"} status={latestAssessmentDraft.reviewStatus === "accepted" ? "ready" : latestAssessmentDraft.reviewStatus === "rejected" ? "blocked" : "pending"} /><span>请先打开 PDF 草稿审查题目、题量和排版。</span></div> : null}
+          {latestAssessmentDraft ? <div className="generation-current-draft"><strong>{latestAssessmentDraft.targetLabel} · {latestAssessmentDraft.subject} · {latestAssessmentDraft.kind}</strong><StatusPill label={latestAssessmentDraft.reviewStatus === "accepted" ? "已确认" : latestAssessmentDraft.reviewStatus === "rejected" ? "已否决" : "待审查"} status={latestAssessmentDraft.reviewStatus === "accepted" ? "ready" : latestAssessmentDraft.reviewStatus === "rejected" ? "blocked" : "pending"} /><span>请先打开 PDF 草稿审查题目、题量和排版。</span>{latestAssessmentDraft.generationContextSummary ? <small>生成依据：{latestAssessmentDraft.generationContextSummary.basis} · 资料来源 {latestAssessmentDraft.generationContextSummary.contentContext.sourceCount} 份 · 学生信号 {latestAssessmentDraft.generationContextSummary.studentSignalCount} 条</small> : null}{latestAssessmentDraft.gradingSource ? <small>批改答案包：{latestAssessmentDraft.gradingSource.questionCount || 0} 题 · 指纹 {latestAssessmentDraft.gradingSource.fingerprint}</small> : null}</div> : null}
         </aside>
       </div>
       <section className="generation-record-board">
@@ -2059,8 +2150,8 @@ function TeacherWorkspace({
         {visiblePrintAssets.length ? <div className="print-asset-list">{visiblePrintAssets.map((asset) => <a key={asset.id} href={asset.url} target="_blank" rel="noreferrer"><FileText size={16} />{asset.title}</a>)}</div> : null}
       </section>
     </section>
-    <section className={moduleClass("批改复核", "panel span-6")}><PanelTitle badge="AI生成" icon={Upload} title="拍照上传批改" /><div className="template-controls"><label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{selectableStudents.map((student) => <option key={student.id} value={student.id}>{student.displayName}</option>)}</select></label><label>材料类型<select value={uploadMaterialType} onChange={(event) => setUploadMaterialType(event.target.value as typeof uploadMaterialType)}><option value="external_workbook">外部练习册</option><option value="generated_assessment">系统生成材料</option></select></label><label>类型<select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option>作业</option><option>小测</option><option>试卷</option><option>听写</option></select></label><label>科目<select value={uploadSubject} onChange={(event) => setUploadSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label></div><label className="field-label">记录标题<input value={uploadTitle} placeholder="例如：三角形单元试卷批改、英语Unit 1听写批改" onChange={(event) => setUploadTitle(event.target.value)} /></label><ReviewImagePicker files={uploadFiles} setFiles={setUploadFiles} testId="teacher-grading-image-picker" /><p className="muted-line">外部练习册建议使用 iPad 连续拍摄多页清晰照片，按页序加入；系统只生成可追溯的识别/批改草稿，教师确认后才归档。</p>{uploadMaterialType === "external_workbook" ? <div className="external-answer-source-panel"><label>答案来源<select value={uploadAnswerSourceMode} onChange={(event) => setUploadAnswerSourceMode(event.target.value as typeof uploadAnswerSourceMode)}><option value="missing">暂未提供答案</option><option value="teacher_confirmed">教师已确认答案</option><option value="teacher_selected_reference">教师选择参考答案</option><option value="model_draft">系统生成参考答案草稿</option></select></label><label className="field-label">教师答案（可选）<textarea value={uploadAnswerKeyText} onChange={(event) => setUploadAnswerKeyText(event.target.value)} placeholder="例如：1.A 2.4 3.小数乘法" /></label><label className="field-label">参考资料 ID（可选）<input value={uploadReferenceSourceId} onChange={(event) => setUploadReferenceSourceId(event.target.value)} placeholder="教师确认的教材/练习册答案来源 ID" /></label></div> : null}<div className="review-upload-action"><button className="primary-button" disabled={!selectedStudent || !uploadFiles.length || isReviewUploading("grading")} onClick={() => selectedStudent && submitReviewUpload("grading", { studentId: selectedStudent.id, subject: uploadSubject, kind: uploadKind, title: uploadTitle.trim() || `${selectedStudent.displayName}${uploadKind}批改`, images: uploadFiles, materialType: uploadMaterialType, answerSourceMode: uploadAnswerSourceMode, answerKeyText: uploadAnswerKeyText, referenceSourceId: uploadReferenceSourceId })}><Upload size={17} />上传并批改</button>{renderReviewUploadStatus("grading")}</div></section>
-    <section className={moduleClass("批改复核", "panel full")}><PanelTitle icon={ListChecks} title="批改工作台" /><div className="button-row"><button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新工作台</button></div><GradingWorkbenchPanel pageData={gradingWorkbenchPage} onConfirmAnswerSource={onConfirmAnswerSource} onMarkReviewed={onMarkReviewed} onQueryGradingWorkbenches={onQueryGradingWorkbenches} onQuestionReview={onQuestionReview} onRecognize={onRecognize} reviewSubmissions={reviewSubmissions} students={students} workbenches={gradingWorkbenches} /></section>
+    <section className={moduleClass("批改复核", "panel span-6")}><PanelTitle badge="AI生成" icon={Upload} title="拍照上传批改" /><div className="template-controls"><label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{selectableStudents.map((student) => <option key={student.id} value={student.id}>{student.displayName}</option>)}</select></label><label>材料类型<select value={uploadMaterialType} onChange={(event) => setUploadMaterialType(event.target.value as typeof uploadMaterialType)}><option value="external_workbook">外部练习册</option><option value="generated_assessment">系统生成材料</option></select></label><label>类型<select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option>作业</option><option>小测</option><option>试卷</option><option>听写</option></select></label><label>科目<select value={uploadSubject} onChange={(event) => setUploadSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label></div>{uploadMaterialType === "generated_assessment" ? <label className="field-label">关联生成作业<select value={selectedGeneratedAssignmentId} onChange={(event) => setSelectedGeneratedAssignmentId(event.target.value)}><option value="">请选择已生成的题目与答案来源</option>{generatedAssessmentAssignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.title} · {assignment.items.length}题 · {assignment.status}</option>)}</select></label> : null}<label className="field-label">记录标题<input value={uploadTitle} placeholder="例如：三角形单元试卷批改、英语Unit 1听写批改" onChange={(event) => setUploadTitle(event.target.value)} /></label><ReviewImagePicker files={uploadFiles} setFiles={setUploadFiles} testId="teacher-grading-image-picker" /><p className="muted-line">外部练习册建议使用 iPad 连续拍摄多页清晰照片，按页序加入；系统只生成可追溯的识别/批改草稿，教师确认后才归档。</p>{uploadMaterialType === "external_workbook" ? <div className="external-answer-source-panel"><label>答案来源<select value={uploadAnswerSourceMode} onChange={(event) => setUploadAnswerSourceMode(event.target.value as typeof uploadAnswerSourceMode)}><option value="missing">暂未提供答案</option><option value="teacher_confirmed">教师已确认答案</option><option value="teacher_selected_reference">教师选择参考答案</option><option value="model_draft">系统生成参考答案草稿</option></select></label><label className="field-label">教师答案（可选）<textarea value={uploadAnswerKeyText} onChange={(event) => setUploadAnswerKeyText(event.target.value)} placeholder="例如：1.A 2.4 3.小数乘法" /></label><label className="field-label">参考资料 ID（可选）<input value={uploadReferenceSourceId} onChange={(event) => setUploadReferenceSourceId(event.target.value)} placeholder="教师确认的教材/练习册答案来源 ID" /></label></div> : null}<div className="review-upload-action"><button className="primary-button" disabled={!selectedStudent || !uploadFiles.length || (uploadMaterialType === "generated_assessment" && !selectedGeneratedAssignmentId) || isReviewUploading("grading")} onClick={() => selectedStudent && submitReviewUpload("grading", { studentId: selectedStudent.id, subject: uploadSubject, kind: uploadKind, title: uploadTitle.trim() || `${selectedStudent.displayName}${uploadKind}批改`, images: uploadFiles, assignmentId: uploadMaterialType === "generated_assessment" ? selectedGeneratedAssignmentId : undefined, materialType: uploadMaterialType, answerSourceMode: uploadAnswerSourceMode, answerKeyText: uploadAnswerKeyText, referenceSourceId: uploadReferenceSourceId })}><Upload size={17} />上传并批改</button>{renderReviewUploadStatus("grading")}</div></section>
+    <section className={moduleClass("批改复核", "panel full")}><PanelTitle icon={ListChecks} title="批改工作台" /><div className="button-row"><button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新工作台</button></div><DialogueSourceRegistrationPanel onRegister={onRegisterDialoguePackage} students={students} /><GradingWorkbenchPanel pageData={gradingWorkbenchPage} onConfirmAnswerSource={onConfirmAnswerSource} onImportDialoguePackage={onImportDialoguePackage} onMarkReviewed={onMarkReviewed} onQueryGradingWorkbenches={onQueryGradingWorkbenches} onQuestionReview={onQuestionReview} onRecognize={onRecognize} reviewSubmissions={reviewSubmissions} students={students} workbenches={gradingWorkbenches} /></section>
     <section className={moduleClass("电视动态屏", "tv-display-shell full")}>
       <TvParentDisplay capabilities={capabilities} assignments={assignments} audit={audit} corrections={corrections} logs={logs} reports={reports} reviewSubmissions={reviewSubmissions} students={students} tasks={tasks} />
     </section>
@@ -2092,7 +2183,7 @@ function TeacherWorkspace({
             <ProfileDraftStructuredReview snapshot={profileDraft.snapshot} />
             <label className="field-label">档案反馈正文<textarea className="wide-textarea profile-draft-textarea" value={profileDraftText} onChange={(event) => setProfileDraftText(event.target.value)} /></label>
             <div className="button-row">
-              <button className="primary-button" onClick={() => selectedArchiveStudent && onProfilePublish({ studentId: selectedArchiveStudent.id, text: profileDraftText })}><ShieldCheck size={17} />确认发布至学生端</button>
+              <button className="primary-button" disabled={Boolean(profileDraft.publishGate && !profileDraft.publishGate.ok && profileDraft.publishGate.blockers.some((item) => item !== "TEACHER_CONFIRMATION_REQUIRED"))} onClick={() => selectedArchiveStudent && onProfilePublish({ studentId: selectedArchiveStudent.id, text: profileDraftText })}><ShieldCheck size={17} />确认发布至学生端</button>
               <button className="secondary-button" onClick={async () => {
                 if (!selectedArchiveStudent) return;
                 const asset = await onProfilePrint(selectedArchiveStudent.id, profileDraft.snapshot, profileDraftText);
@@ -2166,7 +2257,7 @@ function StudentWorkspace({
   onAsk: (input?: { subject?: "全科" | SubjectLabel; images?: File[] }) => void;
   onLogin: () => void;
   onModuleOpen: (module: string) => void;
-  onUploadReview: (input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[] }) => void;
+  onUploadReview: (input: { studentId: string; subject: SubjectLabel; kind: string; title: string; images: File[]; assignmentId?: string }) => void;
   qaBusy: boolean;
   question: string;
   reports: StudentReportCard[];
@@ -2182,7 +2273,19 @@ function StudentWorkspace({
   const [uploadKind, setUploadKind] = useState("作业");
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState("");
   const [qaImages, setQaImages] = useState<File[]>([]);
+  const generatedAssignments = useMemo(() => assignments.filter((assignment) => (
+    assignment.items.length > 0
+      && assignment.subject === uploadSubject
+      && assignment.kind === uploadKind
+      && (assignment.studentId === student.id || (assignment.targetScope === "grade" && assignment.targetGrade === student.grade))
+  )), [assignments, student.grade, student.id, uploadKind, uploadSubject]);
+  useEffect(() => {
+    if (!generatedAssignments.some((assignment) => assignment.id === selectedAssignmentId)) {
+      setSelectedAssignmentId(generatedAssignments[0]?.id || "");
+    }
+  }, [generatedAssignments, selectedAssignmentId]);
   const moduleClass = (module: string, className: string) => `${className} ${activeModule === module ? "" : "module-hidden"}`;
   const submitTitle = uploadTitle.trim() || `${student.displayName}${uploadKind}提交`;
   return <div className="page-grid">
@@ -2203,7 +2306,7 @@ function StudentWorkspace({
       {answer ? <p className="answer-box">{answer}</p> : null}
     </section>
     <section className={moduleClass("英语词典", "panel full")}><PanelTitle badge="AI生成" icon={BookOpen} title="英语词典" /><StudentDictionary /></section>
-    <section className={moduleClass("拍照提交", "panel full")}><PanelTitle icon={Upload} title="拍照提交" /><p className="muted-line">学生端用于作业、练习、小测、试卷和听写照片提交。提交后进入教师端复核，不在学生端直接展示批改细节。</p><div className="template-controls"><label>科目<select value={uploadSubject} onChange={(event) => setUploadSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label><label>类型<select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option>作业</option><option>练习</option><option>小测</option><option>试卷</option><option>听写</option></select></label></div><label className="field-label">记录标题<input value={uploadTitle} placeholder="例如：周三数学作业、Unit 2 听写" onChange={(event) => setUploadTitle(event.target.value)} /></label><ReviewImagePicker files={uploadFiles} setFiles={setUploadFiles} testId="student-submission-image-picker" /><button className="primary-button" onClick={() => onUploadReview({ studentId: student.id, subject: uploadSubject, kind: uploadKind, title: submitTitle, images: uploadFiles })}><Upload size={17} />提交给老师</button></section>
+    <section className={moduleClass("拍照提交", "panel full")}><PanelTitle icon={Upload} title="拍照提交" /><p className="muted-line">学生端用于作业、练习、小测、试卷和听写照片提交。提交后进入教师端复核，不在学生端直接展示批改细节。</p><div className="template-controls"><label>科目<select value={uploadSubject} onChange={(event) => setUploadSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label><label>类型<select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option>作业</option><option>练习</option><option>小测</option><option>试卷</option><option>听写</option></select></label></div>{generatedAssignments.length ? <label className="field-label">对应系统生成内容<select value={selectedAssignmentId} onChange={(event) => setSelectedAssignmentId(event.target.value)}><option value="">按外部作业提交</option>{generatedAssignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.title} · {assignment.items.length}题</option>)}</select></label> : null}<label className="field-label">记录标题<input value={uploadTitle} placeholder="例如：周三数学作业、Unit 2 听写" onChange={(event) => setUploadTitle(event.target.value)} /></label><ReviewImagePicker files={uploadFiles} setFiles={setUploadFiles} testId="student-submission-image-picker" /><button className="primary-button" onClick={() => onUploadReview({ studentId: student.id, subject: uploadSubject, kind: uploadKind, title: submitTitle, assignmentId: selectedAssignmentId || undefined, images: uploadFiles })}><Upload size={17} />提交给老师</button></section>
     <section className={moduleClass("学生档案", "panel full")}><PanelTitle icon={FileText} title="学生档案" /><StudentArchive corrections={corrections} logs={logs} reports={reports} student={student} /></section>
   </div>;
 }
@@ -2768,8 +2871,36 @@ function questionMaxScoreTotal(questions: GradingWorkbench["questions"]) {
   return Number(values.reduce((sum, value) => sum + Number(value), 0).toFixed(2));
 }
 
-function GradingWorkbenchPanel({ onConfirmAnswerSource, onMarkReviewed, onQueryGradingWorkbenches, onQuestionReview, onRecognize, pageData, reviewSubmissions, students, workbenches }: {
+function DialogueSourceRegistrationPanel({ onRegister, students }: {
+  onRegister: (input: { answerPackageText: string; title: string; subject: string; kind: string; grade: string; studentId?: string }) => Promise<void>;
+  students: StudentProfile[];
+}) {
+  const [text, setText] = useState("");
+  const [title, setTitle] = useState("");
+  const [subject, setSubject] = useState("数学");
+  const [kind, setKind] = useState("练习");
+  const [grade, setGrade] = useState("");
+  const [studentId, setStudentId] = useState("");
+  const [busy, setBusy] = useState(false);
+  return <section className="external-review-summary dialogue-answer-package-panel">
+    <strong>登记对话生成内容为统一批改来源</strong>
+    <span>先登记结构化答案包，系统会写入共享数据库。之后上传学生照片时，在“系统生成材料”中选择对应内容，Web 和小程序将使用同一题干、答案、分值和解析。</span>
+    <input accept=".json,application/json" onChange={async (event) => { const file = event.target.files?.[0]; if (file) setText(await file.text()); }} type="file" />
+    <textarea className="wide-textarea compact-textarea" value={text} onChange={(event) => setText(event.target.value)} placeholder="粘贴对话输出的结构化答案包 JSON" />
+    <div className="review-field-row">
+      <label className="field-label">内容标题<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：四年级四则运算专项小测" /></label>
+      <label className="field-label">年级<input value={grade} onChange={(event) => setGrade(event.target.value)} placeholder="例如：四年级" /></label>
+      <label className="field-label">科目<select value={subject} onChange={(event) => setSubject(event.target.value)}><option>数学</option><option>语文</option><option>英语</option></select></label>
+      <label className="field-label">类型<select value={kind} onChange={(event) => setKind(event.target.value)}><option>练习</option><option>小测</option><option>试卷</option></select></label>
+      <label className="field-label">指定学生（可选）<select value={studentId} onChange={(event) => setStudentId(event.target.value)}><option value="">按年级或教师共享</option>{students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.grade}</option>)}</select></label>
+    </div>
+    <div className="button-row"><button className="primary-button" disabled={!text.trim() || busy} onClick={async () => { setBusy(true); try { await onRegister({ answerPackageText: text, title, subject, kind, grade, studentId: studentId || undefined }); setText(""); } finally { setBusy(false); } }} type="button"><Upload size={16} />{busy ? "正在登记" : "登记共享答案来源"}</button></div>
+  </section>;
+}
+
+function GradingWorkbenchPanel({ onConfirmAnswerSource, onImportDialoguePackage, onMarkReviewed, onQueryGradingWorkbenches, onQuestionReview, onRecognize, pageData, reviewSubmissions, students, workbenches }: {
   onConfirmAnswerSource: (submissionId: string, input: { mode: "teacher_confirmed" | "teacher_selected_reference"; answerKeyText?: string; referenceSourceId?: string }) => void;
+  onImportDialoguePackage: (submissionId: string, answerPackageText: string) => Promise<void>;
   onMarkReviewed: (submissionId: string, input?: Record<string, unknown>) => void;
   onQueryGradingWorkbenches: (filters: GradingWorkbenchFilters) => Promise<Awaited<ReturnType<typeof listGradingWorkbenches>> | null>;
   onQuestionReview: (submissionId: string, questionId: string, input: Record<string, unknown>) => void;
@@ -2820,6 +2951,8 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onMarkReviewed, onQueryG
   const [reviewNote, setReviewNote] = useState("");
   const [answerKeyDraft, setAnswerKeyDraft] = useState("");
   const [referenceSourceDraft, setReferenceSourceDraft] = useState("");
+  const [dialogueAnswerPackageText, setDialogueAnswerPackageText] = useState("");
+  const [dialoguePackageBusy, setDialoguePackageBusy] = useState(false);
   useEffect(() => {
     if (!workbenches.some((item) => item.submissionId === activeId)) setActiveId(workbenches[0]?.submissionId || "");
   }, [activeId, workbenches]);
@@ -2832,6 +2965,7 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onMarkReviewed, onQueryG
     setReviewNote("");
     setAnswerKeyDraft("");
     setReferenceSourceDraft("");
+    setDialogueAnswerPackageText("");
   }, [active?.submissionId]);
   const activeQuestions = active?.questions || [];
   const activeQuestionForForm = activeQuestions.find((item) => item.id === activeQuestionId) || activeQuestions[0];
@@ -2998,6 +3132,7 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onMarkReviewed, onQueryG
         <strong>批改复核工作台</strong>
         <span>按“选择批次 → 查看图片 → 逐题确认 → 归档”处理，不对学生和家长展示。</span>
       </div>
+      {active ? <div className="context-note"><ShieldCheck size={15} />当前流程：{active.workflowState} · 答案来源：{active.answerSource?.mode || "missing"} · 归档阻断 {active.archiveBlockers.length} 项</div> : null}
       <div className="grading-command-metrics">
         <Metric label="待复核" value={pageData?.summary?.batches ?? workbenches.length} suffix="份" tone="amber" />
         <Metric label="待确认题" value={pageData?.summary?.pendingQuestions ?? pendingQuestionTotal} suffix="题" tone="blue" />
@@ -3039,6 +3174,7 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onMarkReviewed, onQueryG
       </div>
       <p className={`context-note ${allQuestionsReviewedForArchive ? "" : "blocked"}`}><ShieldCheck size={15} />逐题确认完成后自动汇总总分；仍为“无法识别”的题目不会进入正式归档。</p>
       {active?.materialType === "external_workbook" ? <div className="external-review-summary"><strong>外部练习册证据复核</strong><span>答案来源：{active.answerSource?.mode || "missing"} · {active.answerSource?.status === "confirmed" ? "已确认" : "待教师确认"}</span>{archiveBlockers.length ? <p className="context-note blocked">归档阻断：{archiveBlockers.join("、")}</p> : <p className="context-note">页序、图片质量和逐题识别均已满足当前门禁。</p>}<div className="review-field-row"><label className="field-label">教师确认答案（可选）<textarea value={answerKeyDraft} onChange={(event) => setAnswerKeyDraft(event.target.value)} placeholder="例如：1.A 2.4 3.小数乘法" /></label><label className="field-label">参考资料 ID<input value={referenceSourceDraft} onChange={(event) => setReferenceSourceDraft(event.target.value)} placeholder="教师确认的参考答案来源 ID" /></label></div><div className="button-row"><button className="secondary-button" disabled={!active} onClick={() => active && onConfirmAnswerSource(active.submissionId, { mode: "teacher_confirmed", answerKeyText: answerKeyDraft, referenceSourceId: referenceSourceDraft })} type="button">确认答案来源</button><button className="secondary-button" disabled={!active} onClick={() => active && onConfirmAnswerSource(active.submissionId, { mode: "teacher_selected_reference", answerKeyText: answerKeyDraft, referenceSourceId: referenceSourceDraft })} type="button">选择参考答案</button></div></div> : null}
+      {active ? <div className="external-review-summary dialogue-answer-package-panel"><strong>对话重新批改</strong><span>把对话中生成的“结构化答案包”或“结构化批改结果 JSON”粘贴到这里，或选择已下载的 JSON 文件；系统会保留原始内容并进入教师逐题复核。</span><input accept=".json,application/json" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setDialogueAnswerPackageText(await file.text()); }} type="file" /><textarea className="wide-textarea compact-textarea" value={dialogueAnswerPackageText} onChange={(event) => setDialogueAnswerPackageText(event.target.value)} placeholder="粘贴结构化答案包或批改结果 JSON" /><div className="button-row"><button className="secondary-button" disabled={!dialogueAnswerPackageText.trim() || dialoguePackageBusy} onClick={async () => { if (!active || !dialogueAnswerPackageText.trim()) return; setDialoguePackageBusy(true); try { await onImportDialoguePackage(active.submissionId, dialogueAnswerPackageText); } finally { setDialoguePackageBusy(false); } }} type="button"><RefreshCw size={16} />{dialoguePackageBusy ? "正在重新批改" : "导入并重新批改"}</button></div></div> : null}
       <div className="review-image-tabs">{active?.pages.map((item) => <button className={item.pageNumber === page?.pageNumber ? "active" : ""} key={item.id} onClick={() => selectPage(item.pageNumber)}>第 {item.pageNumber} 页</button>)}</div>
       {page ? <p className={`context-note ${page.qualityStatus === "ready" ? "" : "blocked"}`}><ShieldCheck size={15} />{pageQualityText}{page.qualityScore != null ? ` · 质量分 ${Math.round(page.qualityScore * 100)}%` : ""}{pageQualityIssues.length ? ` · ${pageQualityIssues.slice(0, 2).join("；")}` : ""}</p> : null}
       <div className="grading-image-stage">

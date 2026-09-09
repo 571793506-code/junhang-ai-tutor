@@ -310,7 +310,16 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 教师端打开单个批改工作台详情。
   - 关键字段：`pages[].imageUrl`, `pages[].markers`, `pages[].qualityStatus`, `pages[].qualityScore`, `pages[].qualityIssues`, `questions[].bbox`, `questions[].prompt`, `questions[].studentAnswer`, `questions[].correctAnswer`, `questions[].errorStep`, `questions[].confidence`。
   - 参考答案、主批改或风险审查暂不可用时，接口仍必须保留 OCR 的题号、题干、学生作答、坐标和置信度，供教师逐题补充正确答案、判定、得分和错因；该状态不生成最终分，也不能跳过逐题确认归档。
+- `PATCH /api/grading/workbench/:submissionId/dialogue-answer-package`
+  - 教师端将对话中随试卷、小测或练习生成的结构化答案包，或对话重新识别后得到的结构化批改结果，导入当前批改记录并重新进入批改复核。
+  - 服务端只使用 `junhang-grading-source-v1` 的标准字段建立新的仓库指纹，同时保留对话原始 payload、原始 `sourceId`、原始指纹及 `commonMistake`、`coverage` 等扩展字段到审计元数据；原始内容不被覆盖或丢弃。
+  - 导入结果仍为教师待复核草稿，不能绕过逐题确认、低置信门禁或归档规则。
   - 低置信或待复核题不进入学生端和家长端。
+
+- `POST /api/grading/source-packages/dialogue`
+  - 教师端将对话生成的结构化答案包登记为数据库中的统一 `Assignment` 来源；服务端按 `junhang-grading-source-v1` 规范化并重新生成仓库指纹。
+  - 返回 `assignment.id`、`gradingSource`（来源 ID、版本、指纹）和导入摘要。后续 Web、小程序和课堂平板批改只提交该 `assignmentId`，统一从 `Assignment.metadata.gradingSourcePackage` 读取题干、答案、分值和解析。
+  - 对话原始 `sourceId`、指纹和 payload 仅保存在来源审计元数据中；该接口不会创建学生提交，也不会绕过教师逐题复核和归档门禁。
 
 - `PATCH /api/grading/workbench/:submissionId/questions/:questionId`
   - 教师端逐题修正批改结果，小程序和 Web 共用。
