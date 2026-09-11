@@ -4,6 +4,12 @@
 
 ## 1. 核心概念
 
+### 生成与批改规则同源
+
+生成教学细则读取 `skills/generation/references/runtime-rules.md`，批改读取 `skills/grading/references/runtime-rules.md`；Codex 模块 Playbook 和服务端使用同一正文。`packages/ai/src/teaching-rules.js` 按固定 module 白名单加载 UTF-8 正文、版本和 SHA-256，每次操作重新读取，缺失或格式错误时在模型调用前失败关闭。
+
+规则 root 只允许服务端配置与测试使用，HTTP 输入、上传文件和资料文本不能指定规则路径或替换规则。版本/hash 只属于内部可追踪元数据，不向学生或家长输出正文或内部配置。模型策略及数值预算归 `packages/ai/src/model-policy.js` 管理；Playbook 不复制第二套预算表。规则装配接入状态按 9 月 11 日实施计划记录，规则文件存在不等于所有旧入口已完成迁移。
+
 ### 1.1 Prompt engineering 负责“怎么说”
 
 每一次模型调用都必须明确：

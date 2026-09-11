@@ -13,6 +13,8 @@
 
 当意图是批改已生成材料、外部练习册、图片作业、OCR 结果或逐题分数时加载。已有生成记录优先读取 `gradingSourcePackage`；外部材料走独立参考答案登记路径。
 
+必须同时读取 `skills/grading/references/runtime-rules.md`。证据判断、合理异解、逐题评分和确认细则在该文件统一维护；本 Playbook 负责工具顺序和服务端门禁。
+
 ## 前置依赖
 
 服务端必须确认学生仍可接收新工作、图片页序和质量、题目布局、答案来源及教师权限。生成材料需要有效的 `gradingSourcePackage` 和 `questionLayoutManifest`；外部材料需要参考答案证据或明确进入待复核状态。
@@ -27,11 +29,11 @@
 
 ## 执行顺序
 
-先验证来源包或登记外部参考答案，再按页序识别并对齐印刷题干和学生作答；客观题由服务层保守比较，未解决题目才发送 Terra，最后汇总逐题得分并等待教师逐题确认。
+先验证来源包或登记外部参考答案，再按页序识别并对齐印刷题干和学生作答；客观题由服务层保守比较，未解决题目才发送任务策略指定的模型，最后汇总逐题得分并等待教师逐题确认。
 
 ## 模型与复核
 
-OCR 使用 MiniMax 视觉能力，主观批改和参考答案使用 Terra `high`。只有 evidence 充分且属于 availability 或 quality 故障才允许每题一次 Sol `high`；任何 `teacher_confirmation` 未完成的结果都保持草稿或 `review_required`。
+调用前读取 `packages/ai/src/model-policy.js` 的任务策略，本文件不复制模型参数或数值预算。9 月 11 日设计确定 Astra 主观批改与参考答案、Flash 可选识别/提取、Sol 仅限独立有限任务或可用性替补，接入进度以实施计划为准。OCR 默认 MiniMax 保持至真实图片对照通过。任何 `teacher_confirmation` 未完成的结果都保持草稿或 `review_required`。
 
 ## 核心原则
 
@@ -40,15 +42,13 @@ OCR 使用 MiniMax 视觉能力，主观批改和参考答案使用 Terra `high`
 - 对于本平台新生成的小测、练习和试卷，优先读取 `gradingSourcePackage` 中逐题题干、答案、分值、解析和评分依据；它比 PDF 文本、旧答案键和 OCR 印刷题干优先。学生卷和解析卷资产只用其来源 ID、版本和指纹关联。
 - 有答案键、生成记录或 `questionLayoutManifest` 时优先使用它们，不重新猜题。
 - 没有答案键时先生成参考答案，再标记置信度和复核风险。
-- MiniMax 视觉 OCR 多页识别最多 2 路并发，结果必须保持页序稳定；在 GPT-5.6 图片能力通过实测前，不迁移视觉识别。
+- 视觉 OCR 结果必须保持页序稳定；候选适配器没有通过真实图片评估前，不迁移默认识别链路。
 - 单一明确答案的选择、短填空和数值题优先在服务层保守比较；多解、开放题、过程题、阅读简答、英语表达和作文必须交给 GPT-5.6。
 - 混合题只把未解决题目、对应作答和参考答案发送给 GPT-5.6；总分必须由逐题得分汇总，模型顶层分数不得覆盖。
 - 低置信、漏页、题目缺失、学生作答缺失、图片质量差、参考答案不可靠或模型分歧时，不出最终分、不入档、不发布。
 - 教师确认后才写入学生档案、错题记录和薄弱点分析。
 - 默认主链路执行 OCR/视觉识别、答案键优先、客观题本地比较、GPT-5.6 主观题批改、低置信标记和教师逐题复核。
-- 正常批改先完成一次 Terra 主批改/风险复判；只有已分类为可恢复 availability 或证据充分的 quality 故障时，才允许对最小失败题追加一次 Sol。这里的“一次风险复判”不包含条件式 Sol 升级，也不允许 Sol 后再串接第三个文本模型。
-- `gpt-5.6-terra` 的外部材料参考答案生成、主批改和高风险复判统一使用 `high`。configuration 故障不能升级；OCR、题干、学生作答或参考证据不足属于 evidence 故障，直接进入教师复核。
-- 每个失败题最多一次 Sol，局部参考答案或批改独立预算为 180 秒 / 12000 tokens。Sol 仍失败、结果冲突或质量门禁不通过时，只保留待复核结果。
+- 失败先分类，configuration 故障不追加调用；OCR、题干、学生作答或参考证据不足属于 evidence 故障，直接进入教师复核。额外调用次数和预算由代码策略统一约束，不能在服务层与模型层各叠加一套重试。
 - `usedModelEscalation`、模型名、档位、触发原因和预算只属于内部运行元数据，不得展示给学生、家长、课堂平板或公共屏。Sol availability 和合成质量样本只证明链路可用，不能证明生产批改正确率；正确率必须使用教师确认的 gold 数据评估。
 - 采集真实批改质量样本时先运行 `cmd /c npm.cmd run collect:grading:gold` 做只读 dry-run；只有确认候选范围后，才用 `--write tmp/quality/grading-gold-cases.json` 写出脱敏样本。把待评估模型的 `actual` 结果合入评估副本后，再运行 `cmd /c npm.cmd run check:grading:quality -- tmp/quality/grading-gold-cases.json`。对话中已由教师确认并归档的生成批改，按 `gradingSourcePackage`、逐题确认和归档状态纳入；外部图片批改还必须有 OCR、答案来源和图片质量证据。
 - 真实回放使用 `cmd /c npm.cmd run replay:grading:gold -- --gold <gold.json> --output <evaluation.json>`；评估入口只使用服务层结构化结果并强制 `persist:false`，需要受控模型探针时显式增加 `--model <model>`，需要缩短诊断预算时增加 `--timeout-ms <milliseconds>`。回放文件可直接交给 `cmd /c npm.cmd run check:grading:quality -- <evaluation.json>`，不得把模型原始输出写入金标或正式资产。
@@ -59,7 +59,7 @@ OCR 使用 MiniMax 视觉能力，主观批改和参考答案使用 Terra `high`
 
 - 使用 `assignmentId`、`gradingSourcePackage`、题目布局清单和导出资产来源版本；历史生成记录没有答案包时，才兼容使用题目、答案键和 `questionLayoutManifest`。
 - 只识别学生作答区域，按题号对齐。
-- 这是最高准确率路径。
+- 这条路径可追溯答案与来源版本，实际准确率仍需教师确认样本验证。
 
 外部材料：
 

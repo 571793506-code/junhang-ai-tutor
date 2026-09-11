@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseAllDocuments } from "yaml";
+import { loadTeachingRulePack, TEACHING_RULE_PATHS } from "../packages/ai/src/teaching-rules.js";
 
 export const REQUIRED_SKILL_ROUTES = {
   "ai-qa": "skills/ai-qa/SKILLS.md",
@@ -604,7 +605,7 @@ function validateNpmCommands({
   }
 }
 
-export function validateSkillsWorkspace(root, options = {}) {
+export async function validateSkillsWorkspace(root, options = {}) {
   const workspaceRoot = path.resolve(root);
   const failures = [];
   const containmentFailureKeys = new Set();
@@ -794,6 +795,30 @@ export function validateSkillsWorkspace(root, options = {}) {
   }
   const moduleContracts = validateModulePlaybookContracts({ rootSkills, playbooks: modulePlaybooks });
   failures.push(...moduleContracts.failures);
+
+  for (const [moduleId, rulePath] of Object.entries(TEACHING_RULE_PATHS)) {
+    const playbook = modulePlaybooks[moduleId] || "";
+    if (!hasExactPathToken(playbook, "packages/ai/src/model-policy.js")) {
+      addFailure("missing-teaching-policy-reference", { path: MODULE_PLAYBOOK_REQUIREMENTS[moduleId].path });
+    }
+    if (/\d+\s*(?:tokens\b|毫秒|秒|ms\b)|最多\s*\d+\s*路并发/i.test(playbook)) {
+      addFailure("duplicated-teaching-call-budget", { path: MODULE_PLAYBOOK_REQUIREMENTS[moduleId].path });
+    }
+    for (const [referencePath, content] of [
+      ["SKILLS.md", rootSkills],
+      [MODULE_PLAYBOOK_REQUIREMENTS[moduleId].path, modulePlaybooks[moduleId]],
+      [`.agents/skills/${moduleId}/SKILL.md`, readTextFile(toSystemPath(workspaceRoot, `.agents/skills/${moduleId}/SKILL.md`)).content]
+    ]) {
+      if (!content || !hasExactPathToken(content, rulePath)) {
+        addFailure("missing-teaching-rules-reference", { path: referencePath, route: rulePath });
+      }
+    }
+    try {
+      await loadTeachingRulePack(moduleId, { root: workspaceRoot });
+    } catch {
+      addFailure("invalid-teaching-rules", { path: rulePath, message: "Shared teaching rules must be valid and nonempty." });
+    }
+  }
 
   return { ok: failures.length === 0, checkedSkills, failures };
 }

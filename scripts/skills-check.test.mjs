@@ -36,6 +36,7 @@ description: Use when changing ${name} behavior in Junhang AI Tutor.
 # ${name}
 
 AGENTS.md project rules take precedence.
+${["generation", "grading"].includes(name) ? `Read skills/${name}/references/runtime-rules.md.` : ""}
 Before editing, read the \`${route}\` Playbook.
 For cross-module changes, read every affected module Playbook.
 Minimum verification: \`${command}\`.
@@ -59,7 +60,7 @@ function modulePlaybook(name) {
     "teaching-materials": ".edupdf allowedForGeneration contentContext check:content-context",
     "student-profile": "profileEvidencePack blockedEvidence publishedView teacher_confirmation"
   }[name];
-  return `# ${name} Playbook\n${MODULE_PLAYBOOK_SECTIONS.map((section) => `${section}\n${tokens}\n`).join("\n")}`;
+  return `# ${name} Playbook\n${["generation", "grading"].includes(name) ? `skills/${name}/references/runtime-rules.md\n` : ""}${MODULE_PLAYBOOK_SECTIONS.map((section) => `${section}\n${tokens}\n`).join("\n")}`;
 }
 
 async function createFixture() {
@@ -82,6 +83,8 @@ async function createFixture() {
     "SKILLS.md",
     `${Object.values(EXPECTED_ROUTES).map((route) => `- \`${route}\``).join("\n")}\n
 生成小测/练习/试卷 -> teaching-materials -> prompt-context-engineering -> generation -> gradingSourcePackage -> teacher review
+skills/generation/references/runtime-rules.md
+skills/grading/references/runtime-rules.md
 已生成材料批改 -> grading -> gradingSourcePackage/questionLayoutManifest -> teacher question review -> teacher confirmation
 外部材料批改 -> grading -> reference answer registration -> OCR/question review -> teacher confirmation
 资料上传/登记 -> teaching-materials -> conversion/index -> source review -> generation contentContext
@@ -90,10 +93,13 @@ async function createFixture() {
   );
 
   for (const [name, route] of Object.entries(EXPECTED_ROUTES)) {
-    await write(root, route, MODULE_PLAYBOOK_SECTIONS.includes("## 何时加载") && ["generation", "grading", "teaching-materials", "student-profile"].includes(name) ? modulePlaybook(name) : `# ${name} Playbook\n`);
+    await write(root, route, MODULE_PLAYBOOK_SECTIONS.includes("## 何时加载") && ["generation", "grading", "teaching-materials", "student-profile"].includes(name) ? modulePlaybook(name) + "\npackages/ai/src/model-policy.js\n" : `# ${name} Playbook\n`);
     await write(root, `.agents/skills/${name}/SKILL.md`, wrapper(name, route));
   }
 
+  for (const module of ["generation", "grading"]) {
+    await write(root, `skills/${module}/references/runtime-rules.md`, `# ${module}-v1\nTeaching rules.\n`);
+  }
   return root;
 }
 
@@ -106,9 +112,34 @@ async function withFixture(run) {
   }
 }
 
+test("rejects missing or empty shared teaching rules and missing playbook references", async () => {
+  await withFixture(async (root) => {
+    await unlink(path.join(root, "skills/generation/references/runtime-rules.md"));
+    const playbook = await readFile(path.join(root, "skills/generation/SKILLS.md"), "utf8");
+    await write(root, "skills/generation/SKILLS.md", playbook.replace("skills/generation/references/runtime-rules.md", ""));
+    const result = await validateSkillsWorkspace(root);
+    assert.ok(failureCodes(result).includes("invalid-teaching-rules"));
+    assert.ok(failureCodes(result).includes("missing-teaching-rules-reference"));
+    await write(root, "skills/generation/references/runtime-rules.md", "# generation-v1\n");
+    const empty = await validateSkillsWorkspace(root);
+    assert.ok(failureCodes(empty).includes("invalid-teaching-rules"));
+  });
+});
+
 function failureCodes(result) {
   return result.failures.map((failure) => failure.code);
 }
+
+test("teaching playbooks must reference model policy without duplicating numeric call budgets", async () => {
+  await withFixture(async (root) => {
+    const file = "skills/grading/SKILLS.md";
+    const content = await readFile(path.join(root, file), "utf8");
+    await write(root, file, content.replace("packages/ai/src/model-policy.js", "旧策略") + "\n调用预算为 180 秒 / 12000 tokens。\n");
+    const result = await validateSkillsWorkspace(root);
+    assert.ok(failureCodes(result).includes("missing-teaching-policy-reference"));
+    assert.ok(failureCodes(result).includes("duplicated-teaching-call-budget"));
+  });
+});
 
 test("exports the fixed nine required skill routes", () => {
   assert.deepEqual(REQUIRED_SKILL_ROUTES, EXPECTED_ROUTES);

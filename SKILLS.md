@@ -28,6 +28,8 @@
 
 ## 模块意图路由
 
+生成与批改还必须分别读取 `skills/generation/references/runtime-rules.md` 和 `skills/grading/references/runtime-rules.md`。这两个文件是共享教学细则；模块 Playbook 负责操作顺序，`packages/ai/src/teaching-rules.js` 负责服务端白名单加载和内容 hash。规则修改须同时验证加载测试与 `check:skills`，不能只添加 Skill 名称标签。模型策略与调用预算以 `packages/ai/src/model-policy.js` 为准。
+
 路由按“意图 -> 首个 Skill -> 依赖 Skill -> 执行顺序 -> 验证命令”理解；跨模块任务同时读取对应模块 Playbook 和 `docs/41-prompt-context-engineering-playbook.md`。
 
 - 生成小测/练习/试卷：`teaching-materials`（只有声明教材或资料时加载） -> `prompt-context-engineering` -> `generation` -> 保留 `gradingSourcePackage` -> 教师复核；验证 `check:generation:blueprint`、`check:content-context`。

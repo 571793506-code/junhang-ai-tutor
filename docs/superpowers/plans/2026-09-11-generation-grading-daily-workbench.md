@@ -10,7 +10,7 @@
 
 **Spec:** [生成与批改日常工作台设计](../specs/2026-09-11-generation-grading-daily-workbench-design.md)
 
-**状态：** 计划已编写；以下任务尚未实施。旧 9 月 7 日计划仅作为已建能力背景，不能重复执行其全部任务，也不能由复选框状态判断代码完成度。
+**状态：** Task 1 已实现共享规则与 Skills 校验（46 项测试通过），继续 Task 2 模型策略与有界执行器；实际调用装配和入口迁移仍属于 Task 3。旧 9 月 7 日计划仅作为已建能力背景，不能重复执行其全部任务，也不能由复选框状态判断代码完成度。
 
 ## Global Constraints
 
@@ -35,7 +35,7 @@
 | 三：两个 Web 工作台 | 7–8 | 对话输入与结构化编辑、原图逐题复核 | 登录后真实浏览器操作通过；无需全量重生成完成局部修改 |
 | 四：真实教学验收 | 9 | 同样本对照及可追溯结论 | 教师评估内容与操作负担；报告不把技术通过称为生产通过 |
 
-当前任务只完成设计与计划文档。进入工程实施后按阶段推进；每阶段更新完成项、变更路径、验证结果和精确下一动作，不能一次勾选所有阶段。
+工程实施已开始，按阶段更新完成项、变更路径、验证结果和精确下一动作，不能一次勾选所有阶段。
 
 ## 固定接口与文件职责
 
@@ -81,8 +81,8 @@ type WorkflowView = {
 
 **Interfaces:** 产出 RulePack，供 Task 3 使用；规则以 UTF-8 固定白名单路径读取，SHA-256 标识实际内容。
 
-- [ ] 写规则加载失败测试：未知 module、路径穿越、缺文件、空正文不能返回旧规则。
-- [ ] 写临时测试目录用例证明“修改正文会改变实际加载内容与 hash”，不是仅测试文档存在：
+- [x] 写规则加载失败测试：未知 module、路径穿越、缺文件、空正文不能返回旧规则。
+- [x] 写临时测试目录用例证明“修改正文会改变实际加载内容与 hash”，不是仅测试文档存在：
 
 ```js
 const first = await loadTeachingRulePack('generation', { root: fixtureRoot });
@@ -93,12 +93,14 @@ assert.match(next.text, /专项练习/);
 await assert.rejects(loadTeachingRulePack('../grading', { root: fixtureRoot }));
 ```
 
-- [ ] 运行 `node --test packages/ai/src/teaching-rules.test.mjs`，确认先因入口缺失或行为缺失失败。
-- [ ] 实现仅 generation/grading 的路径映射与 hash；明确重载策略，不让永久缓存导致修改文档后运行时不更新。
-- [ ] 把教学细则写入两个 references：专项/综合/多日/讲解分流、合理异解、证据不足、逐题得分和确认边界；把调用流程留在 Playbook，删除重复矛盾说明。
-- [ ] 更新 Skills 校验：引用目标必须存在；规则不能为空；模型调用预算只引用权威策略，不在多个 Playbook 重复硬编码。
-- [ ] 验证 `node --test packages/ai/src/teaching-rules.test.mjs scripts/skills-check.test.mjs`、`cmd /c npm.cmd run check:skills`、`cmd /c npm.cmd run check:encoding`。
-- [ ] 显式 stage 本任务文件，提交 `feat: share generation and grading teaching rules`。
+- [x] 运行 `node --test packages/ai/src/teaching-rules.test.mjs`，确认先因入口缺失或行为缺失失败。
+- [x] 实现仅 generation/grading 的路径映射与 hash；明确重载策略，不让永久缓存导致修改文档后运行时不更新。
+- [x] 把教学细则写入两个 references：专项/综合/多日/讲解分流、合理异解、证据不足、逐题得分和确认边界；把调用流程留在 Playbook，删除重复矛盾说明。
+- [x] 更新 Skills 校验：引用目标必须存在；规则不能为空；模型调用预算只引用权威策略，不在多个 Playbook 重复硬编码。
+- [x] 验证 `node --test packages/ai/src/teaching-rules.test.mjs scripts/skills-check.test.mjs`、`cmd /c npm.cmd run check:skills`、`cmd /c npm.cmd run check:encoding`。
+- [x] 显式 stage 本任务文件，提交 `feat: share generation and grading teaching rules`。
+
+Task 1 验证记录（2026-09-11）：新增用例先因缺少入口和校验规则失败，补齐实现后 46/46 通过；check:skills 通过全部 9 个路由，check:encoding 无问题。校验 CLI 改为等待异步规则加载。尚未接入旧模型请求，不以此宣称 Web/对话内容一致或新模型上线。
 
 ### Task 2：任务独立模型策略与有界调用
 
