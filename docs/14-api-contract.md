@@ -1,5 +1,17 @@
 # 三端共享 API 契约
 
+## 2026-09-11 生成用途契约
+
+`POST /api/assessments/draft` 和 `POST /api/assessments/generation-jobs` 接收以下业务字段，现有教师权限、学生可用性、教材审批与正式导出门禁继续适用：
+
+- `purpose`：省略为 `comprehensive`，按现有小测/练习/试卷蓝图生成；`focused` 为专项；`multi_day` 为多日计划；`explanation` 为结构化讲解。
+- `requestedItemTypes`：专项必填，允许 `fill/choice/judgment/calculation/solution/operation/reading/writing/listening`；`requestedItemCount` 为 1–100 的整数，至少覆盖指定题型数。
+- `dayPlan`：多日用途必填，1–30 项。每项包含 `dayId`、`goal`、`requestedItemCount`、`requestedItemTypes`；省略 dayId 时按顺序生成 `day-N`，题型可继承外层。dayId 必须唯一，目标不得为空。
+
+用途、题型、数量或 dayId 无效时，在入队和调用模型前返回 HTTP 422 / `GENERATION_PURPOSE_INVALID`。模型、规则、prompt 与内部预算不属于客户端契约。
+
+讲解草稿保存在 `parsedDraft.explanation`，包含 `concept`、`steps`、`workedExamples`（prompt、answer、analysisSteps）和 `commonMistakes`。此用途不创建可批改答案包，不自动套用试卷 PDF；异步任务的 `draftAsset`、`layoutValidation` 可以为 null。工作台用途选择和讲解复核界面属于后续 UI 任务。所有结果仍是教师待复核草稿。
+
 本阶段新增 `apps/api`，默认本地地址：
 
 ```bash

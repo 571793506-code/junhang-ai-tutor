@@ -1,3 +1,5 @@
+import { normalizeTeachingPurpose } from "@junhang/core";
+
 const plans = {
   数学: {
     quiz: [
@@ -92,6 +94,21 @@ function allocateItemCounts(partitions, requestedItemCount) {
 }
 
 export function buildAssessmentPartitions(input = {}) {
+  const { purpose, requestedItemTypes, dayPlan } = normalizeTeachingPurpose(input);
+  if (purpose === "explanation") return [{ id: "explanation", title: "知识讲解", itemTypes: [], purpose }];
+  if (purpose === "multi_day") return dayPlan.map((day, index) => ({
+    id: day.dayId, dayId: day.dayId, title: `第 ${index + 1} 天：${day.goal}`, goal: day.goal,
+    itemTypes: day.requestedItemTypes, targetItemCount: day.requestedItemCount, purpose,
+    subject: input.subject, kind: input.kind || "练习", orderIndex: index + 1
+  }));
+  if (purpose === "focused") {
+    const total = input.requestedItemCount == null ? requestedItemTypes.length * 4 : Number(input.requestedItemCount);
+    return requestedItemTypes.map((type, index) => ({
+      id: type, title: `专项 ${index + 1}`, itemTypes: [type], purpose,
+      targetItemCount: Math.floor(total / requestedItemTypes.length) + (index < total % requestedItemTypes.length ? 1 : 0),
+      subject: input.subject, kind: input.kind || "练习", orderIndex: index + 1
+    }));
+  }
   const subject = plans[input.subject] ? input.subject : "数学";
   const kind = input.kind === "试卷" ? "formal" : input.kind === "小测" ? "quiz" : "practice";
   const partitions = [...plans[subject][kind]];

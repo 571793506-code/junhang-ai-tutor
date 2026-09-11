@@ -8,6 +8,7 @@ function text(value) {
 }
 
 function numberOrNull(value) {
+  if (value == null || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -38,6 +39,8 @@ function normalizeQuestion(question = {}, index = 0, pageNumber = 1) {
     id: text(question.id) || `question-${pageNumber}-${index + 1}`,
     questionNo: text(question.questionNo || question.no) || String(index + 1),
     questionType: text(question.questionType || question.itemType) || "unknown",
+    ...(text(question.sourceImageRef) ? { sourceImageRef: text(question.sourceImageRef) } : {}),
+    ...(text(question.cropRef) ? { cropRef: text(question.cropRef) } : {}),
     bbox: {
       page: Number(question.bbox?.page || pageNumber),
       x: Number(question.bbox?.x || 0),

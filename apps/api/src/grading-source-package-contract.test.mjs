@@ -19,10 +19,12 @@ test("linked grading prefers the persisted grading source package over mutable a
 
   assert.match(source, /GRADING_SOURCE_PACKAGE_SCHEMA_VERSION/);
   assert.match(gradeInput, /gradingSourcePackageForAssignment\(assignment\)/);
-  assert.match(gradeInput, /gradingSourcePackage\.questions\.map/);
+  assert.match(gradeInput, /const authoritativeSourcePackage = gradingSourcePackage \|\| importedSourcePackage/);
+  assert.match(gradeInput, /dialogueAnswerPackage && validateGradingSourcePackage\(dialogueAnswerPackage\)\.ok/);
+  assert.match(gradeInput, /authoritativeSourcePackage\.questions\.map/);
   assert.match(gradeInput, /answer:\s*question\.correctAnswer/);
   assert.match(gradeInput, /score:\s*question\.maxScore/);
-  assert.match(gradeInput, /gradingSource:\s*gradingSourceReference\(gradingSourcePackage\)/);
+  assert.match(gradeInput, /gradingSource:\s*gradingSourceReference\(authoritativeSourcePackage\)/);
 });
 
 test("student paper, analysis paper, and layout manifest retain the same source reference", () => {

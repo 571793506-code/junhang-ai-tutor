@@ -1,10 +1,13 @@
 import fs from "node:fs";
 import { mapWithConcurrency } from "./assessment-partitions.js";
+import { createTeachingOperationBudget, runTeachingPipelineUnit } from "./teaching-pipeline.js";
 import {
   buildAiStartupSnapshot,
+  callTeachingModel,
   callOpenAiCompatibleChat,
   extractChatText,
-  normalizeRuntimeConfig
+  normalizeRuntimeConfig,
+  runTeachingTask
 } from "./runtime.js";
 
 async function timedCall(run) {
@@ -190,7 +193,55 @@ async function callMiniMaxCodingPlanVlm({ baseUrl, apiKey, prompt, image }) {
   return body;
 }
 
-export async function recognizeImages(config, input = {}) {
+async function recognizeWithFlash(config, images, execution) {
+  const pool = createTeachingOperationBudget("recognize", config, execution);
+  const allowance = Math.floor(pool.remainingTokens / images.length);
+  const results = await mapWithConcurrency(images, 2, async (image, index) => {
+    const pageNumber = index + 1;
+    const dataUrl = imageToDataUrl(image);
+    const call = execution.call || ((route, messages, options) => callTeachingModel(config, route, messages, options));
+    const result = await runTeachingPipelineUnit(runTeachingTask, config, "recognize", { pageNumber }, {
+      ...execution,
+      evidenceSufficient: Boolean(dataUrl),
+      call: (route, messages, options) => call(route, messages.map((message) => message.role === "user" ? {
+        ...message, content: [{ type: "text", text: message.content }, { type: "image_url", image_url: { url: dataUrl } }]
+      } : message), options)
+    }, pool, allowance, (candidate) => {
+      return typeof candidate.printedText === "string" && typeof candidate.studentAnswerText === "string" &&
+        Array.isArray(candidate.questions) && candidate.questions.every((q) =>
+          q && typeof q.printedPrompt === "string" && typeof q.studentAnswer === "string" &&
+          typeof q.questionNo === "string" && q.questionNo.trim() &&
+          Number.isFinite(q.confidence) && q.confidence >= 0 && q.confidence <= 1)
+        ? [] : ["ocr_structure_invalid"];
+    }, "只做识别，不批改不给分。区分印刷题干和学生手写作答，空白或不可辨认作答保留空字符串。输出严格 JSON {text,printedText,studentAnswerText,confidence,questions:[{questionNo,printedPrompt,studentAnswer,observedWork,confidence,bbox:{page,x,y,w,h},warnings:string[]}]}。坐标为 0 到 1 的相对坐标。");
+    if (result.status !== "success") return { page: pageNumber, questions: [], failed: true };
+    const candidate = result.candidate;
+    return {
+      page: pageNumber, text: candidate.text || "", printedText: candidate.printedText,
+      studentAnswerText: candidate.studentAnswerText, confidence: candidate.confidence ?? null,
+      questions: candidate.questions.map((question, questionIndex) => {
+        const normalized = normalizeOcrQuestion(question, pageNumber, questionIndex);
+        return { ...normalized, page: pageNumber,
+          bbox: normalized.bbox ? { ...normalized.bbox, page: pageNumber } : null,
+          ...(image.sourceImageRef || image.id || image.fileName ? { sourceImageRef: String(image.sourceImageRef || image.id || image.fileName) } : {}),
+          ...(image.cropRef ? { cropRef: image.cropRef } : {})
+        };
+      })
+    };
+  });
+  const complete = results.every((page) => !page.failed);
+  return {
+    available: complete, status: complete ? "READY" : "FAILED", engine: "vision",
+    text: results.map((page) => page.text || "").filter(Boolean).join("\n\n"),
+    printedText: results.map((page) => page.printedText || "").filter(Boolean).join("\n\n"),
+    studentAnswerText: results.map((page) => page.studentAnswerText || "").filter(Boolean).join("\n\n"),
+    confidence: null, questions: results.flatMap((page) => page.questions),
+    reason: complete ? "识别完成，请教师核对题干和学生作答。" : "部分页面识别未完成，请教师核对或重新识别。",
+    raw: { pages: results }
+  };
+}
+
+export async function recognizeImages(config, input = {}, execution = {}) {
   const runtime = normalizeRuntimeConfig(config);
   const engine = String(input.engine || runtime.ocrEngine || "manual").toLowerCase();
   const images = normalizeOcrImages(input);
@@ -312,6 +363,7 @@ export async function recognizeImages(config, input = {}) {
         reason: "没有可识别的图片文件。"
       };
     }
+    if (runtime.ocrVisionProvider === "deepseek-flash") return recognizeWithFlash(config, images, execution);
     const vision = resolveVisionProvider(runtime);
     if (!vision.baseUrl || !vision.apiKey || !vision.model) {
       return {

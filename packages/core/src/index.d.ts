@@ -516,3 +516,8 @@ export declare function getModuleCapability(moduleId: ModuleCapabilityId): Modul
 export declare function validateModuleCapabilityRegistry(
   registry?: ModuleCapabilityDefinition[] | readonly ModuleCapabilityDefinition[]
 ): { ok: boolean; issues: string[] };
+export declare function normalizeTeachingPurpose(input?: Record<string, unknown>): {
+  purpose: "comprehensive" | "focused" | "multi_day" | "explanation";
+  requestedItemTypes: string[];
+  dayPlan: Array<{ dayId: string; goal: string; requestedItemTypes: string[]; requestedItemCount: number }>;
+};

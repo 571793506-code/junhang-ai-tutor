@@ -25,13 +25,13 @@ export const moduleCapabilityCatalog = Object.freeze([
       internalOnlyFields: ["raw", "prompt", "provider", "model", "modelRun", "reviewModelRunIds", "budget"]
     },
     modelPolicy: {
-      primaryTask: "assessment-draft",
-      primaryRoute: "gpt56-assessment",
-      supportRoutes: ["gpt56-sol-escalation", "local-structured-repair"],
-      defaultReasoning: { quiz: "medium", practice: "medium", formal: "high" },
+      primaryTask: "generation",
+      primaryRoute: "gpt-6-astra",
+      supportRoutes: ["gpt-5.6-sol-availability-replacement", "primary-quality-repair", "local-structured-validation"],
+      defaultReasoning: { quiz: "high", practice: "high", formal: "high" },
       escalation: {
-        allowedTriggerClasses: ["availability", "quality"],
-        blockedTriggerClasses: ["configuration", "evidence"],
+        allowedTriggerClasses: ["availability"],
+        blockedTriggerClasses: ["configuration", "evidence", "quality"],
         maxAttemptsPerUnit: 1
       }
     },
@@ -57,13 +57,13 @@ export const moduleCapabilityCatalog = Object.freeze([
       internalOnlyFields: ["raw", "prompt", "provider", "model", "modelRun", "attempts", "usedModelEscalation"]
     },
     modelPolicy: {
-      primaryTask: "submission-grading",
-      primaryRoute: "gpt56-grading",
-      supportRoutes: ["minimax-ocr", "local-objective-comparison", "gpt56-sol-escalation"],
-      defaultReasoning: { reference: "high", grading: "high", audit: "high" },
+      primaryTask: "grading",
+      primaryRoute: "gpt-6-astra",
+      supportRoutes: ["minimax-ocr", "deepseek-flash-ocr-opt-in", "local-objective-comparison", "gpt-5.6-sol-availability-replacement", "primary-quality-repair"],
+      defaultReasoning: { reference: "high", grading: "high" },
       escalation: {
-        allowedTriggerClasses: ["availability", "quality"],
-        blockedTriggerClasses: ["configuration", "evidence"],
+        allowedTriggerClasses: ["availability"],
+        blockedTriggerClasses: ["configuration", "evidence", "quality"],
         maxAttemptsPerUnit: 1
       }
     },

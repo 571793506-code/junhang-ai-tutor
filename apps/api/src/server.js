@@ -19,7 +19,8 @@ import {
   inspectEncodingPayload,
   matchesTextbookAssetSearch,
   mergeTextbookChapterDrafts,
-  normalizeGradeLevel
+  normalizeGradeLevel,
+  normalizeTeachingPurpose
 } from "@junhang/core";
 import {
   GRADING_SOURCE_PACKAGE_SCHEMA_VERSION,
@@ -3763,7 +3764,7 @@ function allowlistedAssessmentInput(body = {}) {
   const input = {};
   for (const key of [
     "targetScope", "studentId", "targetGrade", "grade", "subject", "kind", "difficulty", "requirement",
-    "specialRequirements", "requestedItemCount", "contentScope", "knowledgePoints", "textbookAssetId",
+    "specialRequirements", "requestedItemCount", "purpose", "requestedItemTypes", "dayPlan", "contentScope", "knowledgePoints", "textbookAssetId",
     "textbookTitle", "textbookEdition", "textbookEditionDisplay", "textbookSeries", "textbookVolume",
     "textbookRegion", "textbookChapterId", "textbookChapterTitle", "generationBasis", "recoveryReason"
   ]) {
@@ -3829,6 +3830,12 @@ function assessmentContentContextFailure(contentContext, contentContextValidatio
 
 async function prepareAssessmentDraftInput(req) {
   const input = assessmentDraftInputFromRequest(req);
+  try {
+    Object.assign(input, normalizeTeachingPurpose(input));
+  } catch (error) {
+    if (error.code !== "GENERATION_PURPOSE_INVALID") throw error;
+    return { ok: false, failure: { error: error.code, message: "请检查生成用途、专项题型、题量和每日目标。" } };
+  }
   const requestedGradeText = input.grade || input.targetGrade;
   const requestedGrade = normalizeGradeLevel(requestedGradeText);
   if (requestedGradeText && (!requestedGrade || (requestedGrade.stage === "middle" && requestedGrade.level !== 7))) {
@@ -3875,7 +3882,7 @@ async function prepareAssessmentDraftInput(req) {
 function assessmentGenerationJobRequest(input = {}) {
   const request = {};
   for (const key of [
-    "targetScope", "studentId", "targetGrade", "subject", "kind", "difficulty", "requirement", "requestedItemCount", "contentScope",
+    "targetScope", "studentId", "targetGrade", "subject", "kind", "difficulty", "requirement", "requestedItemCount", "purpose", "requestedItemTypes", "dayPlan", "contentScope",
     "textbookAssetId", "textbookTitle", "textbookEdition", "textbookSeries", "textbookVolume", "textbookRegion",
     "textbookChapterId", "textbookChapterTitle", "knowledgePoints", "generationBasis", "recoveryReason"
   ]) {
@@ -4057,14 +4064,16 @@ app.post("/api/assessments/generation-jobs", requireDatabase, requireSession(con
         if (!assignmentId) throw new Error("ASSESSMENT_DRAFT_PERSISTENCE_REQUIRED");
         throwIfAssessmentGenerationCancelled(signal);
 
-        setStage("exporting_draft", "内容已生成，正在生成审查 PDF。");
+        setStage("exporting_draft", input.purpose === "explanation" ? "正在保存讲解草稿。" : "内容已生成，正在生成审查 PDF。");
         const assignment = await prisma.assignment.findUnique({
           where: { id: assignmentId },
           include: { subject: true, items: { orderBy: { orderIndex: "asc" } } }
         });
         if (!assignment) throw new Error("ASSIGNMENT_NOT_FOUND");
-        const exported = await exportAssessmentDraftForReview(req, assignment, { signal });
-        draftAssetId = exported.asset.id;
+        const exported = input.purpose === "explanation"
+          ? { asset: null, layoutValidation: null }
+          : await exportAssessmentDraftForReview(req, assignment, { signal });
+        draftAssetId = exported.asset?.id || null;
         throwIfAssessmentGenerationCancelled(signal);
         await auditEvent(req, {
           studentId: input.studentId || null,

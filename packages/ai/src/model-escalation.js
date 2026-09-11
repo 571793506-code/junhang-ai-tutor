@@ -100,7 +100,8 @@ export function validateAssessmentPartition(parsed = {}, partition = {}) {
     const subject = String(partition?.subject || "");
     const kind = String(partition?.kind || "");
     const groups = [...passageGroups.values()];
-    const minimumGroups = subject === "英语" && kind === "试卷" ? 2 : 1;
+    const comprehensive = !partition.purpose || partition.purpose === "comprehensive";
+    const minimumGroups = comprehensive && subject === "英语" && kind === "试卷" ? 2 : 1;
     if (!groups.length || groups.some((group) => !group.passageText)) codes.push("reading_passage_missing");
     if (groups.some((group) => group.passageTexts.size > 1)) codes.push("reading_passage_inconsistent");
     if (groups.length < minimumGroups) codes.push("reading_passage_groups_insufficient");
@@ -119,7 +120,7 @@ export function validateAssessmentPartition(parsed = {}, partition = {}) {
     const minimumContextualQuestions = subject === "英语"
       ? kind === "试卷" ? 6 : kind === "练习" ? 3 : 4
       : 4;
-    if (contextualQuestionCount < minimumContextualQuestions) codes.push("reading_context_questions_insufficient");
+    if (contextualQuestionCount < Math.min(minimumContextualQuestions, partition.targetItemCount || minimumContextualQuestions)) codes.push("reading_context_questions_insufficient");
   }
 
   const uniqueCodes = [...new Set(codes)];

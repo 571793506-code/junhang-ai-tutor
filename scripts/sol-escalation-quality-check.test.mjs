@@ -104,6 +104,7 @@ test("Sol quality check injects forced Sol only through the internal draft runne
   assert.equal(capturedInput.role, undefined);
   assert.equal(capturedConfig.GPT56_API_KEY, "synthetic-key");
   assert.equal(capturedConfig.GPT56_REASONING_EFFORT_ENABLED, "true");
+  assert.equal(capturedConfig.TEACHING_PRIMARY_MODEL, "gpt-5.6-sol");
   assert.deepEqual(capturedExecution, {
     role: "sol-quality-check",
     reasoningEffort: "high",

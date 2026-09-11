@@ -1,4 +1,4 @@
-import { validateGradingSourcePackage } from "@junhang/core";
+import { validateGradingSourcePackage, normalizeTeachingPurpose } from "@junhang/core";
 
 const MAX_SIGNALS = 40;
 const MAX_KNOWLEDGE_POINTS = 30;
@@ -92,6 +92,7 @@ export function buildGenerationContext(input = {}, options = {}) {
   const knowledgePoints = list(source.knowledgePoints, MAX_KNOWLEDGE_POINTS);
   const generationContext = {
     request: {
+      ...normalizeTeachingPurpose(source),
       requestId: requestId || null,
       requirement: text(source.requirement || source.specialRequirements, MAX_TEXT_PREVIEW),
       kind: kind || null,

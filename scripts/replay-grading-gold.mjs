@@ -185,7 +185,8 @@ export async function replayGradingGoldCases(cases = [], config = process.env, o
     try {
       const result = await gradeSubmissionService(config, buildReplayInput(sample.input), {
         persist: false,
-        runDeepGradingAudit: options.deepAudit === true
+        runDeepGradingAudit: options.deepAudit === true,
+        teachingExecution: { ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}), ...(options.model ? { disableSolEscalation: true } : {}) }
       });
       actualCases.push({
         ...sample,
@@ -226,7 +227,7 @@ async function runCli() {
   const cases = limit ? allCases.slice(0, limit) : allCases;
   const config = {
     ...process.env,
-    ...(model ? { GPT56_MODEL: model } : {}),
+    ...(model ? { GPT56_MODEL: model, TEACHING_PRIMARY_MODEL: model } : {}),
     ...(model ? { GPT56_SOL_FALLBACK_ENABLED: "false" } : {}),
     ...(timeoutMs ? {
       GPT56_GRADING_TIMEOUT_MS: String(timeoutMs),
@@ -238,6 +239,7 @@ async function runCli() {
   const evaluation = await replayGradingGoldCases(cases, config, {
     deepAudit,
     model,
+    timeoutMs,
     maxQuestions,
     progress: (event) => process.stdout.write(`${JSON.stringify(event)}\n`)
   });

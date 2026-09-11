@@ -4,7 +4,8 @@ import { inspectEncodingPayload } from "@junhang/core";
 const INTERNAL_KEYS = new Set([
   "__proto__", "constructor", "prototype", "prompt", "systemPrompt", "messages",
   "provider", "providerId", "model", "modelRun", "raw", "debug", "attempts", "rulePack",
-  "rulePath", "root", "budget", "generationBudget", "reasoningEffort", "apiKey",
+  "rulePath", "root", "budget", "generationBudget", "reasoningEffort", "apiKey", "outputContract",
+  "assessmentTotalTimeoutMs", "assessmentMaxTokens", "generationTimeoutMs", "generationMaxTokens",
   "confirmedBy", "confirmedAt", "archiveEligible", "finalScore"
 ]);
 
@@ -53,7 +54,7 @@ async function boundedCall(call, route, messages, { timeoutMs, signal, maxTokens
 // Unknown usage consumes the reservation; no estimated currency cost is invented.
 export async function runTeachingUnit(
   { task, input, rulePack, budget, signal, evidenceSufficient = true },
-  { call, repairIssues, config = {}, now = Date.now } = {}
+  { call, repairIssues, outputContract = "", config = {}, now = Date.now } = {}
 ) {
   const attempts = [];
   const internal = { attempts, rules: rulePack ? { module: rulePack.module, version: rulePack.version, hash: rulePack.hash } : null };
@@ -80,7 +81,7 @@ export async function runTeachingUnit(
     const maxTokens = Math.max(1, Math.min(policy.budget.maxTokens, Math.floor(budget.remainingTokens / slots)));
     budget.remainingTokens -= maxTokens; // Reserve before awaiting, including concurrent units.
     const messages = [
-      { role: "system", content: `${rulePack.text}\nRule version: ${rulePack.version}; SHA-256: ${rulePack.hash}\nTask: ${task}. Return a valid JSON object only.${issues.length ? `\nRepair these validation issues: ${JSON.stringify(issues)}` : ""}` },
+      { role: "system", content: `${rulePack.text}\nRule version: ${rulePack.version}; SHA-256: ${rulePack.hash}\nTask: ${task}. Return a valid JSON object only.\n${outputContract}${issues.length ? `\nRepair these validation issues: ${JSON.stringify(issues)}` : ""}` },
       { role: "user", content: JSON.stringify(cleanInput) }
     ];
     const attempt = { role: reason, providerId: route.providerId, model: route.model, reasoningEffort: route.reasoningEffort, timeoutMs, maxTokens, status: "ERROR", usage: null, cost: "unknown" };

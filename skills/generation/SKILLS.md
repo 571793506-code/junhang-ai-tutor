@@ -20,7 +20,7 @@
 
 ## 输入契约
 
-Web 只提交学科、年级、`kind`、目标范围、难度、题量、教师要求、知识点和教材标识。服务端组装 `generationContext`、`studentSignals`、`contentContext` 和生成预算；客户端不得提交 prompt、provider、model、raw 或内部预算。
+Web 只提交学科、年级、`kind`、`purpose`、`requestedItemTypes`、`dayPlan`、目标范围、难度、题量、教师要求、知识点和教材标识。服务端组装 `generationContext`、`studentSignals`、`contentContext` 和生成预算；客户端不得提交 prompt、provider、model、raw 或内部预算。
 
 ## 输出契约
 
@@ -28,7 +28,7 @@ Web 只提交学科、年级、`kind`、目标范围、难度、题量、教师�
 
 ## 执行顺序
 
-先按 `kind` 选择小测、练习或试卷蓝图，再组装上下文并分区生成；随后合并、结构修复、确定性审查、答案包校验、布局检查和教师复核。失败只重试失败分区，不能用页面状态重建第二套 prompt。
+先用 `normalizeTeachingPurpose` 校验用途。默认 comprehensive 按 `kind` 选择蓝图；focused 只包含指定题型；multi_day 保留每日 dayId、目标和题量；explanation 产出概念、步骤、例题和易错点，不生成试卷答案包或自动审查 PDF。随后通过 `draftAssessmentService -> draftAssessment -> runAssessmentPipeline -> runTeachingTask` 装配共享规则、上下文和校验器。额外调用仅发生在执行器中，不能用页面状态重建第二套 prompt。
 
 ## 模型与复核
 
@@ -50,7 +50,7 @@ Web 只提交学科、年级、`kind`、目标范围、难度、题量、教师�
 - 部分分区失败或动态兜底必须写入 `usedDynamicFallback=true`，本地审查状态强制为 `needs_teacher_review`。预算不足不能宣称生成成功。
 - `check:content-context` 低预算 E2E 只作为 `link-guard` 链路守卫，证明资料上下文、预算退出、动态兜底、教师复核和导出链路能收口；不得用它判断题目原创性、教师要求贴合度、个性化程度、解析质量或 PDF 视觉质量。
 - `check:generation:quality:quiz` 和 `check:generation:quality:formal` 才用于真实模型生成内容质量样本；质量样本必须 `modelAvailable=true`、`usedDynamicFallback=false`，否则不能通过。
-- `check:generation:quality:sol` 强制以 Sol `high` 作为主调用运行同一组六个项目质量样本，并禁止内部再次升级；它证明 Sol 可用且能通过当前合成生成门禁，不代表真实批改正确率，批改准确率只能由教师确认的 gold 数据评估。
+- Sol 只作为 Astra 可用性故障的单次替补；质量错误由 Astra 受限修复，不再追加服务层深度审查。
 - 生成质量样本必须同时带有预期的 `generationProfile`；缺少 profile、动态兜底或模型不可用时，质量检查失败。生成质量检查只评估结构化内容，不替代 `check:generation:layout` 的 PDF 版式检查，也不替代 `check:content-context` 的资料链路守卫。
 - 批改准确率使用 `cmd /c npm.cmd run check:grading:quality -- <gold-cases.json>` 评估；`fixtures/quality/grading-gold-cases.example.json` 只用于验证契约和指标路径，不能作为生产准确率证据。
 
@@ -64,7 +64,7 @@ Web 只提交学科、年级、`kind`、目标范围、难度、题量、教师�
 
 ## 类型规则
 
-小测、练习、试卷与专项/多日/讲解的教学细则统一维护在 `skills/generation/references/runtime-rules.md`。服务端 purpose 分流尚未接入前，不能仅凭规则文档宣称新形态已可用；接入时同步验证蓝图和实际模型请求。
+小测、练习、试卷与专项/多日/讲解的教学细则统一维护在 `skills/generation/references/runtime-rules.md`。服务端已接入 purpose 分流；Web 用途选择与讲解复核界面仍属于后续工作台任务，不能把服务层单测当作 UI 或真实内容质量验收。
 
 ## 当前项目可参考位置
 
@@ -94,7 +94,7 @@ Web 只提交学科、年级、`kind`、目标范围、难度、题量、教师�
 
 - 不继续扩大当前复杂 PDF 自动排版主流程。
 - 不把多模型自动审查堆叠作为默认主链路。
-- 不让 `POST /api/assessments/draft` 默认等待多模型质量审查；深度审查只在 `runModelReview=true` 或服务端配置开启时执行。
+- 不让 `POST /api/assessments/draft` 追加服务层多模型质量审查；模型层最多执行一次受限修复。
 - 不把模型输出直接导出给学生。
 - 不用大量空白凑页数。
 - 不仅修英语小测，三科和小测/练习/试卷模板都必须遵守类型规则。

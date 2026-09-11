@@ -49,6 +49,7 @@ export type TeachingCall = (
   options: { timeoutMs: number; maxTokens: number; signal?: AbortSignal }
 ) => Promise<{ text: string; usage?: Record<string, number> | null }>;
 export interface TeachingExecution {
+  outputContract?: string;
   ruleRoot?: string;
   budget?: TeachingBudget;
   signal?: AbortSignal;
@@ -69,7 +70,7 @@ export declare function projectTeachingResult(result: TeachingResult, role: stri
 export declare function runTeachingUnit(args: {
   task: TeachingTask; input: Record<string, unknown>; rulePack: TeachingRulePack; budget: TeachingBudget;
   signal?: AbortSignal; evidenceSufficient?: boolean;
-}, dependencies: Pick<TeachingExecution, "call" | "repairIssues" | "now"> & { config?: RuntimeConfigLike }): Promise<TeachingResult>;
+}, dependencies: Pick<TeachingExecution, "call" | "repairIssues" | "now" | "outputContract"> & { config?: RuntimeConfigLike }): Promise<TeachingResult>;
 
 export declare const providerCatalog: Array<{
   id: AiProviderId;
@@ -161,6 +162,10 @@ export declare function validateAssessmentPartition(
 };
 
 export interface AssessmentExecutionOptions {
+  call?: TeachingCall;
+  ruleRoot?: string;
+  maxTokens?: number;
+  operationBudget?: { deadlineAt: number; remainingTokens: number };
   role?: string;
   model?: string;
   reasoningEffort?: string;
@@ -172,6 +177,10 @@ export interface AssessmentExecutionOptions {
 }
 
 export interface SubmissionExecutionOptions {
+  call?: TeachingCall;
+  signal?: AbortSignal;
+  evidenceSufficient?: boolean;
+  operationBudget?: { deadlineAt: number; remainingTokens: number };
   role?: string;
   model?: string;
   reasoningEffort?: string;

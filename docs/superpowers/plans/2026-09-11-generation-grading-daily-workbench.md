@@ -147,7 +147,7 @@ Task 2 验证记录（2026-09-11）：规则、模型、执行器、HTTP 假网�
 
 实施顺序调整：模块能力注册表与状态展示和 Task 3 业务入口迁移同步修改，避免仅有新基础代码时就向 Web 宣称新链路已生效。下一动作：接入 generation/grading/reference，移除这些入口的重复追加调用，补 purpose 分流与逐题评分证据测试。
 
-### Task 3：生成分流与批改证据链
+### Task 3：生成分流与批改证据链（已实现）
 
 **Files:**
 - Modify: `packages/ai/src/assessment-partitions.js`、`packages/ai/src/assessment-partitions.test.mjs`
@@ -158,11 +158,11 @@ Task 2 验证记录（2026-09-11）：规则、模型、执行器、HTTP 假网�
 
 **Interfaces:** 新增业务字段 purpose、dayPlan、requestedItemTypes，服务端归一化后进入 generationContext；返回草稿继续兼容现有答案包。新 runner 接入现有 `draftAssessmentService`、`gradeSubmissionService`，保留可注入假 runner。
 
-- [ ] 写失败用例：数学 focused/calculation 不产生选择题；英语字母专项不强制阅读；缺省 purpose 保持综合蓝图；multi_day 各日分区有稳定 dayId；同一阅读材料不拆到无上下文的小题调用。
-- [ ] 写模型输入捕获测试：真实 rulePack.text 和 hash 被使用；原始教师要求与有出处资料片段仍在；Flash 摘要不能覆盖原话；客户端不能注入 rulePack 或预算。
-- [ ] 写批改用例：题干不能补学生答案；仅未解决题组进入内容模型；主观题有 score/maxScore；uncertain 为 null；错误顶层总分不会覆盖逐题合计。
-- [ ] 运行 `node --test packages/services/src/teaching-pipeline.test.mjs packages/ai/src/assessment-partitions.test.mjs packages/ai/src/runtime-prompt.test.mjs`，确认新需求有失败证据。
-- [ ] 实现分流：
+- [x] 写并运行分流、模型输入、批改证据和 OCR 引用用例。
+- [x] 捕获测试确认真实 rulePack/hash、原始要求和资料片段进入服务端请求，客户端 rulePack/model/预算不能覆盖服务端值。
+- [x] 批改用例确认仅未解决题目发送、逐题 score/maxScore、uncertain=null、总分按逐题汇总。
+- [x] 运行生成、批改、OCR、目的校验和旧运行时兼容测试；专项回归 106/106 通过。
+- [x] 实现分流：
 
 ```js
 const purpose = normalized.purpose || 'comprehensive';
@@ -172,10 +172,14 @@ const purpose = normalized.purpose || 'comprehensive';
 // comprehensive: keep existing kind/subject blueprint.
 ```
 
-- [ ] 增加 Flash 识别适配器输出到既有 OCR 契约，保留 page、bbox、原图及裁剪引用；受配置选择，不在本任务自动替换现有真实 OCR 默认路线。
-- [ ] 对 figure、sourcePackage、分值和资料审批继续运行既有校验；不通过时保留可修正草稿。
-- [ ] 验证本任务测试、`node --test packages/services/src/deterministic-grading.test.mjs packages/services/src/grading-audit-gates.test.mjs`、`cmd /c npm.cmd run check:generation:blueprint`、`cmd /c npm.cmd run check:encoding`。涉及真实上下文变更时追加 `check:content-context`，不以其结果代替内容质量。
-- [ ] 按范围提交 `feat: align teaching generation and grading pipelines`；记录阶段一结果及下一项 Task 4。
+- [x] 增加配置选择的 Flash 识别适配器，保留 page、bbox、原图及裁剪引用，不替换 MiniMax 默认路线。
+- [x] 对 figure、sourcePackage、分值和资料审批继续执行校验，不通过时保留教师待复核草稿。
+- [x] 验证本任务测试、生成蓝图、编码、API、Web 类型和 `check:content-context`。`check:content-context` 报告为 link-guard，只证明资料—复核—导出闭环，不证明真实模型内容质量。
+- [x] 按范围提交 `feat: align teaching generation and grading pipelines`；记录阶段一结果及下一项 Task 4。
+
+Task 3 实现提交：`5d07673`。新增与迁移回归 106/106 通过，收尾追加的用途校验、多题型专项、讲解草稿与模型探针兼容用例通过。Skills、生成蓝图、编码、API 启动与 Web typecheck 通过。运行时测试使用合成输入和本地 HTTP 假网关，证明实际调用序列、共享规则、deadline/token pool 和评分契约。
+
+`check:content-context` 连接已有 `127.0.0.1:8787` 实例，完整通过上传、审批、上下文注入、教师复核、正式导出拦截和清理；没有重启该实例，不能据此证明它已加载此次新代码，也不能证明内容原创性或批改准确率。Flash 仍为配置选择的识别候选，默认 OCR 未切换。阶段一服务层实现收口，下一项为 Task 4：持久化版本、并发与检查点；Web 新交互、局部修订、确认复用及真实样本验收继续按后续任务推进。
 
 ## 阶段二：持续工作能力
 

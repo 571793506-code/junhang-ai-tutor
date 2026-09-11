@@ -1,5 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+
+test("focused requests contain only requested types and keep reading in one unit", () => {
+  const math = buildAssessmentPartitions({ subject: "数学", purpose: "focused", requestedItemTypes: ["calculation"], requestedItemCount: 8 });
+  assert.equal(math.length, 1);
+  assert.deepEqual(math[0].itemTypes, ["calculation"]);
+  assert.equal(math[0].targetItemCount, 8);
+  const english = buildAssessmentPartitions({ subject: "英语", purpose: "focused", requestedItemTypes: ["fill"] });
+  assert.deepEqual(english.flatMap((part) => part.itemTypes), ["fill"]);
+  assert.equal(buildAssessmentPartitions({ purpose: "focused", requestedItemTypes: ["reading", "reading"] }).length, 1);
+});
+
+test("multi-day plans preserve day identity and explanation is not an exam blueprint", () => {
+  const days = buildAssessmentPartitions({ purpose: "multi_day", requestedItemTypes: ["calculation"], dayPlan: [
+    { dayId: "day-1", goal: "addition", requestedItemCount: 5 },
+    { dayId: "day-2", goal: "subtraction", requestedItemCount: 6 }
+  ] });
+  assert.deepEqual(days.map((part) => part.dayId), ["day-1", "day-2"]);
+  assert.deepEqual(days.map((part) => part.targetItemCount), [5, 6]);
+  assert.deepEqual(buildAssessmentPartitions({ purpose: "explanation" }).map((part) => part.id), ["explanation"]);
+  assert.throws(() => buildAssessmentPartitions({ purpose: "focused" }), /GENERATION_PURPOSE_INVALID/);
+  assert.throws(() => buildAssessmentPartitions({ purpose: "invalid" }), /GENERATION_PURPOSE_INVALID/);
+});
 import {
   buildAssessmentPartitions,
   mapWithConcurrency

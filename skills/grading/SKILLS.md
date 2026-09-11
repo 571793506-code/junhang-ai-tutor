@@ -29,7 +29,7 @@
 
 ## 执行顺序
 
-先验证来源包或登记外部参考答案，再按页序识别并对齐印刷题干和学生作答；客观题由服务层保守比较，未解决题目才发送任务策略指定的模型，最后汇总逐题得分并等待教师逐题确认。
+先验证来源包或登记外部参考答案，再按页序识别并对齐印刷题干和学生作答；客观题由服务层保守比较，未解决题目才发送任务策略指定的模型，最后汇总逐题得分并等待教师逐题确认。入口为 `gradeSubmissionService -> generateSubmissionReferenceAnswers/gradeSubmissionText -> runSubmissionPipeline -> runTeachingTask`；参考答案仅依据题干证据生成，不把学生作答作为答案来源。
 
 ## 模型与复核
 
@@ -43,11 +43,12 @@
 - 有答案键、生成记录或 `questionLayoutManifest` 时优先使用它们，不重新猜题。
 - 没有答案键时先生成参考答案，再标记置信度和复核风险。
 - 视觉 OCR 结果必须保持页序稳定；候选适配器没有通过真实图片评估前，不迁移默认识别链路。
-- 单一明确答案的选择、短填空和数值题优先在服务层保守比较；多解、开放题、过程题、阅读简答、英语表达和作文必须交给 GPT-5.6。
-- 混合题只把未解决题目、对应作答和参考答案发送给 GPT-5.6；总分必须由逐题得分汇总，模型顶层分数不得覆盖。
+- 单一明确答案的选择、短填空和数值题优先在服务层保守比较；多解、开放题、过程题、阅读简答、英语表达和作文交给 Astra。
+- 混合题只把未解决题目、对应作答和参考答案发送给 Astra；总分必须由逐题得分汇总，模型顶层分数不得覆盖。
 - 低置信、漏页、题目缺失、学生作答缺失、图片质量差、参考答案不可靠或模型分歧时，不出最终分、不入档、不发布。
 - 教师确认后才写入学生档案、错题记录和薄弱点分析。
-- 默认主链路执行 OCR/视觉识别、答案键优先、客观题本地比较、GPT-5.6 主观题批改、低置信标记和教师逐题复核。
+- 默认主链路执行 OCR/视觉识别、答案键优先、客观题本地比较、Astra 主观题批改、低置信标记和教师逐题复核。`gradeSubmissionService` 的参考答案与主观批改共享操作 deadline/token pool；不再执行服务层风险复判或深度模型审查。`uncertain` 的逐题与总分保持 null。
+- 配置 `OCR_VISION_PROVIDER=deepseek-flash` 才选用 Flash 候选识别器；`recognizeImages` 输出沿用既有 OCR 契约，页码取服务端图片顺序，保留 bbox、sourceImageRef 和 cropRef。它只提取证据，不给分或确认归档。
 - 失败先分类，configuration 故障不追加调用；OCR、题干、学生作答或参考证据不足属于 evidence 故障，直接进入教师复核。额外调用次数和预算由代码策略统一约束，不能在服务层与模型层各叠加一套重试。
 - `usedModelEscalation`、模型名、档位、触发原因和预算只属于内部运行元数据，不得展示给学生、家长、课堂平板或公共屏。Sol availability 和合成质量样本只证明链路可用，不能证明生产批改正确率；正确率必须使用教师确认的 gold 数据评估。
 - 采集真实批改质量样本时先运行 `cmd /c npm.cmd run collect:grading:gold` 做只读 dry-run；只有确认候选范围后，才用 `--write tmp/quality/grading-gold-cases.json` 写出脱敏样本。把待评估模型的 `actual` 结果合入评估副本后，再运行 `cmd /c npm.cmd run check:grading:quality -- tmp/quality/grading-gold-cases.json`。对话中已由教师确认并归档的生成批改，按 `gradingSourcePackage`、逐题确认和归档状态纳入；外部图片批改还必须有 OCR、答案来源和图片质量证据。

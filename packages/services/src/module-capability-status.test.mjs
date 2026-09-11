@@ -2,6 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildModuleCapabilityStatus } from "./module-capability-status.js";
 
+test("configured generation route is discoverable without implying a live model probe", () => {
+  const result = buildModuleCapabilityStatus({ GPT56_API_KEY: "synthetic" });
+  const generation = result.capabilities.find((item) => item.moduleId === "generation");
+  assert.equal(generation.status, "available");
+  assert.match(generation.teacherMessage, /实际可用性以执行结果为准/);
+  assert.doesNotMatch(JSON.stringify(result), /gpt-6-astra|apiKey|synthetic/);
+});
+
 test("projects runtime readiness into four teacher-safe module statuses", () => {
   const result = buildModuleCapabilityStatus({
     aiSnapshot: {

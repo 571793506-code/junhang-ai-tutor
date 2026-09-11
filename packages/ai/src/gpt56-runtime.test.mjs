@@ -122,7 +122,7 @@ test("buildAiStartupSnapshot assigns Junhang text capabilities to GPT-5.6", () =
   assert.match(snapshot.providers.find((item) => item.id === "deepseek")?.reason || "", /紧急回滚/);
 });
 
-test("buildModelOrchestrationPlan uses GPT-5.6 for QA and assessment generation", () => {
+test("buildModelOrchestrationPlan uses GPT-5.6 for QA and Astra for assessment generation", () => {
   const plan = buildModelOrchestrationPlan({
     GPT56_API_KEY: "test-key",
     GPT56_BASE_URL: "https://gpt56.example/v1",
@@ -132,7 +132,7 @@ test("buildModelOrchestrationPlan uses GPT-5.6 for QA and assessment generation"
   assert.equal(plan.routes.qa.providerId, "gpt56");
   assert.equal(plan.routes.qa.model, "gpt-5.6");
   assert.equal(plan.routes.assessmentDraft.providerId, "gpt56");
-  assert.equal(plan.routes.assessmentDraft.model, "gpt-5.6");
+  assert.equal(plan.routes.assessmentDraft.model, "gpt-6-astra");
 });
 
 test("callGpt56Chat only sends reasoning_effort when intermediary support is enabled", async () => {
@@ -618,7 +618,7 @@ async function runSubmissionEscalationCase(workflow, primaryResponse, solRespons
     req.on("end", () => {
       const payload = JSON.parse(body);
       payloads.push(payload);
-      if (payload.model === "gpt-5.6") {
+      if (payload.model === "gpt-6-astra") {
         res.writeHead(primaryResponse.status, { "Content-Type": primaryResponse.contentType });
         res.end(primaryResponse.body);
         return;
@@ -629,8 +629,8 @@ async function runSubmissionEscalationCase(workflow, primaryResponse, solRespons
         return;
       }
       const content = workflow === "reference"
-        ? JSON.stringify({ referenceAnswers: [{ questionNo: "1", correctAnswer: "2", confidence: 0.99 }] })
-        : JSON.stringify({ score: 5, questionResults: [{ questionNo: "1", status: "correct", confidence: 0.99 }] });
+        ? JSON.stringify({ referenceAnswers: [{ questionNo: "1", prompt: "1+1=?", correctAnswer: "2", score: 5, analysisSteps: ["相加得2"], confidence: 0.99 }] })
+        : JSON.stringify({ score: 5, questionResults: [{ questionNo: "1", status: "correct", score: 5, maxScore: 5, explanation: "答案一致", confidence: 0.99 }] });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ choices: [{ message: { content } }] }));
     });
@@ -656,7 +656,7 @@ async function runSubmissionEscalationCase(workflow, primaryResponse, solRespons
 }
 
 for (const workflow of ["reference", "grading"]) {
-  test(`${workflow} retries a Terra 524 once with Sol high and an independent timeout`, async () => {
+  test(`${workflow} replaces an Astra 524 once with Sol within the shared deadline`, async () => {
     const { payloads, result } = await runSubmissionEscalationCase(workflow, {
       status: 524,
       contentType: "text/plain",
@@ -664,15 +664,15 @@ for (const workflow of ["reference", "grading"]) {
     });
 
     assert.equal(payloads.length, 2);
-    assert.deepEqual(payloads.map((item) => item.model), ["gpt-5.6", "gpt-5.6-sol"]);
+    assert.deepEqual(payloads.map((item) => item.model), ["gpt-6-astra", "gpt-5.6-sol"]);
     assert.equal(payloads[1].reasoning_effort, "high");
     assert.equal(result.available, true);
     assert.equal(result.model, "gpt-5.6-sol");
     assert.equal(result.modelRun.metadata.usedModelEscalation, true);
     assert.equal(result.modelRun.metadata.solAttempted, true);
     assert.equal(result.modelRun.metadata.attempts.length, 2);
-    assert.equal(result.modelRun.metadata.attempts[1].role, "sol-escalation");
-    assert.equal(result.modelRun.metadata.attempts[1].timeoutMs, 180000);
+    assert.equal(result.modelRun.metadata.attempts[1].role, "availability-replacement");
+    assert.ok(result.modelRun.metadata.attempts[1].timeoutMs <= result.modelRun.metadata.attempts[0].timeoutMs);
     assert.equal(result.modelRun.metadata.attempts[1].reasoningEffort, "high");
   });
 
@@ -691,8 +691,8 @@ for (const workflow of ["reference", "grading"]) {
 
 test("reference Sol usability preserves numeric and boolean answer fields", async () => {
   for (const content of [
-    JSON.stringify({ referenceAnswers: [{ questionNo: "1", correctAnswer: 0 }] }),
-    JSON.stringify({ referenceAnswers: [{ questionNo: "1", prompt: false }] })
+    JSON.stringify({ referenceAnswers: [{ questionNo: "1", prompt: "结果", correctAnswer: 0, score: 5, analysisSteps: ["计算"], confidence: 1 }] }),
+    JSON.stringify({ referenceAnswers: [{ questionNo: "1", prompt: "判断", correctAnswer: false, score: 5, analysisSteps: ["判断"], confidence: 1 }] })
   ]) {
     const { result } = await runSubmissionEscalationCase("reference", {
       status: 524,
@@ -715,9 +715,9 @@ test("submission runtime does not treat malformed model content as an availabili
     body: JSON.stringify({ choices: [{ message: { content: "not-json" } }] })
   };
   const { payloads, result } = await runSubmissionEscalationCase("grading", response);
-  assert.equal(payloads.length, 1);
-  assert.equal(result.available, true);
-  assert.equal(result.gradingText, "not-json");
+  assert.deepEqual(payloads.map((p) => p.model), ["gpt-6-astra", "gpt-6-astra"]);
+  assert.equal(result.available, false);
+  assert.equal(result.gradingText, "");
   assert.equal(result.modelRun.metadata.usedModelEscalation, false);
 });
 
@@ -746,7 +746,7 @@ for (const workflow of ["reference", "grading"]) {
   });
 }
 
-test("Junhang text workflows use GPT-5.6 as their primary provider", async () => {
+test("unmigrated QA, task, profile and explicit review routes retain configured GPT-5.6", async () => {
   const payloads = [];
   const server = http.createServer((req, res) => {
     let body = "";
@@ -807,15 +807,13 @@ test("Junhang text workflows use GPT-5.6 as their primary provider", async () =>
       generateStudentDictionaryDraft(config, { word: "study" }),
       draftTeacherTask(config, { title: "今日任务", requirement: "复习小数" }),
       draftStudentProfileNarrative(config, { studentId: "synthetic", periodKey: "synthetic" }),
-      generateSubmissionReferenceAnswers(config, { title: "合成样例", printedText: "1+1=?" }),
-      gradeSubmissionText(config, { title: "合成样例", answerKey: "1.2", studentAnswerText: "1.2" }),
       reviewWithGpt55(config, { reviewTask: "submission-premium-grading-review", title: "合成样例" })
     ]);
 
     assert.equal(results.every((result) => result.providerId === "gpt56"), true);
     assert.equal(results.every((result) => result.modelRun?.provider === "gpt56"), true);
     assert.equal(results.every((result) => result.modelRun?.model === "gpt-5.6"), true);
-    assert.equal(payloads.length, 7);
+    assert.equal(payloads.length, 5);
     assert.equal(payloads.every((payload) => payload.model === "gpt-5.6"), true);
     const effortForSystem = (marker) => payloads.find((payload) =>
       String(payload.messages?.[0]?.content || "").includes(marker)
@@ -824,8 +822,6 @@ test("Junhang text workflows use GPT-5.6 as their primary provider", async () =>
     assert.equal(effortForSystem("英语词典编写助手"), "none");
     assert.equal(effortForSystem("教师助手"), "low");
     assert.equal(effortForSystem("学情分析助手"), "low");
-    assert.equal(effortForSystem("标准答案生成助手"), "high");
-    assert.equal(effortForSystem("作业、练习、小测和试卷批改助手"), "high");
     assert.equal(effortForSystem("最高级质量审查器"), "high");
   } finally {
     await close(server);

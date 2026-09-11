@@ -46,11 +46,12 @@ export async function runSolQualityCheck(
     model: runtime.gpt56SolModel,
     timeoutMs: runtime.gpt56SolFallbackTimeoutMs
   };
-  const assessmentDraftRunner = (runnerConfig, input) => (
+  const assessmentDraftRunner = (runnerConfig, input, serviceExecution = {}) => (
     draftAssessmentImpl({
       ...runnerConfig,
+      TEACHING_PRIMARY_MODEL: runtime.gpt56SolModel,
       GPT56_REASONING_EFFORT_ENABLED: "true"
-    }, input, execution)
+    }, input, { ...serviceExecution, ...execution, timeoutMs: Math.min(serviceExecution.timeoutMs || execution.timeoutMs, execution.timeoutMs) })
   );
   const checks = [];
 

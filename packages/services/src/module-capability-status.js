@@ -30,7 +30,7 @@ function messageFor(status, moduleId) {
   if (status === "available") {
     return moduleId === "teaching-materials"
       ? "资料处理能力可用，选择已审核来源后才能注入生成上下文。"
-      : "当前模块可用，结果仍按教师复核流程处理。";
+      : "服务配置已就绪，实际可用性以执行结果为准；生成与批改结果仍需教师复核。";
   }
   if (status === "blocked") return "当前模块暂不可用，请检查服务状态或保留待复核结果。";
   return "当前模块需要补充资料、证据或教师复核后继续。";

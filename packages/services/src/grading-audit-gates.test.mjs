@@ -1,719 +1,107 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
 import { gradeSubmissionService } from "./index.js";
 
-function fakeGradingResult() {
-  return {
-    available: true,
-    providerId: "fake",
-    gradingText: JSON.stringify({
-      score: 5,
-      summary: "教师待复核批改草稿。",
-      strengths: [],
-      mistakes: [],
-      nextPractice: "继续巩固。",
-      needsTeacherReview: true,
-      questionResults: [
-        {
-          questionNo: "1",
-          status: "correct",
-          score: 5,
-          maxScore: 5,
-          studentAnswer: "A",
-          correctAnswer: "A",
-          explanation: "答案一致。",
-          knowledgePoint: "选择题",
-          confidence: 0.9
-        }
-      ]
-    }),
-    modelRun: { provider: "fake", model: "fake", skill: "submission-grading", status: "SUCCESS" }
-  };
+const subjective = {
+  subject: "数学", totalScore: 5,
+  referenceAnswers: [{ questionNo: "1", prompt: "说明理由", correctAnswer: "交换加数和不变", score: 5, confidence: 1 }],
+  ocrQuestions: [{ questionNo: "1", printedPrompt: "说明理由", studentAnswer: "因为交换后仍是原来的数量", confidence: 0.95 }]
+};
+const answer = (patch = {}) => ({ questionNo: "1", status: "partial", score: 3, maxScore: 5, explanation: "思路正确，理由不完整", confidence: 0.9, ...patch });
+const runtime = (questions, metadata = {}) => ({
+  available: true, providerId: "gpt56", model: "gpt-6-astra",
+  gradingText: JSON.stringify({ score: 999, questionResults: questions }),
+  modelRun: { provider: "gpt56", model: "gpt-6-astra", skill: "submission-grading", status: "SUCCESS", metadata }
+});
+
+test("legacy flags and injected reviewers cannot add service calls or authorize archive", async () => {
+  let gradingCalls = 0; let extraCalls = 0;
+  const reviewer = async () => { extraCalls++; throw new Error("No service review allowed"); };
+  const result = await gradeSubmissionService({ GRADING_RUN_DEEP_AUDIT: "true", GPT56_SOL_FALLBACK_ENABLED: "true" }, { ...subjective, runDeepGradingAudit: true }, {
+    persist: false, runDeepGradingAudit: true,
+    gradingRunner: async () => { gradingCalls++; return runtime([answer()]); },
+    solGradingRunner: reviewer, gradingReviewers: { premium: reviewer, minimax: reviewer }
+  });
+  assert.equal(gradingCalls, 1); assert.equal(extraCalls, 0);
+  assert.equal(result.structured.score, 3); assert.equal(result.structured.archiveEligible, false);
+  assert.equal(result.structured.gradingAudit.required, false); assert.equal(result.structured.gradingAudit.status, "skipped");
+  assert.equal(result.persisted.gradingAuditModelRunId, null); assert.equal(result.persisted.premiumAuditModelRunId, null);
+});
+
+test("objective evidence remains available with zero content or reviewer calls", async () => {
+  const unexpected = async () => { throw new Error("Objective task must stay local"); };
+  const result = await gradeSubmissionService({}, {
+    subject: "数学", totalScore: 10, printedText: "1. 6*7=? 2. 3*6=?", answerKey: "1=42;2=18", studentAnswerText: "1.42 2.18", runDeepGradingAudit: true
+  }, { persist: false, gradingRunner: unexpected, gradingReviewers: { premium: unexpected, minimax: unexpected } });
+  assert.equal(result.structured.score, 10);
+  assert.deepEqual(result.structured.questionResults.map((q) => q.questionNo), ["1", "2"]);
+  assert.equal(result.structured.archiveEligible, false);
+});
+
+for (const patch of [{ status: "uncertain", score: 3, confidence: 0.4 }, { confidence: 0.4 }, { correctAnswer: "与参考答案冲突" }]) {
+  test(`risky draft stays under teacher confirmation without service Sol (${JSON.stringify(patch)})`, async () => {
+    let calls = 0;
+    const result = await gradeSubmissionService({}, { ...subjective, assignmentId: "assignment-1" }, {
+      persist: false, gradingRunner: async () => { calls++; return runtime([answer(patch)]); },
+      solGradingRunner: async () => { throw new Error("No additional service call"); }
+    });
+    assert.equal(calls, 1); assert.equal(result.structured.archiveEligible, false);
+    if (patch.status === "uncertain") {
+      assert.equal(result.structured.questionResults[0].score, null); assert.equal(result.structured.score, null);
+    }
+  });
 }
 
-test("gradeSubmissionService skips deep grading audits by default", async () => {
-  let auditCallCount = 0;
-  const result = await gradeSubmissionService(
-    {},
-    { subject: "数学", answerKey: "1.A", studentAnswerText: "1.A" },
-    {
-      persist: false,
-      gradingRunner: async () => fakeGradingResult(),
-      gradingReviewers: {
-        minimax: async () => {
-          auditCallCount += 1;
-          return { available: true, reviewText: "{}" };
-        },
-        premium: async () => {
-          auditCallCount += 1;
-          return { available: true, reviewText: "{}" };
-        }
-      }
-    }
-  );
-
-  assert.equal(auditCallCount, 0);
-  assert.equal(result.structured.gradingAudit.required, false);
-  assert.equal(result.structured.gradingAudit.status, "skipped");
-  assert.equal(result.structured.gradingAudit.available, true);
-  assert.equal(result.persisted.gradingAuditModelRunId, null);
-  assert.equal(result.persisted.premiumAuditModelRunId, null);
-});
-
-test("gradeSubmissionService runs deep grading audits when explicitly enabled", async () => {
-  let auditCallCount = 0;
-  const reviewer = async () => {
-    auditCallCount += 1;
-    return {
-      available: true,
-      reviewText: JSON.stringify({
-        status: "pass",
-        riskLevel: "low",
-        scoreReliable: true,
-        archiveAllowed: true,
-        issues: [],
-        suggestions: []
-      }),
-      modelRun: { status: "SUCCESS" }
-    };
-  };
-
-  const result = await gradeSubmissionService(
-    {},
-    { subject: "数学", answerKey: "1.A", studentAnswerText: "1.A", runDeepGradingAudit: true },
-    {
-      persist: false,
-      gradingRunner: async () => fakeGradingResult(),
-      gradingReviewers: {
-        minimax: reviewer,
-        premium: reviewer
-      }
-    }
-  );
-
-  assert.equal(auditCallCount, 2);
-  assert.equal(result.structured.gradingAudit.required, true);
-  assert.equal(result.structured.gradingAudit.status, "pass");
-  assert.equal(result.structured.gradingAudit.archiveAllowed, true);
-});
-
-test("gradeSubmissionService supplies structured evidence to deep grading audits from answer key and typed text", async () => {
-  const auditPayloads = [];
-  const reviewer = async (_config, payload) => {
-    auditPayloads.push(payload);
-    return {
-      available: true,
-      reviewText: JSON.stringify({
-        status: "pass",
-        riskLevel: "low",
-        scoreReliable: true,
-        archiveAllowed: true,
-        issues: [],
-        suggestions: []
-      }),
-      modelRun: { status: "SUCCESS" }
-    };
-  };
-
-  const result = await gradeSubmissionService(
-    {},
-    {
-      subject: "数学",
-      kind: "小测",
-      title: "结构化证据审计",
-      answerKey: "1=42;2=18",
-      printedText: "1. 6*7=? 2. 3*6=?",
-      studentAnswerText: "1. 42 2. 18",
-      runDeepGradingAudit: true
-    },
-    {
-      persist: false,
-      gradingRunner: async () => ({
-        available: true,
-        providerId: "fake",
-        gradingText: JSON.stringify({
-          score: 100,
-          summary: "两题均正确。",
-          needsTeacherReview: true,
-          questionResults: [
-            { questionNo: "1", status: "correct", studentAnswer: "42", correctAnswer: "42", confidence: 0.95 },
-            { questionNo: "2", status: "correct", studentAnswer: "18", correctAnswer: "18", confidence: 0.95 }
-          ]
-        }),
-        modelRun: { provider: "fake", model: "fake", skill: "submission-grading", status: "SUCCESS" }
-      }),
-      gradingReviewers: {
-        minimax: reviewer,
-        premium: reviewer
-      }
-    }
-  );
-
-  assert.equal(auditPayloads.length, 2);
-  for (const payload of auditPayloads) {
-    assert.deepEqual(
-      payload.referenceAnswers.map((item) => [item.questionNo, item.correctAnswer]),
-      [["1", "42"], ["2", "18"]]
-    );
-    assert.equal(payload.questionLayoutManifest.questionCount, 2);
-    assert.deepEqual(
-      payload.ocr.questions.map((item) => [item.questionNo, item.printedText, item.studentAnswer]),
-      [["1", "6*7=?", "42"], ["2", "3*6=?", "18"]]
-    );
-    assert.equal(payload.ocr.confidence, 0.92);
-  }
-  assert.equal(result.structured.gradingAudit.status, "pass");
-});
-
-test("gradeSubmissionService runs one GPT-5.6 risk review for uncertain, low-confidence, or score-mismatch results", async () => {
-  const cases = [
-    { name: "uncertain", score: 0, status: "uncertain", confidence: 0.5, questionScore: 0 },
-    { name: "low-confidence", score: 5, status: "correct", confidence: 0.4, questionScore: 5 },
-    { name: "score-mismatch", score: 5, status: "correct", confidence: 0.95, questionScore: 2 }
-  ];
-
-  for (const sample of cases) {
-    let minimaxCalls = 0;
-    let premiumCalls = 0;
-    const result = await gradeSubmissionService(
-      {},
-      {
-        subject: "英语",
-        totalScore: 5,
-        answerKey: "1=A或B",
-        studentAnswerText: "1. A"
-      },
-      {
-        persist: false,
-        gradingRunner: async () => ({
-          available: true,
-          providerId: "gpt56",
-          gradingText: JSON.stringify({
-            score: sample.score,
-            summary: sample.name,
-            questionResults: [
-              {
-                questionNo: "1",
-                status: sample.status,
-                score: sample.questionScore,
-                maxScore: 5,
-                studentAnswer: "A",
-                correctAnswer: "A或B",
-                confidence: sample.confidence
-              }
-            ]
-          }),
-          modelRun: { provider: "gpt56", model: "gpt-5.6", skill: "submission-grading", status: "SUCCESS" }
-        }),
-        gradingReviewers: {
-          minimax: async () => {
-            minimaxCalls += 1;
-            return { available: true, reviewText: "{}" };
-          },
-          premium: async () => {
-            premiumCalls += 1;
-            return {
-              available: true,
-              reviewText: JSON.stringify({
-                status: "needs_review",
-                riskLevel: "medium",
-                scoreReliable: false,
-                archiveAllowed: false,
-                issues: ["教师需复核。"]
-              }),
-              modelRun: { provider: "gpt56", model: "gpt-5.6", status: "SUCCESS" }
-            };
-          }
-        }
-      }
-    );
-
-    assert.equal(minimaxCalls, 0, sample.name);
-    assert.equal(premiumCalls, 1, sample.name);
-    assert.equal(result.structured.gradingAudit.required, true, sample.name);
+test("runtime replacement is persisted once and its unsuccessful attempt is not repeated", async () => {
+  for (const successful of [true, false]) {
+    const runs = [];
+    const result = await gradeSubmissionService({}, { ...subjective, assignmentId: "assignment-1" }, {
+      prisma: { modelRun: { create: async ({ data }) => { runs.push(data); return { id: "bounded-run", ...data }; } } },
+      gradingRunner: async () => ({ ...runtime([answer(successful ? {} : { status: "uncertain", score: null })], {
+        solAttempted: true, usedModelEscalation: successful, attempts: [{ model: "gpt-6-astra", status: "ERROR" }, { model: "gpt-5.6-sol", status: successful ? "SUCCESS" : "ERROR" }]
+      }), model: successful ? "gpt-5.6-sol" : "gpt-6-astra" }),
+      solGradingRunner: async () => { throw new Error("Must not repeat runtime attempt"); },
+      gradingReviewers: { premium: async () => { throw new Error("Must not append review"); } }
+    });
+    assert.equal(runs.length, 1); assert.equal(result.persisted.modelRunId, "bounded-run");
+    assert.equal(result.structured.archiveEligible, false);
+    if (!successful) assert.equal(result.structured.score, null);
   }
 });
 
-test("gradeSubmissionService does not run risk review for a clean grading result", async () => {
-  let reviewCalls = 0;
-  await gradeSubmissionService(
-    {},
-    { subject: "英语", totalScore: 5, answerKey: "1=A或B", studentAnswerText: "1. A" },
-    {
-      persist: false,
-      gradingRunner: async () => ({
-        available: true,
-        providerId: "gpt56",
-        gradingText: JSON.stringify({
-          score: 5,
-          summary: "证据清晰。",
-          questionResults: [
-            { questionNo: "1", status: "correct", score: 5, maxScore: 5, studentAnswer: "A", correctAnswer: "A或B", confidence: 0.95 }
-          ]
-        }),
-        modelRun: { provider: "gpt56", model: "gpt-5.6", skill: "submission-grading", status: "SUCCESS" }
-      }),
-      gradingReviewers: {
-        premium: async () => {
-          reviewCalls += 1;
-          return { available: true, reviewText: "{}" };
-        }
-      }
-    }
-  );
-
-  assert.equal(reviewCalls, 0);
+test("persistence failure surfaces instead of publishing an unrecorded grading result", async () => {
+  await assert.rejects(gradeSubmissionService({}, subjective, {
+    prisma: { modelRun: { create: async () => { throw new Error("persistence unavailable"); } } },
+    gradingRunner: async () => runtime([answer()])
+  }), /persistence unavailable/);
 });
 
-function riskyTwoQuestionResult(overrides = {}) {
-  return {
-    available: true,
-    providerId: "gpt56",
-    gradingText: JSON.stringify({
-      score: 7,
-      summary: "其中一道题需复核。",
-      questionResults: [
-        { questionNo: "1", status: "correct", score: 4, maxScore: 4, studentAnswer: "C", correctAnswer: "C", confidence: 0.98 },
-        { questionNo: "2", status: "uncertain", score: 3, maxScore: 6, studentAnswer: "人物很勇敢。", correctAnswer: "结合文本说明", confidence: 0.5, ...overrides }
-      ]
-    }),
-    modelRun: { provider: "gpt56", model: "gpt-5.6", status: "SUCCESS" }
-  };
-}
+test("insufficient image evidence is passed as a preflight block to the bounded runtime", async () => {
+  let execution;
+  const result = await gradeSubmissionService({}, { ...subjective, imageQuality: { status: "poor" } }, {
+    persist: false, gradingRunner: async (_config, _input, options) => {
+      execution = options;
+      return { available: false, providerId: "gpt56", gradingText: "", error: "TEACHING_EVIDENCE_MISSING" };
+    }
+  });
+  assert.equal(execution.evidenceSufficient, false);
+  assert.equal(result.structured.score, null); assert.equal(result.structured.archiveEligible, false);
+});
 
-test("Sol regrades only risky questions, replaces only those results, and recomputes total score", async () => {
-  const solInputs = [];
-  let premiumCalls = 0;
-  const result = await gradeSubmissionService(
-    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol", GPT56_SOL_FALLBACK_TIMEOUT_MS: "180000" },
-    {
-      subject: "语文",
-      totalScore: 10,
-      referenceAnswers: [
-        { questionNo: "1", prompt: "选择题", correctAnswer: "C", score: 4, confidence: 1 },
-        { questionNo: "2", prompt: "结合文本说明人物品质。", correctAnswer: "勇敢并结合文本", score: 6, confidence: 1 }
-      ],
-      answerKey: "1=C;2=勇敢并结合文本",
-      ocrQuestions: [
-        { questionNo: "1", printedText: "选择题", studentAnswer: "C", confidence: 0.99 },
-        { questionNo: "2", printedText: "结合文本说明人物品质。", studentAnswer: "人物很勇敢。", confidence: 0.95 }
-      ],
-      assignmentItems: [
-        { prompt: "选择题", metadata: { localOnly: "q1" } },
-        { prompt: "结合文本说明人物品质。", metadata: { localOnly: "q2" } }
-      ],
-      manualText: "1. C 2. 人物很勇敢。"
+test("reference and unresolved grading share one deadline and output-token pool", async () => {
+  const budgets = []; const remaining = [];
+  const result = await gradeSubmissionService({}, { subject: "数学", printedText: "1.说明理由", studentAnswerText: "1.我的推导", totalScore: 5 }, {
+    persist: false, teachingExecution: { now: () => 1000, timeoutMs: 300, maxTokens: 1000 },
+    referenceAnswerRunner: async (_config, _input, execution) => {
+      budgets.push(execution.operationBudget); execution.operationBudget.remainingTokens -= 200;
+      return { available: true, referenceText: JSON.stringify({ referenceAnswers: [{ questionNo: "1", prompt: "说明理由", correctAnswer: "标准推导", score: 5, confidence: 0.95 }] }) };
     },
-    {
-      persist: false,
-      gradingRunner: async () => riskyTwoQuestionResult(),
-      solGradingRunner: async (_config, input, execution) => {
-        solInputs.push({ input, execution });
-        return {
-          available: true,
-          providerId: "gpt56",
-          gradingText: JSON.stringify({
-            score: 5,
-            summary: "复核完成。",
-            questionResults: [{ questionNo: "2", status: "partial", score: 5, maxScore: 6, studentAnswer: "人物很勇敢。", correctAnswer: "勇敢并结合文本", confidence: 0.9 }]
-          }),
-          modelRun: { provider: "gpt56", model: "gpt-5.6-sol", status: "SUCCESS" }
-        };
-      },
-      gradingReviewers: { premium: async () => { premiumCalls += 1; return { available: true, reviewText: "{}" }; } }
+    gradingRunner: async (_config, _input, execution) => {
+      budgets.push(execution.operationBudget); remaining.push(execution.operationBudget.remainingTokens);
+      return runtime([answer()]);
     }
-  );
-
-  assert.equal(solInputs.length, 1);
-  assert.deepEqual(solInputs[0].input.ocrQuestions.map((item) => item.questionNo), ["2"]);
-  assert.deepEqual(solInputs[0].input.referenceAnswers.map((item) => item.questionNo), ["2"]);
-  assert.deepEqual(solInputs[0].input.questionLayoutManifest.questions.map((item) => item.questionNo), ["2"]);
-  assert.deepEqual(solInputs[0].input.assignmentItems.map((item) => item.questionNo), ["2"]);
-  assert.equal(solInputs[0].input.answerKey, "2. 勇敢并结合文本");
-  assert.doesNotMatch(solInputs[0].input.manualText, /\bC\b/);
-  assert.match(solInputs[0].input.manualText, /^2\./);
-  assert.equal(solInputs[0].execution.reasoningEffort, "high");
-  assert.equal(premiumCalls, 0);
-  assert.equal(result.structured.questionResults[0].modelEscalated, undefined);
-  assert.equal(result.structured.questionResults[1].modelEscalated, true);
-  assert.equal(result.structured.score, 9);
-});
-
-test("quality Sol success returns and persists the effective merged result with both run ids", async () => {
-  let runId = 0;
-  const result = await gradeSubmissionService(
-    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
-    {
-      assignmentId: "existing-assignment",
-      subject: "语文",
-      totalScore: 10,
-      referenceAnswers: [
-        { questionNo: "1", prompt: "选择题", correctAnswer: "C", score: 4, confidence: 1 },
-        { questionNo: "2", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }
-      ],
-      ocrQuestions: [
-        { questionNo: "1", printedText: "选择题", studentAnswer: "C", confidence: 0.99 },
-        { questionNo: "2", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.99 }
-      ]
-    },
-    {
-      prisma: { modelRun: { create: async ({ data }) => ({ id: `run-${++runId}`, ...data }) } },
-      gradingRunner: async () => riskyTwoQuestionResult(),
-      solGradingRunner: async () => ({
-        available: true,
-        providerId: "sol-provider",
-        gradingText: JSON.stringify({ questionResults: [{ questionNo: "2", status: "partial", score: 5, maxScore: 6, correctAnswer: "勇敢", confidence: 0.9 }] }),
-        modelRun: { provider: "gpt56", model: "gpt-5.6-sol", status: "SUCCESS" }
-      })
-    }
-  );
-
-  const effective = JSON.parse(result.gradingText);
-  assert.deepEqual(effective.questionResults.map((item) => item.questionNo), ["1", "2"]);
-  assert.equal(result.providerId, "sol-provider");
-  assert.equal(result.available, true);
-  assert.equal(result.persisted.modelRunId, "run-2");
-  assert.equal(result.persisted.primaryModelRunId, "run-1");
-  assert.equal(result.persisted.escalationModelRunId, "run-2");
-  assert.equal(result.solAttempted, true);
-  assert.equal(result.usedModelEscalation, true);
-});
-
-test("quality Sol persistence failure preserves Terra effective result and blocks review", async () => {
-  let persistCalls = 0;
-  const result = await gradeSubmissionService(
-    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
-    {
-      assignmentId: "existing-assignment",
-      subject: "语文",
-      totalScore: 6,
-      referenceAnswers: [{ questionNo: "1", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }],
-      ocrQuestions: [{ questionNo: "1", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.99 }]
-    },
-    {
-      prisma: {
-        modelRun: {
-          create: async ({ data }) => {
-            persistCalls += 1;
-            if (persistCalls === 2) throw new Error("optional grading Sol persistence failed");
-            return { id: "terra-run", ...data };
-          }
-        }
-      },
-      gradingRunner: async () => ({
-        ...riskyTwoQuestionResult(),
-        providerId: "terra-provider",
-        gradingText: JSON.stringify({ score: 3, questionResults: [{ questionNo: "1", status: "uncertain", score: 3, maxScore: 6, correctAnswer: "勇敢", confidence: 0.5 }] })
-      }),
-      solGradingRunner: async () => ({
-        available: true,
-        providerId: "sol-provider",
-        gradingText: JSON.stringify({ questionResults: [{ questionNo: "1", status: "correct", score: 6, maxScore: 6, correctAnswer: "勇敢", confidence: 0.95 }] }),
-        modelRun: { provider: "gpt56", model: "gpt-5.6-sol", status: "SUCCESS" }
-      })
-    }
-  );
-
-  assert.equal(result.providerId, "terra-provider");
-  assert.equal(result.persisted.modelRunId, "terra-run");
-  assert.equal(result.persisted.primaryModelRunId, "terra-run");
-  assert.equal(result.persisted.escalationModelRunId, null);
-  assert.equal(result.solAttempted, true);
-  assert.equal(result.usedModelEscalation, false);
-  assert.equal(result.escalationPersistenceError, "optional grading Sol persistence failed");
-  assert.equal(result.structured.score, null);
-  assert.equal(result.structured.gradingAudit.scoreReliable, false);
-  assert.equal(result.structured.gradingAudit.archiveAllowed, false);
-});
-
-test("quality Sol does not adopt empty, non-selected, or duplicate replacements", async () => {
-  const invalidQuestionResults = [
-    [],
-    [{ questionNo: "99", status: "correct", score: 6, maxScore: 6, confidence: 0.95 }],
-    [
-      { questionNo: "1", status: "correct", score: 6, maxScore: 6, confidence: 0.95 },
-      { questionNo: "1", status: "partial", score: 3, maxScore: 6, confidence: 0.9 }
-    ]
-  ];
-  for (const questionResults of invalidQuestionResults) {
-    const terraText = JSON.stringify({ score: 3, questionResults: [{ questionNo: "1", status: "uncertain", score: 3, maxScore: 6, confidence: 0.5 }] });
-    const result = await gradeSubmissionService(
-      { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
-      {
-        subject: "语文",
-        totalScore: 6,
-        referenceAnswers: [{ questionNo: "1", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }],
-        ocrQuestions: [{ questionNo: "1", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.99 }]
-      },
-      {
-        persist: false,
-        gradingRunner: async () => ({ available: true, providerId: "terra-provider", gradingText: terraText }),
-        solGradingRunner: async () => ({
-          available: true,
-          providerId: "sol-provider",
-          gradingText: JSON.stringify({ questionResults }),
-          modelRun: { provider: "gpt56", model: "gpt-5.6-sol", status: "SUCCESS", metadata: { usedModelEscalation: true } }
-        })
-      }
-    );
-
-    assert.equal(result.providerId, "terra-provider");
-    assert.equal(result.gradingText, terraText);
-    assert.equal(result.solAttempted, true);
-    assert.equal(result.usedModelEscalation, false);
-    assert.equal(result.structured.score, null);
-    assert.equal(result.structured.gradingAudit.archiveAllowed, false);
-  }
-});
-
-test("Sol filtering preserves original question numbers when source arrays omit questionNo", async () => {
-  let solInput = null;
-  const result = await gradeSubmissionService(
-    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
-    {
-      subject: "语文",
-      totalScore: 10,
-      referenceAnswers: [
-        { orderIndex: "2", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 },
-        { orderIndex: "1", prompt: "选择题", correctAnswer: "C", score: 4, confidence: 1 }
-      ],
-      ocrQuestions: [
-        { orderIndex: "2", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.99 },
-        { orderIndex: "1", printedText: "选择题", studentAnswer: "C", confidence: 0.99 }
-      ],
-      assignmentItems: [{ index: "2", prompt: "分析人物。" }, { index: "1", prompt: "选择题" }],
-      questionLayoutManifest: { questions: [{ orderIndex: "2", prompt: "分析人物。" }, { orderIndex: "1", prompt: "选择题" }] }
-    },
-    {
-      persist: false,
-      gradingRunner: async () => riskyTwoQuestionResult(),
-      solGradingRunner: async (_config, input) => {
-        solInput = input;
-        return {
-          available: true,
-          providerId: "gpt56",
-          gradingText: JSON.stringify({ questionResults: [{ questionNo: "2", status: "partial", score: 5, maxScore: 6, confidence: 0.9 }] })
-        };
-      }
-    }
-  );
-
-  assert.deepEqual(solInput.ocrQuestions.map((item) => item.questionNo), ["2"]);
-  assert.deepEqual(solInput.referenceAnswers.map((item) => item.questionNo), ["2"]);
-  assert.deepEqual(solInput.assignmentItems.map((item) => item.questionNo), ["2"]);
-  assert.deepEqual(solInput.questionLayoutManifest.questions.map((item) => item.questionNo), ["2"]);
-  assert.equal(result.structured.questionResults.find((item) => item.questionNo === "2").modelEscalated, true);
-});
-
-test("Sol selection includes low confidence, answer conflict, and locatable score mismatch only", async () => {
-  const cases = [
-    { overrides: { status: "correct", confidence: 0.4 }, expected: ["2"] },
-    { overrides: { status: "correct", confidence: 0.95, correctAnswer: "另一个答案" }, expected: ["2"] },
-    { overrides: { status: "correct", confidence: 0.95, score: 7, maxScore: 6 }, expected: ["2"] }
-  ];
-  for (const sample of cases) {
-    const selected = [];
-    await gradeSubmissionService(
-      { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
-      {
-        subject: "语文",
-        totalScore: 10,
-        referenceAnswers: [
-          { questionNo: "1", prompt: "选择题", correctAnswer: "C", score: 4, confidence: 1 },
-          { questionNo: "2", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }
-        ],
-        ocrQuestions: [
-          { questionNo: "1", printedText: "选择题", studentAnswer: "C", confidence: 0.99 },
-          { questionNo: "2", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.99 }
-        ]
-      },
-      {
-        persist: false,
-        gradingRunner: async () => riskyTwoQuestionResult(sample.overrides),
-        solGradingRunner: async (_config, input) => {
-          selected.push(...input.ocrQuestions.map((item) => item.questionNo));
-          return riskyTwoQuestionResult({ status: "correct", confidence: 0.95, score: 6, maxScore: 6, correctAnswer: "勇敢" });
-        }
-      }
-    );
-    assert.deepEqual(selected, sample.expected);
-  }
-});
-
-test("answer conflict selection preserves numeric and boolean answers", async () => {
-  for (const sample of [
-    { referenceAnswer: 0, modelAnswer: false, expectedCalls: 1 },
-    { referenceAnswer: 0, modelAnswer: 0, expectedCalls: 0 },
-    { referenceAnswer: false, modelAnswer: 0, expectedCalls: 1 },
-    { referenceAnswer: false, modelAnswer: false, expectedCalls: 0 }
-  ]) {
-    let solCalls = 0;
-    await gradeSubmissionService(
-      { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
-      {
-        subject: "数学",
-        totalScore: 5,
-        referenceAnswers: [{ questionNo: "1", prompt: "说明判断结果", correctAnswer: sample.referenceAnswer, score: 5, confidence: 1 }],
-        ocrQuestions: [{ questionNo: "1", printedText: "说明判断结果", studentAnswer: "0", confidence: 0.99 }]
-      },
-      {
-        persist: false,
-        gradingRunner: async () => ({
-          available: true,
-          providerId: "gpt56",
-          gradingText: JSON.stringify({
-            score: 5,
-            questionResults: [{ questionNo: "1", status: "correct", score: 5, maxScore: 5, correctAnswer: sample.modelAnswer, confidence: 0.95 }]
-          })
-        }),
-        solGradingRunner: async () => {
-          solCalls += 1;
-          return { available: true, providerId: "gpt56", gradingText: JSON.stringify({ questionResults: [{ questionNo: "1", status: "correct", score: 5, maxScore: 5, correctAnswer: sample.referenceAnswer, confidence: 0.95 }] }) };
-        }
-      }
-    );
-    assert.equal(solCalls, sample.expectedCalls);
-  }
-});
-
-test("insufficient grading evidence never calls Sol", async () => {
-  const cases = [
-    { imageQuality: { status: "poor" } },
-    { imageQuality: { status: "needs_review" } },
-    { studentAnswerText: "", ocrQuestions: [{ questionNo: "1", printedText: "1+1=?", studentAnswer: "" }] },
-    { printedText: "", ocrQuestions: [{ questionNo: "1", printedText: "", studentAnswer: "2" }] },
-    { ocrStatus: "UNSEPARATED" }
-  ];
-  for (const evidence of cases) {
-    let solCalls = 0;
-    await gradeSubmissionService(
-      { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
-      {
-        subject: "数学",
-        totalScore: 5,
-        referenceAnswers: [{ questionNo: "1", prompt: "1+1=?", correctAnswer: "2", score: 5, confidence: 1 }],
-        printedText: "1. 1+1=?",
-        studentAnswerText: "1. 2",
-        ocrQuestions: [{ questionNo: "1", printedText: "1+1=?", studentAnswer: "2", confidence: 0.95 }],
-        ...evidence
-      },
-      {
-        persist: false,
-        gradingRunner: async () => riskyTwoQuestionResult(),
-        solGradingRunner: async () => { solCalls += 1; return riskyTwoQuestionResult(); },
-        gradingReviewers: { premium: async () => ({ available: false, reviewText: "" }) }
-      }
-    );
-    assert.equal(solCalls, 0, JSON.stringify(evidence));
-  }
-});
-
-test("insufficient evidence still runs Terra grading with runtime Sol disabled", async () => {
-  let gradingCalls = 0;
-  let execution = null;
-  let solCalls = 0;
-  const result = await gradeSubmissionService(
-    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
-    {
-      subject: "语文",
-      totalScore: 6,
-      referenceAnswers: [{ questionNo: "1", prompt: "", correctAnswer: "言之有理即可", score: 6, confidence: 1 }],
-      studentAnswerText: "1. 勇敢",
-      ocrQuestions: [{ questionNo: "1", printedText: "", studentAnswer: "勇敢", confidence: 0.95 }]
-    },
-    {
-      persist: false,
-      gradingRunner: async (_config, _input, runnerExecution) => {
-        gradingCalls += 1;
-        execution = runnerExecution;
-        return {
-          available: false,
-          providerId: "gpt56",
-          gradingText: "",
-          modelRun: { provider: "gpt56", model: "gpt-5.6", status: "ERROR" }
-        };
-      },
-      solGradingRunner: async () => {
-        solCalls += 1;
-        throw new Error("Sol must not run without sufficient evidence");
-      },
-      gradingReviewers: {
-        premium: async () => ({ available: false, reviewText: "" })
-      }
-    }
-  );
-
-  assert.equal(gradingCalls, 1);
-  assert.equal(execution.disableSolEscalation, true);
-  assert.equal(solCalls, 0);
-  assert.equal(result.structured.score, null);
-  assert.equal(result.structured.needsTeacherReview, true);
-});
-
-test("unresolved Sol preserves provisional score, blocks audit, and does not chain a Terra reviewer", async () => {
-  let premiumCalls = 0;
-  const result = await gradeSubmissionService(
-    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
-    {
-      subject: "语文",
-      totalScore: 6,
-      referenceAnswers: [{ questionNo: "1", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }],
-      ocrQuestions: [{ questionNo: "1", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.95 }]
-    },
-    {
-      persist: false,
-      gradingRunner: async () => ({
-        available: true,
-        providerId: "gpt56",
-        gradingText: JSON.stringify({ score: 3, questionResults: [{ questionNo: "1", status: "uncertain", score: 3, maxScore: 6, confidence: 0.5 }] })
-      }),
-      solGradingRunner: async () => ({
-        available: true,
-        providerId: "gpt56",
-        gradingText: JSON.stringify({ score: 3, questionResults: [{ questionNo: "1", status: "uncertain", score: 3, maxScore: 6, confidence: 0.55 }] })
-      }),
-      gradingReviewers: { premium: async () => { premiumCalls += 1; return { available: true, reviewText: "{}" }; } }
-    }
-  );
-
-  assert.equal(premiumCalls, 0);
-  assert.equal(result.structured.score, null);
-  assert.equal(result.structured.provisionalScore, 3);
-  assert.equal(result.structured.gradingAudit.required, true);
-  assert.equal(result.structured.gradingAudit.scoreReliable, false);
-  assert.equal(result.structured.gradingAudit.archiveAllowed, false);
-});
-
-test("a failed runtime Sol attempt does not chain a Terra risk reviewer", async () => {
-  let premiumCalls = 0;
-  const result = await gradeSubmissionService(
-    { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
-    {
-      subject: "语文",
-      totalScore: 6,
-      referenceAnswers: [{ questionNo: "1", prompt: "分析人物。", correctAnswer: "勇敢", score: 6, confidence: 1 }],
-      ocrQuestions: [{ questionNo: "1", printedText: "分析人物。", studentAnswer: "勇敢", confidence: 0.95 }]
-    },
-    {
-      persist: false,
-      gradingRunner: async () => ({
-        available: false,
-        providerId: "gpt56",
-        gradingText: "",
-        modelRun: {
-          provider: "gpt56",
-          model: "gpt-5.6-sol",
-          status: "ERROR",
-          metadata: { solAttempted: true, usedModelEscalation: false }
-        }
-      }),
-      solGradingRunner: async () => { throw new Error("must not attempt Sol twice"); },
-      gradingReviewers: { premium: async () => { premiumCalls += 1; return { available: true, reviewText: "{}" }; } }
-    }
-  );
-
-  assert.equal(premiumCalls, 0);
-  assert.equal(result.structured.score, null);
-  assert.equal(result.structured.gradingAudit.scoreReliable, false);
+  });
+  assert.equal(budgets.length, 2); assert.equal(budgets[0], budgets[1]);
+  assert.equal(budgets[0].deadlineAt, 1300); assert.deepEqual(remaining, [800]);
+  assert.equal(result.structured.archiveEligible, false);
 });

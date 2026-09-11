@@ -6,13 +6,13 @@ import {
   draftTeacherTask,
   generateSubmissionReferenceAnswers,
   gradeSubmissionText,
-  normalizeRuntimeConfig,
   reviewWithGpt55,
-  reviewWithMiniMax,
-  solEscalationEnabled
+  reviewWithMiniMax
 } from "@junhang/ai";
 import { randomUUID } from "node:crypto";
-import { matchesTeacherConfirmedTextbookChapterScope, matchesTextbookEvidenceScope, normalizeGradeLevel } from "@junhang/core";
+import { matchesTeacherConfirmedTextbookChapterScope, matchesTextbookEvidenceScope, normalizeGradeLevel, normalizeTeachingPurpose } from "@junhang/core";
+import { assessmentContentIssues, createTeachingOperationBudget } from "../../ai/src/teaching-pipeline.js";
+import { buildAssessmentPartitions } from "../../ai/src/assessment-partitions.js";
 import {
   createAssignmentDraft,
   createLearningTask,
@@ -1035,7 +1035,7 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
     printedText: input.printedText || ocr.printedText || "",
     ocrQuestions: Array.isArray(input.ocrQuestions) ? input.ocrQuestions : ocr.questions || []
   };
-  let result = await referenceAnswerRunner(config, runnerInput);
+  let result = await referenceAnswerRunner(config, runnerInput, options.teachingExecution);
   let modelRun = await persistRun(result.modelRun, options);
   let escalationModelRun = null;
   let escalationPersistenceError = null;
@@ -1054,49 +1054,6 @@ async function prepareSubmissionReferenceAnswers(config, input = {}, ocr = {}, o
   let averageConfidence = normalizedAnswers.length
     ? normalizedAnswers.reduce((sum, item) => sum + Number(item.confidence || 0), 0) / normalizedAnswers.length
     : optionalNumber(parsed.confidence) ?? 0;
-  const runtime = normalizeRuntimeConfig(config);
-  const solEnabled = solEscalationEnabled(runtime);
-  const clearPrintedEvidence = Boolean(
-    runnerInput.printedText ||
-    runnerInput.ocrQuestions.some((item) => String(item?.printedText || item?.printedPrompt || "").trim())
-  );
-  if (solEnabled && clearPrintedEvidence && !solAttempted && !usedModelEscalation && result.available && normalizedAnswers.length && averageConfidence < 0.72) {
-    const solResult = await referenceAnswerRunner(config, runnerInput, {
-      model: runtime.gpt56SolModel,
-      timeoutMs: runtime.gpt56SolFallbackTimeoutMs,
-      reasoningEffort: "high",
-      role: "sol-reference-escalation",
-      disableSolEscalation: true
-    });
-    const solParsed = parseJsonObjectText(solResult.referenceText) || {};
-    const solRawAnswers = Array.isArray(solParsed.referenceAnswers)
-      ? solParsed.referenceAnswers
-      : Array.isArray(solParsed.answers)
-        ? solParsed.answers
-        : [];
-    const solAnswers = solRawAnswers
-      .map(normalizeReferenceAnswerItem)
-      .filter((item) => item.correctAnswer || item.prompt);
-    solAttempted = true;
-    let solModelRun = null;
-    let solPersistenceAvailable = true;
-    try {
-      solModelRun = await persistRun(solResult.modelRun, options);
-      escalationModelRun = solModelRun;
-    } catch (error) {
-      solPersistenceAvailable = false;
-      escalationPersistenceError = String(error?.message || error || "Sol escalation persistence failed");
-    }
-    if (solPersistenceAvailable && solResult.available && solAnswers.length) {
-      result = solResult;
-      parsed = solParsed;
-      rawAnswers = solRawAnswers;
-      normalizedAnswers = solAnswers;
-      averageConfidence = solAnswers.reduce((sum, item) => sum + Number(item.confidence || 0), 0) / solAnswers.length;
-      modelRun = solModelRun;
-      usedModelEscalation = true;
-    }
-  }
   const referenceAnswers = normalizedAnswers;
   return {
     mode: "ai_generated_reference",
@@ -1173,119 +1130,6 @@ function parseGradingAuditResult(auditResult = null) {
     error: auditResult.error || null,
     modelRun: auditResult.modelRun || null
   };
-}
-
-function parseAssessmentQualityReview(auditResult = null, label = "模型审查") {
-  if (!auditResult) {
-    return {
-      label,
-      available: false,
-      status: "needs_review",
-      riskLevel: "high",
-      exportReady: false,
-      qualityScore: null,
-      issues: [`${label}未执行。`],
-      suggestions: []
-    };
-  }
-  const parsed = parseJsonObjectText(auditResult.reviewText) || {};
-  const unavailable = !auditResult.available;
-  const issues = [
-    ...toStringArray(parsed.issues),
-    ...toStringArray(parsed.blockedReasons)
-  ];
-  if (unavailable) issues.push(`${label}未完成：${auditResult.error || "模型不可用或超时。"}`);
-  const status = String(parsed.status || (unavailable ? "needs_review" : "pass")).toLowerCase();
-  const riskLevel = String(parsed.riskLevel || (unavailable ? "high" : "medium")).toLowerCase();
-  const exportReady = !unavailable &&
-    parsed.exportReady !== false &&
-    !/needs|review|fail|block|不通过|复核/.test(status) &&
-    !/high|高/.test(riskLevel);
-  if (!exportReady && !issues.length) issues.push(`${label}要求教师重点复核。`);
-  return {
-    label,
-    available: Boolean(auditResult.available),
-    status,
-    riskLevel,
-    exportReady,
-    qualityScore: optionalNumber(parsed.qualityScore),
-    issues,
-    suggestions: toStringArray(parsed.suggestions),
-    raw: parsed,
-    error: auditResult.error || null,
-    modelRun: auditResult.modelRun || null
-  };
-}
-
-function compactAssessmentQualityReview(auditResult = null, label = "模型审查", modelRunId = null) {
-  const { modelRun, ...review } = parseAssessmentQualityReview(auditResult, label);
-  return {
-    ...review,
-    modelRunId: modelRunId || null,
-    modelRunStatus: modelRun?.status || null
-  };
-}
-
-function strongestRiskLevel(values = []) {
-  const order = { low: 1, medium: 2, high: 3 };
-  return values.reduce((current, value) => {
-    const normalized = String(value || "medium").toLowerCase();
-    return order[normalized] > order[current] ? normalized : current;
-  }, "low");
-}
-
-function mergeGradingAudits(audits = [], config = {}) {
-  const requireSecondModelAudit = String(config.GRADING_REQUIRE_SECOND_MODEL_AUDIT ?? config.gradingRequireSecondModelAudit ?? "true").toLowerCase() !== "false";
-  const requirePremiumJudge = String(config.GRADING_REQUIRE_PREMIUM_JUDGE ?? config.gradingRequirePremiumJudge ?? "true").toLowerCase() !== "false";
-  const normalized = audits.map((entry) => ({
-    role: entry.role,
-    required: entry.role === "premium" ? requirePremiumJudge : requireSecondModelAudit,
-    label: entry.label,
-    audit: parseGradingAuditResult(entry.result)
-  }));
-  const requiredAudits = normalized.filter((entry) => entry.required);
-  const blocking = requiredAudits.filter((entry) => !entry.audit.available || !entry.audit.scoreReliable || !entry.audit.archiveAllowed);
-  const issues = normalized.flatMap((entry) => {
-    const prefix = entry.label ? `${entry.label}：` : "";
-    const ownIssues = entry.audit.issues.length ? entry.audit.issues : entry.audit.error ? [entry.audit.error] : [];
-    if (!entry.audit.available && entry.required) {
-      ownIssues.push(`${entry.label || entry.role}未完成，不能生成最终分。`);
-    }
-    return ownIssues.map((issue) => `${prefix}${issue}`);
-  });
-  const suggestions = normalized.flatMap((entry) => {
-    const prefix = entry.label ? `${entry.label}：` : "";
-    return entry.audit.suggestions.map((suggestion) => `${prefix}${suggestion}`);
-  });
-  const available = requiredAudits.length > 0 && requiredAudits.every((entry) => entry.audit.available);
-  const scoreReliable = blocking.length === 0 && requiredAudits.every((entry) => entry.audit.scoreReliable);
-  const archiveAllowed = scoreReliable && requiredAudits.every((entry) => entry.audit.archiveAllowed);
-  return {
-    merged: true,
-    available,
-    status: archiveAllowed ? "pass" : "needs_review",
-    riskLevel: blocking.length ? "high" : strongestRiskLevel(normalized.map((entry) => entry.audit.riskLevel)),
-    scoreReliable,
-    archiveAllowed,
-    issues,
-    suggestions,
-    raw: {
-      audits: normalized.map((entry) => ({
-        role: entry.role,
-        label: entry.label,
-        required: entry.required,
-        ...entry.audit
-      }))
-    }
-  };
-}
-
-function shouldRunDeepGradingAudit(config = {}, input = {}, options = {}) {
-  if (options.runDeepGradingAudit != null) return options.runDeepGradingAudit === true;
-  if (input.runDeepGradingAudit != null) return input.runDeepGradingAudit === true;
-  const configFlag = config.GRADING_RUN_DEEP_AUDIT ?? config.gradingRunDeepAudit ?? config.GRADING_ENABLE_DEEP_AUDIT ?? config.gradingEnableDeepAudit;
-  if (configFlag != null) return String(configFlag).toLowerCase() === "true";
-  return false;
 }
 
 function skippedGradingAudit() {
@@ -1735,6 +1579,7 @@ function applyQuestionScoreTrace(questionResults = [], input = {}, earnedScore =
     : defaultSubmissionTotalScore(input);
   const fallbackMaxScore = fallbackTotal / questionResults.length;
   return questionResults.map((item) => {
+    if (item.status === "uncertain") return { ...item, score: null };
     const reference = referenceByQuestion.get(String(item.questionNo || ""));
     const maxScore = optionalNumber(item.maxScore ?? reference?.score) ?? fallbackMaxScore;
     const score = optionalNumber(item.score) ?? (
@@ -1897,7 +1742,7 @@ function normalizeGradingResult(result = {}, input = {}, ocr = {}) {
   const questionResults = applyQuestionScoreTrace(normalizedQuestions, input, score);
   const annotationMarkers = buildAnnotationMarkers(questionResults);
   const questionScore = inferScoreFromQuestionResults(questionResults, input);
-  const inferredScore = questionScore ?? score;
+  const inferredScore = questionResults.length ? questionScore : score;
   const quality = {
     ...evaluateGradingQuality({ questionResults, score: inferredScore, summary, input, ocr, parsed }),
     modelScore: score,
@@ -1937,14 +1782,7 @@ function normalizeGradingResult(result = {}, input = {}, ocr = {}) {
   };
 }
 
-function shouldRunGradingRiskReview(structured = {}) {
-  const questions = Array.isArray(structured.questionResults) ? structured.questionResults : [];
-  return structured.quality?.lowConfidence === true ||
-    structured.quality?.scoreMismatch === true ||
-    questions.some((item) => item.status === "uncertain" || Number(item.confidence ?? 1) < 0.62);
-}
-
-function hasSufficientSolGradingEvidence(input = {}, ocr = {}, reference = {}) {
+function hasSufficientTeachingGradingEvidence(input = {}, ocr = {}, reference = {}) {
   const imageQualityStatus = String(ocr.imageQuality?.status || input.imageQuality?.status || "").toLowerCase();
   const imageBlocked = ["poor", "needs_review"].includes(imageQualityStatus);
   const ocrStatus = String(ocr.status || input.ocrStatus || "").toLowerCase();
@@ -1961,110 +1799,6 @@ function hasSufficientSolGradingEvidence(input = {}, ocr = {}, reference = {}) {
     questions.some((item) => String(item?.printedText || item?.printedPrompt || "").trim())
   );
   return !imageBlocked && !unseparatedOcr && hasStudentWork && hasPrompt && reference.available === true;
-}
-
-function selectSolGradingQuestionNos(structured = {}, input = {}, ocr = {}, reference = {}) {
-  if (!hasSufficientSolGradingEvidence(input, ocr, reference)) return [];
-  const references = new Map((reference.referenceAnswers || []).map((item) => [String(item.questionNo || ""), item]));
-  const normalizeAnswer = (value) => String(value ?? "").normalize("NFKC").replace(/\s+/g, "").trim().toLowerCase();
-  const questions = Array.isArray(structured.questionResults) ? structured.questionResults : [];
-  const selected = questions.filter((item) => {
-    const referenceItem = references.get(String(item.questionNo || ""));
-    const reportedAnswer = normalizeAnswer(item.correctAnswer);
-    const referenceAnswer = normalizeAnswer(referenceItem?.correctAnswer);
-    const answerConflict = Boolean(reportedAnswer && referenceAnswer && reportedAnswer !== referenceAnswer);
-    const score = optionalNumber(item.score);
-    const maxScore = optionalNumber(item.maxScore);
-    const localScoreMismatch = score != null && maxScore != null && (score < 0 || score > maxScore);
-    return item.status === "uncertain" || Number(item.confidence ?? 1) < 0.62 || answerConflict || localScoreMismatch;
-  });
-  if (!selected.length && structured.quality?.scoreMismatch === true) return questions.map((item) => String(item.questionNo || "")).filter(Boolean);
-  return selected.map((item) => String(item.questionNo || "")).filter(Boolean);
-}
-
-function buildSolGradingInput(input = {}, questionNos = []) {
-  const selected = new Set(questionNos.map(String));
-  const withQuestionNo = (items = []) => items.map((item, index) => ({
-    ...item,
-    questionNo: String(item.questionNo ?? item.no ?? item.orderIndex ?? item.index ?? index + 1)
-  }));
-  const questions = withQuestionNo(input.ocrQuestions || []).filter((item) => selected.has(item.questionNo));
-  const references = withQuestionNo(input.referenceAnswers || []).filter((item) => selected.has(item.questionNo));
-  const assignmentItems = withQuestionNo(input.assignmentItems || []).filter((item) => selected.has(item.questionNo));
-  const questionLayoutManifest = input.questionLayoutManifest
-    ? filterQuestionLayoutManifest({
-        ...input.questionLayoutManifest,
-        questions: withQuestionNo(input.questionLayoutManifest.questions || [])
-      }, selected)
-    : null;
-  const answerKey = parseAnswerKeyReferenceAnswers(input.answerKey)
-    .filter((item) => selected.has(String(item.questionNo || "")))
-    .map((item) => `${item.questionNo}. ${item.correctAnswer}`)
-    .join(" ") || null;
-  const numberedText = (field) => questions
-    .map((item) => `${item.questionNo}. ${String(item[field] || "").trim()}`)
-    .join(" ");
-  return {
-    ...input,
-    answerKey,
-    ocrQuestions: questions,
-    referenceAnswers: references,
-    assignmentItems,
-    printedText: numberedText("printedText"),
-    ocrText: numberedText("printedText"),
-    studentAnswerText: numberedText("studentAnswer"),
-    manualText: numberedText("studentAnswer"),
-    questionLayoutManifest
-  };
-}
-
-function mergeSolGradingResult(initialStructured = {}, solResult = {}, input = {}, selectedQuestionNos = []) {
-  const parsed = parseJsonObjectText(solResult.gradingText) || {};
-  const solQuestions = Array.isArray(parsed.questionResults) ? parsed.questionResults : [];
-  const selected = new Set(selectedQuestionNos.map(String));
-  const allowedStatuses = new Set(["correct", "wrong", "partial", "uncertain"]);
-  const counts = new Map();
-  for (const item of solQuestions) {
-    const questionNo = String(item?.questionNo ?? item?.no ?? "").trim();
-    if (selected.has(questionNo)) counts.set(questionNo, (counts.get(questionNo) || 0) + 1);
-  }
-  const solByQuestion = new Map(solQuestions
-    .filter((item) => {
-      const questionNo = String(item?.questionNo ?? item?.no ?? "").trim();
-      const status = String(item?.status || "").trim().toLowerCase();
-      return selected.has(questionNo) && counts.get(questionNo) === 1 && allowedStatuses.has(status);
-    })
-    .map((item) => [String(item.questionNo ?? item.no).trim(), { ...item, modelEscalated: true }]));
-  if (!solByQuestion.size) return null;
-  const questionResults = (initialStructured.questionResults || []).map((item) => solByQuestion.get(String(item.questionNo || "")) || item);
-  const explicitScores = questionResults.map((item) => optionalNumber(item.score));
-  const score = explicitScores.every((item) => item != null)
-    ? Number(explicitScores.reduce((sum, item) => sum + Number(item), 0).toFixed(2))
-    : inferScoreFromQuestionResults(questionResults, input);
-  return {
-    ...solResult,
-    gradingText: JSON.stringify({
-      ...parsed,
-      score,
-      questionResults
-    })
-  };
-}
-
-function blockingSolGradingAudit() {
-  return {
-    merged: true,
-    required: true,
-    available: true,
-    status: "needs_review",
-    riskLevel: "high",
-    scoreReliable: false,
-    archiveAllowed: false,
-    issues: ["Sol 复核后仍存在批改风险，需要教师逐题确认。"],
-    suggestions: [],
-    raw: { audits: [] },
-    error: null
-  };
 }
 
 function normalizeAssessmentItem(item, index) {
@@ -2248,6 +1982,7 @@ function buildAssessmentItemMetadata(source = {}, index) {
   const passageQuestionIndex = Number(source.passageQuestionIndex || source.questionInPassage || source.groupQuestionIndex) || null;
   return {
     sourceIndex: index + 1,
+    ...(source.dayId ? { dayId: source.dayId } : {}),
     score: source.score ?? source.points ?? null,
     difficulty: source.difficulty || null,
     knowledgePoint: source.knowledgePoint || source.point || null,
@@ -4161,6 +3896,32 @@ function normalizeAssessmentDraft(result = {}, input = {}) {
       ? parsed.items
       : sectionItems;
   const items = rawItems.map(normalizeAssessmentItem).filter((item) => item.prompt);
+  if (input.purpose && input.purpose !== "comprehensive") {
+    const incomplete = !result.available || result.modelRun?.metadata?.partialGeneration === true;
+    const issues = incomplete ? ["内容未完整生成，请检查失败单元后重新生成或由教师补充。"] : [];
+    for (const partition of buildAssessmentPartitions(input)) {
+      const candidate = partition.dayId
+        ? { ...parsed, sections: (parsed.sections || []).filter((section) => section.dayId === partition.dayId) }
+        : partition.purpose === "focused"
+          ? { ...parsed, sections: (parsed.sections || []).map((section) => ({ ...section, items: (section.items || []).filter((item) => partition.itemTypes.includes(item.itemType)) })).filter((section) => section.items.length) }
+          : parsed;
+      if (assessmentContentIssues(candidate, partition).length) issues.push("题型、题量、答案解析或教学结构不完整，请教师修正后再确认。");
+    }
+    const allowedTypes = new Set(input.purpose === "multi_day" ? input.dayPlan.flatMap((day) => day.requestedItemTypes) : input.requestedItemTypes);
+    if (input.purpose !== "explanation" && rawItems.some((item) => !allowedTypes.has(item.itemType))) issues.push("草稿包含未请求的题型，请教师修正。");
+    if (input.purpose === "multi_day" && (parsed.sections || []).some((section) => !input.dayPlan.some((day) => day.dayId === section.dayId))) issues.push("每日分区标识不匹配，请教师修正。");
+    for (const [index, item] of items.entries()) {
+      if (!Number.isFinite(item.metadata?.score) || item.metadata.score <= 0) issues.push(`第 ${index + 1} 题分值无效。`);
+      if (/如图|图中|画图/.test(item.prompt) && !item.metadata?.figure) issues.push(`第 ${index + 1} 题缺少图形。`);
+    }
+    return {
+      parsed, title: buildAssessmentTitle(input, parsed), items, answerKey: null,
+      totalScore: items.reduce((sum, item) => sum + Number(item.metadata?.score || 0), 0),
+      usedModelEscalation: result.modelRun?.metadata?.usedModelEscalation === true,
+      usedDynamicFallback: false, printNotes: parsed.printNotes || [], sections: parsed.sections || [], layout: parsed.layout || null,
+      audit: { status: issues.length ? "needs_teacher_review" : "passed", passed: !issues.length, itemCount: items.length, issues, teacherMessage: "结构化草稿，等待教师确认。" }
+    };
+  }
   const usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
   const providerUsedDynamicFallback = !result.available || !items.length || result.modelRun?.metadata?.partialGeneration === true;
   const review = reviewAndRepairAssessmentItems(items.length ? items : buildFallbackAssessmentItems(input), input);
@@ -4198,9 +3959,10 @@ function normalizeAssessmentDraft(result = {}, input = {}) {
 }
 
 function buildAssessmentGenerationPipeline({ result = {}, draft = {}, input = {}, printProfile = null, layoutTemplate = null, modelRun = null, modelReviews = {}, modelReviewRequired = false }) {
+  const explanationOnly = input.purpose === "explanation";
   const audit = draft.audit || {};
   const attempts = Array.isArray(result.modelRun?.metadata?.attempts) ? result.modelRun.metadata.attempts : [];
-  const draftReady = Boolean(draft.items?.length);
+  const draftReady = Boolean(draft.items?.length || draft.parsed?.explanation);
   const auditPassed = audit.status === "passed";
   const reviewEntries = Object.values(modelReviews).filter(Boolean);
   const modelReviewPassed = reviewEntries.length
@@ -4268,36 +4030,29 @@ function buildAssessmentGenerationPipeline({ result = {}, draft = {}, input = {}
       reviews: modelReviews
     },
     gates: {
-      draftPdfRequired: true,
+      draftPdfRequired: !explanationOnly,
       draftPdfExported: false,
       modelReviewRequired,
       modelReviewPassed: modelReviewRequired ? modelReviewPassed : null,
       teacherReviewRequired: true,
-      teacherReviewStatus: "not_exported",
+      teacherReviewStatus: explanationOnly ? "pending_teacher_review" : "not_exported",
       finalExportAllowed: false,
       finalExported: false,
-      answerAnalysisRequired: true,
-      gradingSourcePackageRequired: true
+      answerAnalysisRequired: !explanationOnly,
+      gradingSourcePackageRequired: !explanationOnly
     },
     print: {
       paper: "A4",
       layoutTemplate,
       printProfile,
-      requiredAssets: ["student-paper", "answer-analysis"]
+      requiredAssets: explanationOnly ? [] : ["student-paper", "answer-analysis"]
     },
-    summary: draftReady
+    summary: explanationOnly && draftReady ? "讲解草稿已生成，等待教师核对概念、步骤和例题。" : draftReady
       ? modelAvailable
         ? "模型已生成结构化草稿，服务层已完成修复与主脑审查，等待导出 PDF 草稿给教师确认。"
         : "模型未成功返回结构化草稿，服务层已生成动态兜底草稿，必须经教师 PDF 草稿复核。"
       : "未形成可用生成草稿，需要重新生成。"
   };
-}
-
-function shouldRunAssessmentModelReview(config = {}, input = {}, options = {}) {
-  if (options.runModelReview != null) return options.runModelReview === true;
-  if (input.runModelReview != null) return input.runModelReview === true;
-  const configured = config.ASSESSMENT_DRAFT_MODEL_REVIEW_ENABLED ?? config.assessmentDraftModelReviewEnabled;
-  return String(configured || "false").toLowerCase() === "true";
 }
 
 export async function answerStudentQuestionService(config, input = {}, options = {}) {
@@ -4399,6 +4154,7 @@ export async function draftTeacherTaskService(config, input = {}, options = {}) 
 }
 
 export async function draftAssessmentService(config, input = {}, options = {}) {
+  input = { ...input, ...normalizeTeachingPurpose(input) };
   const requestedGradeText = input.grade || input.targetGrade;
   const requestedGrade = normalizeGradeLevel(requestedGradeText);
   if (requestedGradeText && (!requestedGrade || (requestedGrade.stage === "middle" && requestedGrade.level !== 7))) {
@@ -4432,71 +4188,15 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
   }
   const assessmentDraftRunner = options.assessmentDraftRunner || draftAssessment;
   if (options.signal?.aborted) throw options.signal.reason || new Error("ASSESSMENT_GENERATION_CANCELLED");
-  const result = await assessmentDraftRunner(config, modelInput, { signal: options.signal });
+  const result = await assessmentDraftRunner(config, modelInput, { ...options.teachingExecution, signal: options.signal || options.teachingExecution?.signal, timeoutMs: generationBudget.assessmentTotalTimeoutMs, maxTokens: generationBudget.assessmentMaxTokens });
   if (options.signal?.aborted) throw options.signal.reason || new Error("ASSESSMENT_GENERATION_CANCELLED");
   const modelRun = await persistRun(result.modelRun, options);
   const printProfile = input.printProfile || buildPrintProfile(modelInput);
   const layoutTemplate = input.layoutTemplate || buildLayoutTemplate(modelInput);
   const draft = normalizeAssessmentDraft(result, modelInput);
-  const modelReviewRequired = shouldRunAssessmentModelReview(config, input, options);
-  const reviewPayload = {
-    reviewTask: "assessment-draft-quality-audit",
-    title: draft.title,
-    subject: modelInput.subject || "",
-    kind: modelInput.kind || "",
-    grade: modelInput.grade || modelInput.targetGrade || "",
-    difficulty: modelInput.difficulty || "",
-    requirement: modelInput.requirement || modelInput.specialRequirements || "",
-    totalScore: draft.totalScore,
-    printProfile,
-    layoutTemplate,
-    localAudit: draft.audit,
-    usedDynamicFallback: draft.usedDynamicFallback,
-    sections: draft.sections || [],
-    items: (draft.items || []).slice(0, 80).map((item, index) => ({
-      questionNo: index + 1,
-      itemType: item.itemType,
-      prompt: item.prompt,
-      answer: item.answer,
-      rubric: item.rubric,
-      metadata: {
-        sectionTitle: item.metadata?.sectionTitle || null,
-        score: item.metadata?.score ?? null,
-        answerSpaceMm: item.metadata?.answerSpaceMm ?? null,
-        answerFormat: item.metadata?.answerFormat || null,
-        hasFigure: Boolean(item.metadata?.figure),
-        hasPassage: Boolean(item.metadata?.passageText),
-        analysisSteps: item.metadata?.analysisSteps || [],
-        knowledgePoint: item.metadata?.knowledgePoint || null,
-        commonMistake: item.metadata?.commonMistake || null
-      }
-    }))
-  };
+  const modelReviewRequired = false;
   const modelReviews = {};
   const reviewModelRunIds = {};
-  if (modelReviewRequired) {
-    const reviewers = options.assessmentModelReviewers || {};
-    const legacyDoubleReview = typeof reviewers.minimax === "function" && typeof reviewers.premium === "function";
-    const premiumReviewer = reviewers.premium || reviewWithGpt55;
-    if (legacyDoubleReview) {
-      const miniMaxDraftReview = await reviewers.minimax(config, reviewPayload);
-      const miniMaxDraftReviewRun = await persistRun(miniMaxDraftReview.modelRun, options);
-      const gptDraftReview = await premiumReviewer(config, {
-        ...reviewPayload,
-        secondModelAudit: parseAssessmentQualityReview(miniMaxDraftReview, "MiniMax M3 生成审查")
-      });
-      const gptDraftReviewRun = await persistRun(gptDraftReview.modelRun, options);
-      modelReviews.minimax = compactAssessmentQualityReview(miniMaxDraftReview, "MiniMax M3 生成审查", miniMaxDraftReviewRun?.id || null);
-      modelReviews.premium = compactAssessmentQualityReview(gptDraftReview, "GPT-5.6 生成高级审查", gptDraftReviewRun?.id || null);
-      reviewModelRunIds.minimax = miniMaxDraftReviewRun?.id || null;
-      reviewModelRunIds.premium = gptDraftReviewRun?.id || null;
-    } else {
-      const gptDraftReview = await premiumReviewer(config, reviewPayload);
-      const gptDraftReviewRun = await persistRun(gptDraftReview.modelRun, options);
-      modelReviews.premium = compactAssessmentQualityReview(gptDraftReview, "GPT-5.6 生成风险审查", gptDraftReviewRun?.id || null);
-      reviewModelRunIds.premium = gptDraftReviewRun?.id || null;
-    }
-  }
   const generationPipeline = buildAssessmentGenerationPipeline({
     result,
     draft,
@@ -4534,7 +4234,9 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
               parsedDraft: draft.parsed,
               answerKey: draft.answerKey,
               totalScore: draft.totalScore,
-              gradingSourcePackageRequested: true,
+              gradingSourcePackageRequested: input.purpose !== "explanation",
+              purpose: input.purpose,
+              dayPlan: input.dayPlan,
               usedDynamicFallback: draft.usedDynamicFallback,
               printNotes: draft.printNotes,
               audit: draft.audit,
@@ -4566,7 +4268,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     ...result,
     available: Boolean(result.available || draft.items?.length),
     modelAvailable: Boolean(result.available),
-    draftAvailable: Boolean(draft.items?.length),
+    draftAvailable: Boolean(draft.items?.length || draft.parsed?.explanation),
     parsedDraft: draft.parsed,
     draftItems: draft.items,
     audit: draft.audit,
@@ -4588,11 +4290,13 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
 }
 
 export async function gradeSubmissionService(config, input = {}, options = {}) {
+  options = { ...options, teachingExecution: { ...options.teachingExecution, signal: options.signal || options.teachingExecution?.signal,
+    operationBudget: createTeachingOperationBudget("grading", config, options.teachingExecution) } };
   const baseOcr = buildSubmissionOcr(input);
   const reference = await prepareSubmissionReferenceAnswers(config, input, baseOcr, options);
   const ocr = enrichSubmissionOcr(input, baseOcr, reference.referenceAnswers || []);
   const questionLayoutManifest = buildSubmissionQuestionLayoutManifest(input, ocr, reference.referenceAnswers || []);
-  const deepAuditRequired = shouldRunDeepGradingAudit(config, input, options);
+  const deepAuditRequired = false;
   const contextBundle = buildSubmissionGradingContext({
     ...input,
     ocrQuestions: Array.isArray(input.ocrQuestions) ? input.ocrQuestions : ocr.questions || [],
@@ -4625,7 +4329,7 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
   const deterministicPlan = buildDeterministicGradingPlan(gradingInput, ocr, reference.referenceAnswers || []);
   const gradingRunner = options.gradingRunner || gradeSubmissionText;
   const remoteGradingInput = buildUnresolvedGradingInput(gradingInput, deterministicPlan);
-  const gradingEvidenceSufficient = hasSufficientSolGradingEvidence(gradingInput, ocr, reference);
+  const gradingEvidenceSufficient = hasSufficientTeachingGradingEvidence(gradingInput, ocr, reference);
   const remoteResult = deterministicPlan.fullyResolved
     ? {
         available: true,
@@ -4642,166 +4346,21 @@ export async function gradeSubmissionService(config, input = {}, options = {}) {
         modelRun: null
       }
     : await gradingRunner(config, remoteGradingInput, {
-        disableSolEscalation: !gradingEvidenceSufficient
+        ...options.teachingExecution,
+        evidenceSufficient: gradingEvidenceSufficient
       });
   const result = mergeDeterministicGradingResult(remoteResult, deterministicPlan.deterministicResults, gradingInput);
   const primaryModelRun = await persistRun(result.modelRun, options);
-  let effectiveResult = result;
-  let effectiveModelRun = primaryModelRun;
-  let escalationModelRun = result.modelRun?.metadata?.solAttempted === true || result.modelRun?.metadata?.usedModelEscalation === true
-    ? primaryModelRun
-    : null;
-  let usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
-  let escalationPersistenceError = null;
-  let initialStructured = normalizeGradingResult(result, gradingInput, ocr);
-  let auditModelRun = null;
-  let premiumAuditModelRun = null;
-  let combinedAudit = skippedGradingAudit();
-  const reviewers = options.gradingReviewers || {};
-  const runtime = normalizeRuntimeConfig(config);
-  const solEnabled = solEscalationEnabled(runtime);
-  const selectedSolQuestionNos = solEnabled
-    ? selectSolGradingQuestionNos(initialStructured, gradingInput, ocr, reference)
-    : [];
-  let actualSolAttempt = result.modelRun?.metadata?.solAttempted === true || result.modelRun?.metadata?.usedModelEscalation === true;
-  if (!actualSolAttempt && selectedSolQuestionNos.length) {
-    actualSolAttempt = true;
-    const solGradingRunner = options.solGradingRunner || gradeSubmissionText;
-    const solResult = await solGradingRunner(
-      config,
-      buildSolGradingInput(gradingInput, selectedSolQuestionNos),
-      {
-        model: runtime.gpt56SolModel,
-        timeoutMs: runtime.gpt56SolFallbackTimeoutMs,
-        reasoningEffort: "high",
-        role: "sol-grading-escalation",
-        disableSolEscalation: true
-      }
-    );
-    let solModelRun = null;
-    let solPersistenceAvailable = true;
-    try {
-      solModelRun = await persistRun(solResult.modelRun, options);
-      escalationModelRun = solModelRun;
-    } catch (error) {
-      solPersistenceAvailable = false;
-      escalationPersistenceError = String(error?.message || error || "Sol grading persistence failed");
-    }
-    if (solPersistenceAvailable && solResult.available) {
-      const mergedSolResult = mergeSolGradingResult(initialStructured, solResult, gradingInput, selectedSolQuestionNos);
-      if (mergedSolResult) {
-        effectiveResult = mergedSolResult;
-        effectiveModelRun = solModelRun;
-        usedModelEscalation = true;
-        initialStructured = normalizeGradingResult(mergedSolResult, gradingInput, ocr);
-      }
-    }
-  }
-  const riskReviewRequired = shouldRunGradingRiskReview(initialStructured);
-  const legacyDoubleReview = !actualSolAttempt && deepAuditRequired && typeof reviewers.minimax === "function" && typeof reviewers.premium === "function";
-  if (legacyDoubleReview) {
-    const miniMaxReviewer = reviewers.minimax;
-    const premiumReviewer = reviewers.premium;
-    const auditResult = await miniMaxReviewer(config, {
-      reviewTask: "submission-grading-audit",
-      title: input.title || "",
-      subject: input.subject || "",
-      kind: input.kind || "",
-      referenceAnswerMode: reference.mode,
-      referenceAnswerConfidence: reference.confidence,
-      referenceAnswers: reference.referenceAnswers || [],
-      questionLayoutManifest: summarizeQuestionLayoutManifestForAudit(questionLayoutManifest),
-      ocr: {
-        status: ocr.status,
-        confidence: ocr.confidence,
-        textPreview: String(ocr.text || "").slice(0, 1200),
-        studentAnswerTextPreview: String(ocr.studentAnswerText || "").slice(0, 1200),
-        printedTextPreview: String(ocr.printedText || "").slice(0, 1200),
-        questions: (ocr.questions || []).slice(0, 80)
-      },
-      grading: {
-        score: initialStructured.score ?? initialStructured.provisionalScore,
-        summary: initialStructured.summary,
-        questionResults: initialStructured.questionResults
-      }
-    });
-    auditModelRun = await persistRun(auditResult.modelRun, options);
-    const premiumAuditResult = await premiumReviewer(config, {
-      reviewTask: "submission-premium-grading-review",
-      title: input.title || "",
-      subject: input.subject || "",
-      kind: input.kind || "",
-      referenceAnswerMode: reference.mode,
-      referenceAnswerConfidence: reference.confidence,
-      referenceAnswers: reference.referenceAnswers || [],
-      questionLayoutManifest: summarizeQuestionLayoutManifestForAudit(questionLayoutManifest),
-      ocr: {
-        status: ocr.status,
-        confidence: ocr.confidence,
-        engine: ocr.engine,
-        reason: ocr.reason,
-        textPreview: String(ocr.text || "").slice(0, 1800),
-        studentAnswerTextPreview: String(ocr.studentAnswerText || "").slice(0, 1800),
-        printedTextPreview: String(ocr.printedText || "").slice(0, 1800),
-        questions: (ocr.questions || []).slice(0, 80)
-      },
-      grading: {
-        score: initialStructured.score ?? initialStructured.provisionalScore,
-        summary: initialStructured.summary,
-        questionResults: initialStructured.questionResults,
-        annotationMarkers: initialStructured.annotationMarkers,
-        quality: initialStructured.quality
-      },
-      secondModelAudit: parseGradingAuditResult(auditResult)
-    });
-    premiumAuditModelRun = await persistRun(premiumAuditResult.modelRun, options);
-    combinedAudit = mergeGradingAudits([
-      { role: "second-model", label: "MiniMax二次审计", result: auditResult },
-      { role: "premium", label: "GPT-5.6高级审查", result: premiumAuditResult }
-    ], config);
-    combinedAudit.required = true;
-  } else if (!actualSolAttempt && (deepAuditRequired || riskReviewRequired)) {
-    const premiumReviewer = reviewers.premium || reviewWithGpt55;
-    const premiumAuditResult = await premiumReviewer(config, {
-      reviewTask: "submission-premium-grading-review",
-      title: input.title || "",
-      subject: input.subject || "",
-      kind: input.kind || "",
-      referenceAnswerMode: reference.mode,
-      referenceAnswerConfidence: reference.confidence,
-      referenceAnswers: reference.referenceAnswers || [],
-      questionLayoutManifest: summarizeQuestionLayoutManifestForAudit(questionLayoutManifest),
-      ocr: {
-        status: ocr.status,
-        confidence: ocr.confidence,
-        engine: ocr.engine,
-        reason: ocr.reason,
-        textPreview: String(ocr.text || "").slice(0, 1800),
-        studentAnswerTextPreview: String(ocr.studentAnswerText || "").slice(0, 1800),
-        printedTextPreview: String(ocr.printedText || "").slice(0, 1800),
-        questions: (ocr.questions || []).slice(0, 80)
-      },
-      grading: {
-        score: initialStructured.score ?? initialStructured.provisionalScore,
-        summary: initialStructured.summary,
-        questionResults: initialStructured.questionResults,
-        annotationMarkers: initialStructured.annotationMarkers,
-        quality: initialStructured.quality
-      }
-    });
-    premiumAuditModelRun = await persistRun(premiumAuditResult.modelRun, options);
-    combinedAudit = mergeGradingAudits([
-      { role: "premium", label: "GPT-5.6风险审查", result: premiumAuditResult }
-    ], {
-      ...config,
-      GRADING_REQUIRE_SECOND_MODEL_AUDIT: "false",
-      GRADING_REQUIRE_PREMIUM_JUDGE: "true"
-    });
-    combinedAudit.required = true;
-  }
-  if (actualSolAttempt && riskReviewRequired) {
-    combinedAudit = blockingSolGradingAudit();
-  }
+  const effectiveResult = result;
+  const effectiveModelRun = primaryModelRun;
+  const actualSolAttempt = result.modelRun?.metadata?.solAttempted === true;
+  const usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
+  const escalationModelRun = actualSolAttempt ? primaryModelRun : null;
+  const escalationPersistenceError = null;
+  const initialStructured = normalizeGradingResult(result, gradingInput, ocr);
+  const auditModelRun = null;
+  const premiumAuditModelRun = null;
+  const combinedAudit = skippedGradingAudit();
   const structured = applyGradingAudit({
     ...initialStructured,
     referenceAnswer: reference,

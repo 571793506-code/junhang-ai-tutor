@@ -281,7 +281,7 @@ test("draftAssessmentService uses final validation state after an unusable Sol r
   assert.equal(result.generationPipeline.audit.status, "needs_teacher_review");
 });
 
-test("draftAssessmentService can run model review when explicitly requested", async () => {
+test("draftAssessmentService ignores legacy double review requests under the bounded teaching policy", async () => {
   let reviewCallCount = 0;
   const reviewer = async () => {
     reviewCallCount += 1;
@@ -318,13 +318,13 @@ test("draftAssessmentService can run model review when explicitly requested", as
     }
   );
 
-  assert.equal(reviewCallCount, 2);
-  assert.equal(result.generationPipeline.modelReview.required, true);
-  assert.equal(result.generationPipeline.modelReview.status, "passed");
-  assert.equal(result.generationPipeline.gates.modelReviewRequired, true);
+  assert.equal(reviewCallCount, 0);
+  assert.equal(result.generationPipeline.modelReview.required, false);
+  assert.equal(result.generationPipeline.modelReview.status, "skipped");
+  assert.equal(result.generationPipeline.gates.modelReviewRequired, false);
 });
 
-test("draftAssessmentService uses one GPT-5.6 review outside the injected legacy double-review path", async () => {
+test("draftAssessmentService does not append a premium review outside the bounded runtime", async () => {
   let premiumCalls = 0;
   const result = await draftAssessmentService(
     {},
@@ -358,10 +358,10 @@ test("draftAssessmentService uses one GPT-5.6 review outside the injected legacy
     }
   );
 
-  assert.equal(premiumCalls, 1);
-  assert.equal(result.generationPipeline.modelReview.status, "passed");
+  assert.equal(premiumCalls, 0);
+  assert.equal(result.generationPipeline.modelReview.status, "skipped");
   assert.equal(result.modelReviews.minimax, undefined);
-  assert.equal(result.modelReviews.premium.label, "GPT-5.6 生成风险审查");
+  assert.equal(result.modelReviews.premium, undefined);
 });
 
 test("draftAssessmentService forwards assessment timeout budget to runner", async () => {

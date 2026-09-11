@@ -61,7 +61,7 @@ test("objective grading extracts the final numeric answer from calculation work"
   assert.equal(result.structured.questionResults[0].score, 2);
 });
 
-test("low-confidence generated references retry once with Sol only when printed evidence exists", async () => {
+test("low-confidence references remain teacher-review drafts without a service retry", async () => {
   const executions = [];
   const referenceAnswerRunner = async (_config, _input, execution) => {
     executions.push(execution || null);
@@ -92,11 +92,10 @@ test("low-confidence generated references retry once with Sol only when printed 
     { subject: "数学", totalScore: 5, printedText: "1. 1+1=?", studentAnswerText: "1. 2" },
     commonOptions
   );
-  assert.equal(executions.length, 2);
-  assert.equal(executions[1].model, "gpt-5.6-sol");
-  assert.equal(executions[1].reasoningEffort, "high");
-  assert.equal(executions[1].timeoutMs, 180000);
-  assert.equal(result.referenceAnswer.confidence, 0.99);
+  assert.equal(executions.length, 1);
+  assert.ok(executions[0].operationBudget);
+  assert.equal(result.referenceAnswer.confidence, 0.5);
+  assert.equal(result.referenceAnswer.needsTeacherReview, true);
 
   executions.length = 0;
   await gradeSubmissionService(
@@ -141,7 +140,7 @@ test("a prior runtime Sol reference attempt is never repeated by the quality gat
   assert.equal(result.referenceAnswer.usedModelEscalation, false);
 });
 
-test("failed Sol reference regeneration keeps Terra content and tracks both persisted runs", async () => {
+test("reference service persists only the bounded runtime result", async () => {
   let callCount = 0;
   let runId = 0;
   const result = await gradeSubmissionService(
@@ -175,11 +174,11 @@ test("failed Sol reference regeneration keeps Terra content and tracks both pers
     }
   );
 
-  assert.equal(callCount, 2);
+  assert.equal(callCount, 1);
   assert.equal(result.referenceAnswer.referenceAnswers[0].correctAnswer, "2");
   assert.equal(result.referenceAnswer.modelRunId, "run-1");
-  assert.equal(result.referenceAnswer.escalationModelRunId, "run-2");
-  assert.equal(result.referenceAnswer.solAttempted, true);
+  assert.equal(result.referenceAnswer.escalationModelRunId, null);
+  assert.equal(result.referenceAnswer.solAttempted, false);
   assert.equal(result.referenceAnswer.usedModelEscalation, false);
 });
 
@@ -216,7 +215,7 @@ test("successful runtime reference escalation uses one consistent persisted Sol 
   assert.equal(result.referenceAnswer.usedModelEscalation, true);
 });
 
-test("optional Sol reference persistence failure preserves the persisted Terra source", async () => {
+test("reference service never attempts an optional second model persistence", async () => {
   let persistCalls = 0;
   const result = await gradeSubmissionService(
     { GPT56_SOL_FALLBACK_ENABLED: "true", GPT56_REASONING_EFFORT_ENABLED: "true", GPT56_SOL_MODEL: "gpt-5.6-sol" },
@@ -235,9 +234,9 @@ test("optional Sol reference persistence failure preserves the persisted Terra s
         available: true,
         providerId: "gpt56",
         referenceText: JSON.stringify({
-          referenceAnswers: [{ questionNo: "1", correctAnswer: execution ? "Sol answer" : "Terra answer", confidence: execution ? 0.99 : 0.5 }]
+          referenceAnswers: [{ questionNo: "1", correctAnswer: execution?.role === "sol-reference-escalation" ? "Sol answer" : "Terra answer", confidence: execution?.role === "sol-reference-escalation" ? 0.99 : 0.5 }]
         }),
-        modelRun: { provider: "gpt56", model: execution ? "gpt-5.6-sol" : "gpt-5.6", skill: "submission-reference-answer", status: "SUCCESS" }
+        modelRun: { provider: "gpt56", model: execution?.role === "sol-reference-escalation" ? "gpt-5.6-sol" : "gpt-5.6", skill: "submission-reference-answer", status: "SUCCESS" }
       }),
       gradingRunner: async () => ({
         available: true,
@@ -250,8 +249,9 @@ test("optional Sol reference persistence failure preserves the persisted Terra s
   assert.equal(result.referenceAnswer.referenceAnswers[0].correctAnswer, "Terra answer");
   assert.equal(result.referenceAnswer.modelRunId, "terra-run");
   assert.equal(result.referenceAnswer.escalationModelRunId, null);
-  assert.equal(result.referenceAnswer.escalationPersistenceError, "optional Sol persistence failed");
-  assert.equal(result.referenceAnswer.solAttempted, true);
+  assert.equal(persistCalls, 1);
+  assert.equal(result.referenceAnswer.escalationPersistenceError, null);
+  assert.equal(result.referenceAnswer.solAttempted, false);
   assert.equal(result.referenceAnswer.usedModelEscalation, false);
 });
 
@@ -421,7 +421,7 @@ test("mixed grading keeps unresolved questions uncertain when remote grading fai
   assert.equal(result.structured.questionResults[1].status, "uncertain");
   assert.equal(result.structured.score, null);
   assert.equal(result.structured.needsTeacherReview, true);
-  assert.equal(reviewCalls, 1);
+  assert.equal(reviewCalls, 0);
 });
 
 test("external worksheet keeps OCR question drafts when reference and grading models fail", async () => {
@@ -609,5 +609,5 @@ test("subjective grading keeps questions omitted by the remote model uncertain",
   assert.deepEqual(result.structured.questionResults.map((item) => item.questionNo), ["1", "2"]);
   assert.equal(result.structured.questionResults[1].status, "uncertain");
   assert.equal(result.structured.score, null);
-  assert.equal(reviewCalls, 1);
+  assert.equal(reviewCalls, 0);
 });

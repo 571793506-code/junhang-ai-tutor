@@ -9,3 +9,4 @@ export * from "./textbook-chapter-drafts.js";
 export * from "./dialogue-grading-import.js";
 export * from "./grading-source-package.js";
 export * from "./module-capability-registry.js";
+export * from "./teaching-purpose.js";
