@@ -1,5 +1,7 @@
 # Module Capability and Web Alignment Implementation Plan
 
+> 后续计划：生成与批改的新一轮工作见 [2026-09-11 日常工作台计划](2026-09-11-generation-grading-daily-workbench.md)。本计划保留历史任务记录，不能依据尚未同步的复选框重复实施全部任务；先核查当前代码与提交。新计划文档完成不代表其工程阶段已经实施。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把生成、批改、资源库和学生档案统一到同一套能力契约、上下文工程、模型路由、教师复核和多端可见性流程，使 Web 成为服务层能力的完整联调入口，并为小程序复用留下稳定契约。
