@@ -1,7 +1,35 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyTaskFailure, resolveTaskModelPolicy } from "./model-policy.js";
+import { classifyTaskFailure, resolveTaskModelPolicy, resolveTeachingTaskPolicy } from "./model-policy.js";
+
+test("teaching policies isolate Astra, Flash and Sol responsibilities from QA", () => {
+  for (const task of ["generation", "grading", "reference"]) {
+    const policy = resolveTeachingTaskPolicy(task, { GPT56_MODEL: "legacy-model" });
+    assert.equal(policy.primary.model, "gpt-6-astra");
+    assert.equal(policy.primary.reasoningEffort, "high");
+    assert.equal(policy.replacement.model, "gpt-5.6-sol");
+    assert.equal(policy.maxAdditionalAttempts, 1);
+  }
+  for (const task of ["extract-requirement", "extract-material", "recognize"]) {
+    const policy = resolveTeachingTaskPolicy(task);
+    assert.equal(policy.primary.model, "deepseek-flash");
+    assert.equal(policy.primary.providerId, "deepseek");
+    assert.equal(policy.replacement, null);
+  }
+  assert.equal(resolveTeachingTaskPolicy("rewrite-feedback").primary.model, "gpt-5.6-sol");
+  assert.equal(resolveTeachingTaskPolicy("rewrite-feedback").replacement, null);
+  assert.equal(resolveTaskModelPolicy("qa").primary.model, "gpt-5.6-terra");
+  assert.equal(resolveTaskModelPolicy("qa").escalation.enabled, false);
+  assert.throws(() => resolveTeachingTaskPolicy("qa"), /Unknown teaching task/);
+});
+
+test("teaching configuration overrides do not mutate global runtime configuration", () => {
+  const config = Object.freeze({ GPT56_MODEL: "gpt-5.6-terra", TEACHING_PRIMARY_MODEL: "astra-gateway-alias" });
+  assert.equal(resolveTeachingTaskPolicy("grading", config).primary.model, "astra-gateway-alias");
+  assert.equal(resolveTaskModelPolicy("qa", config).primary.model, "gpt-5.6-terra");
+  assert.equal(resolveTeachingTaskPolicy("generation", { teachingPrimaryModel: "astra-alias" }).primary.model, "astra-alias");
+});
 
 test("assessment and grading use Terra defaults with one bounded Sol escalation", () => {
   const assessment = resolveTaskModelPolicy("assessment-draft", {}, { kind: "小测" });

@@ -33,6 +33,44 @@ export interface RuntimeConfigLike {
   [key: string]: string | undefined;
 }
 
+export type TeachingModule = "generation" | "grading";
+export type TeachingTask = "generation" | "grading" | "reference" | "extract-requirement" | "extract-material" | "recognize" | "rewrite-feedback";
+export interface TeachingRulePack { module: TeachingModule; version: string; hash: string; text: string }
+export interface TeachingRoute { providerId: "gpt56" | "deepseek"; model: string; reasoningEffort: string | null }
+export interface TeachingBudget { deadlineAt: number; remainingTokens: number; additionalAttemptsUsed: number }
+export interface TeachingResult {
+  status: "success" | "review_required" | "cancelled";
+  candidate: Record<string, unknown> | null;
+  issueCodes: string[];
+  internal: { attempts: Array<Record<string, unknown>>; rules: Omit<TeachingRulePack, "text"> | null };
+}
+export type TeachingCall = (
+  route: TeachingRoute, messages: Array<{ role: string; content: string }>,
+  options: { timeoutMs: number; maxTokens: number; signal?: AbortSignal }
+) => Promise<{ text: string; usage?: Record<string, number> | null }>;
+export interface TeachingExecution {
+  ruleRoot?: string;
+  budget?: TeachingBudget;
+  signal?: AbortSignal;
+  evidenceSufficient?: boolean;
+  now?: () => number;
+  call?: TeachingCall;
+  repairIssues: (candidate: Record<string, unknown>, input: Record<string, unknown>) => string[] | Promise<string[]>;
+}
+export declare const TEACHING_RULE_PATHS: Readonly<Record<TeachingModule, string>>;
+export declare function loadTeachingRulePack(module: TeachingModule, options?: { root?: string }): Promise<TeachingRulePack>;
+export declare function resolveTeachingTaskPolicy(task: TeachingTask, config?: RuntimeConfigLike): {
+  task: TeachingTask; module: TeachingModule; primary: TeachingRoute; replacement: TeachingRoute | null;
+  maxAdditionalAttempts: number; maxConcurrency: number; budget: { timeoutMs: number; maxTokens: number };
+};
+export declare function callTeachingModel(config: RuntimeConfigLike, route: TeachingRoute, messages: Array<{ role: string; content: string }>, options?: { timeoutMs?: number; maxTokens?: number; signal?: AbortSignal }): ReturnType<TeachingCall>;
+export declare function runTeachingTask(config: RuntimeConfigLike, task: TeachingTask, input: Record<string, unknown>, execution: TeachingExecution): Promise<TeachingResult>;
+export declare function projectTeachingResult(result: TeachingResult, role: string): { status: string; candidate?: Record<string, unknown> | null; needsTeacherReview?: boolean };
+export declare function runTeachingUnit(args: {
+  task: TeachingTask; input: Record<string, unknown>; rulePack: TeachingRulePack; budget: TeachingBudget;
+  signal?: AbortSignal; evidenceSufficient?: boolean;
+}, dependencies: Pick<TeachingExecution, "call" | "repairIssues" | "now"> & { config?: RuntimeConfigLike }): Promise<TeachingResult>;
+
 export declare const providerCatalog: Array<{
   id: AiProviderId;
   label: string;
@@ -205,6 +243,10 @@ export declare function callOpenAiCompatibleChat(args: {
   maxTokens?: number;
   timeoutMs?: number;
   reasoningEffort?: string;
+  signal?: AbortSignal;
+  allowStructuredRetry?: boolean;
+  completionTokenLimit?: boolean;
+  omitTemperature?: boolean;
 }): Promise<unknown>;
 export declare function callDeepSeekChat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>, options?: Record<string, unknown>): Promise<unknown>;
 export declare function callMiniMaxChat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>): Promise<unknown>;

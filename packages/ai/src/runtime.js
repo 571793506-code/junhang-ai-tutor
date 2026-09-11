@@ -6,7 +6,9 @@ import {
   solEscalationEnabled,
   validateAssessmentPartition
 } from "./model-escalation.js";
-import { classifyTaskFailure, resolveTaskModelPolicy } from "./model-policy.js";
+import { classifyTaskFailure, resolveTaskModelPolicy, resolveTeachingTaskPolicy } from "./model-policy.js";
+import { loadTeachingRulePack } from "./teaching-rules.js";
+import { runTeachingUnit } from "./teaching-model-runner.js";
 import {
   QA_BLOCKED_ANSWER,
   QA_LEARNING_SIGNAL_SCHEMA_VERSION,
@@ -314,14 +316,18 @@ export async function callOpenAiCompatibleChat({
   maxTokens,
   timeoutMs,
   reasoningEffort,
-  signal
+  signal,
+  allowStructuredRetry = true,
+  completionTokenLimit = false,
+  omitTemperature = false
 }) {
   if (!apiKey) throw new Error("Missing API key");
   const requestStartedAt = Date.now();
 
   const payload = { model, messages, temperature };
+  if (omitTemperature) delete payload.temperature;
   if (responseFormat) payload.response_format = responseFormat;
-  if (maxTokens) payload.max_tokens = maxTokens;
+  if (maxTokens) payload[completionTokenLimit ? "max_completion_tokens" : "max_tokens"] = maxTokens;
   if (reasoningEffort) payload.reasoning_effort = reasoningEffort;
   const controller = timeoutMs || signal ? new AbortController() : null;
   const abortForCaller = () => controller?.abort(signal?.reason);
@@ -368,7 +374,7 @@ export async function callOpenAiCompatibleChat({
 
   if (!response.ok) {
     const message = body?.error?.message || body?.message || text.trim() || response.statusText;
-    const canRetryStructuredRequest = responseFormat?.type === "json_object" && (
+    const canRetryStructuredRequest = allowStructuredRetry && responseFormat?.type === "json_object" && (
       (response.status === 502 && /json_object|response_format|must contain the word ['\"]?json|no available channel|channel unavailable/i.test(message)) ||
       (response.status === 503 && /no available channel|channel unavailable/i.test(message))
     );
@@ -383,7 +389,10 @@ export async function callOpenAiCompatibleChat({
         maxTokens,
         timeoutMs: remainingTimeoutMs,
         reasoningEffort,
-        signal
+        signal,
+        allowStructuredRetry,
+        completionTokenLimit,
+        omitTemperature
       });
     }
     const requestError = new Error(`${response.status} ${message}`);
@@ -406,6 +415,48 @@ export async function callDeepSeekChat(config, messages, options = {}) {
     responseFormat: options.responseFormat,
     maxTokens: options.maxTokens,
     timeoutMs: options.timeoutMs
+  });
+}
+
+export async function callTeachingModel(config, route, messages, options = {}) {
+  const runtime = normalizeRuntimeConfig(config);
+  if (!["gpt56", "deepseek"].includes(route?.providerId)) throw new Error("Unsupported teaching provider");
+  const openai = route.providerId === "gpt56";
+  const baseUrl = openai ? runtime.gpt56BaseUrl : runtime.deepseekBaseUrl;
+  const apiKey = openai ? runtime.gpt56ApiKey : runtime.deepseekApiKey;
+  if (!baseUrl || !apiKey || !route.model) throw new Error("Teaching model is not configured");
+  const body = await callOpenAiCompatibleChat({
+    baseUrl, apiKey, model: route.model, messages,
+    responseFormat: { type: "json_object" },
+    maxTokens: options.maxTokens,
+    timeoutMs: options.timeoutMs,
+    signal: options.signal,
+    reasoningEffort: openai ? route.reasoningEffort : undefined,
+    allowStructuredRetry: false,
+    completionTokenLimit: openai,
+    omitTemperature: openai
+  });
+  return { text: extractChatText(body), usage: body.usage || null };
+}
+
+// execution contains server-owned dependencies, never a forwarded HTTP body.
+export async function runTeachingTask(config, task, input, execution = {}) {
+  const policy = resolveTeachingTaskPolicy(task, config);
+  const now = execution.now || Date.now;
+  const budget = execution.budget || {
+    deadlineAt: now() + policy.budget.timeoutMs,
+    remainingTokens: policy.budget.maxTokens,
+    additionalAttemptsUsed: 0
+  };
+  let rulePack;
+  try {
+    rulePack = await loadTeachingRulePack(policy.module, { root: execution.ruleRoot });
+  } catch {
+    return { status: "review_required", candidate: null, issueCodes: ["TEACHING_RULES_INVALID"], internal: { attempts: [], rules: null } };
+  }
+  return runTeachingUnit({ task, input, rulePack, budget, signal: execution.signal, evidenceSufficient: execution.evidenceSufficient }, {
+    config, now, repairIssues: execution.repairIssues,
+    call: execution.call || ((route, messages, options) => callTeachingModel(config, route, messages, options))
   });
 }
 

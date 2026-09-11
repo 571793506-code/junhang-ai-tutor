@@ -4,6 +4,34 @@ const CONFIGURATION_CODE = /insufficient_quota|context_length|invalid_(api_)?key
 const ACCOUNT_CONFIGURATION = /quota|usage[_\s-]*limit|spending[_\s-]*limit|plan[_-]+limit|subscription|balance|billing|额度|余额|账户/i;
 const EVIDENCE_CODE = /evidence|reference|ocr|student[_-]?answer|prompt[_-]?missing|content[_-]?context|textbook/i;
 
+const TEACHING_TASKS = Object.freeze({
+  generation: { module: "generation", role: "primary", timeoutMs: 240000, maxTokens: 24000 },
+  grading: { module: "grading", role: "primary", timeoutMs: 180000, maxTokens: 12000 },
+  reference: { module: "grading", role: "primary", timeoutMs: 180000, maxTokens: 12000 },
+  "extract-requirement": { module: "generation", role: "assist", timeoutMs: 60000, maxTokens: 4000 },
+  "extract-material": { module: "generation", role: "assist", timeoutMs: 60000, maxTokens: 8000 },
+  recognize: { module: "grading", role: "assist", timeoutMs: 90000, maxTokens: 8000 },
+  "rewrite-feedback": { module: "grading", role: "replacement", timeoutMs: 60000, maxTokens: 4000 }
+});
+
+export function resolveTeachingTaskPolicy(task, config = {}) {
+  if (!Object.hasOwn(TEACHING_TASKS, task)) throw new Error(`Unknown teaching task: ${task}`);
+  const defaults = TEACHING_TASKS[task];
+  const routes = {
+    primary: { providerId: "gpt56", model: config.TEACHING_PRIMARY_MODEL || config.teachingPrimaryModel || "gpt-6-astra", reasoningEffort: "high" },
+    replacement: { providerId: "gpt56", model: config.TEACHING_REPLACEMENT_MODEL || config.teachingReplacementModel || "gpt-5.6-sol", reasoningEffort: "high" },
+    assist: { providerId: "deepseek", model: config.TEACHING_ASSIST_MODEL || config.teachingAssistModel || "deepseek-flash", reasoningEffort: null }
+  };
+  const primary = routes[defaults.role];
+  return {
+    task, module: defaults.module, primary,
+    replacement: defaults.role === "primary" && primary.model !== routes.replacement.model ? routes.replacement : null,
+    maxAdditionalAttempts: 1,
+    maxConcurrency: 2,
+    budget: { timeoutMs: defaults.timeoutMs, maxTokens: defaults.maxTokens }
+  };
+}
+
 const TASK_DEFAULTS = {
   qa: { providerId: "gpt56", modelFamily: "terra", reasoningEffort: "low", escalation: false },
   "task-draft": { providerId: "gpt56", modelFamily: "terra", reasoningEffort: "low", escalation: false },

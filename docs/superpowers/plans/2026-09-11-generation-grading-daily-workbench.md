@@ -10,7 +10,7 @@
 
 **Spec:** [生成与批改日常工作台设计](../specs/2026-09-11-generation-grading-daily-workbench-design.md)
 
-**状态：** Task 1 已实现共享规则与 Skills 校验（46 项测试通过），继续 Task 2 模型策略与有界执行器；实际调用装配和入口迁移仍属于 Task 3。旧 9 月 7 日计划仅作为已建能力背景，不能重复执行其全部任务，也不能由复选框状态判断代码完成度。
+**状态：** Task 1–2 已实现共享规则、Skills 校验、教学模型策略、有界执行器和服务端装配入口；118 项相关测试通过。Task 3 的既有生成/批改业务迁移尚未完成，因此 Web 仍使用旧入口。旧 9 月 7 日计划仅作为已建能力背景，不能重复执行其全部任务，也不能由复选框状态判断代码完成度。
 
 ## Global Constraints
 
@@ -114,7 +114,7 @@ Task 1 验证记录（2026-09-11）：新增用例先因缺少入口和校验规
 
 新增配置键为 `TEACHING_PRIMARY_MODEL`（默认 `gpt-6-astra`）、`TEACHING_REPLACEMENT_MODEL`（默认 `gpt-5.6-sol`）、`TEACHING_ASSIST_MODEL`（默认 `deepseek-flash`）。适配器沿用现有受保护的供应商凭据与地址配置；发现端点不支持时报告配置错误，不能修改全局 `GPT56_MODEL` 把学生问答一起切换。
 
-- [ ] 增加路由隔离测试：
+- [x] 增加路由隔离测试：
 
 ```js
 assert.equal(resolveTeachingTaskPolicy('generation', {}).primary.model, 'gpt-6-astra');
@@ -124,9 +124,9 @@ assert.equal(resolveTaskModelPolicy('qa', {}).primary.model, 'gpt-5.6-terra');
 assert.equal(resolveTaskModelPolicy('qa', {}).escalation.enabled, false);
 ```
 
-- [ ] 使用注入的 `call` 和假时钟测试调用序列：正常 `[Astra]`；503 `[Astra,Sol]`；401/OCR缺证 `[Astra]` 或预检零调用；质量问题 `[Astra,Astra修复]`；追加失败不出现第三次调用。
-- [ ] 运行 `node --test packages/ai/src/model-policy.test.mjs packages/ai/src/teaching-model-runner.test.mjs` 确认新增用例失败。
-- [ ] 按统一预算实现调用：
+- [x] 使用注入的 `call` 和假时钟测试调用序列：正常 `[Astra]`；503 `[Astra,Sol]`；401/OCR缺证 `[Astra]` 或预检零调用；质量问题 `[Astra,Astra修复]`；追加失败不出现第三次调用。
+- [x] 运行 `node --test packages/ai/src/model-policy.test.mjs packages/ai/src/teaching-model-runner.test.mjs` 确认新增用例失败。
+- [x] 按统一预算实现调用：
 
 ```js
 const remaining = budget.deadlineAt - now();
@@ -138,8 +138,14 @@ const primary = await call(policy.primary, input, { timeoutMs: remaining, signal
 
 `now` 为 runner 注入的时钟函数；`interruptedOrFailed` 是 runner 内部构造规范化失败结果的辅助函数，不调用模型。预算包含 deadlineAt、remainingTokens、additionalAttemptsUsed；有供应商 usage 才记录实际费用，未知费率保持 unknown。
 
-- [ ] 输出按 role 过滤；attempts、模型名和错误原文只保留内部，不添加到学生/家长或普通工作台响应。
-- [ ] 验证本任务测试及既有 `packages/ai/src/gpt56-runtime.test.mjs`、`packages/ai/src/qa-learning-signal.test.mjs`；编码检查后按本任务路径提交 `feat: route teaching tasks with bounded model calls`。
+- [x] 输出按 role 过滤；attempts、模型名和错误原文只保留内部，不添加到学生/家长或普通工作台响应。
+- [x] 验证本任务测试及既有 `packages/ai/src/gpt56-runtime.test.mjs`、`packages/ai/src/qa-learning-signal.test.mjs`；编码检查后按本任务路径提交 `feat: route teaching tasks with bounded model calls`。
+
+Task 2 验证记录（2026-09-11）：规则、模型、执行器、HTTP 假网关、旧问答及 Skills 合计 118/118 通过；check:api 成功（只证明服务启动检查和数据库连接，不证明真实模型可用）。新增 `runTeachingTask` 服务端装配入口，捕获请求证明规则修改即时改变正文/hash。教学 HTTP 禁止底层隐式重发，Astra/Sol 使用推理参数及 max_completion_tokens，不发送 temperature；旧调用兼容参数保持原状。官方依据：`https://developers.openai.com/api/docs/models/gpt-6-astra` 及其 model guide。
+
+预算口径：remainingTokens 是整项共享的输出 token 额度（包括供应商计入 completion 的推理 token），调用前预留，存在 usage 时结算；没有 usage 保守扣除预留额度，费用保持 unknown。输入 token 仅在供应商 usage 返回后记录，不把该额度当作货币费用上限。additionalAttemptsUsed 按内容单元保存；Task 3 必须共享 deadline/token pool 并限制并发，不能复用同一追加计数阻塞其他单元。
+
+实施顺序调整：模块能力注册表与状态展示和 Task 3 业务入口迁移同步修改，避免仅有新基础代码时就向 Web 宣称新链路已生效。下一动作：接入 generation/grading/reference，移除这些入口的重复追加调用，补 purpose 分流与逐题评分证据测试。
 
 ### Task 3：生成分流与批改证据链
 
