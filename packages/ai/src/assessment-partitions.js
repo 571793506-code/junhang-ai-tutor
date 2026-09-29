@@ -1,4 +1,4 @@
-import { normalizeTeachingPurpose } from "@junhang/core";
+import { normalizeTeachingPurpose, allocateAssessmentScores } from "@junhang/core";
 
 const plans = {
   数学: {
@@ -120,13 +120,16 @@ export function buildAssessmentPartitions(input = {}) {
     partitions[4].title = "五、写作";
   }
   const counts = allocateItemCounts(partitions, kind === "formal" ? null : input.requestedItemCount);
-  return partitions.map((partition, index) => ({
-    ...partition,
-    orderIndex: index + 1,
-    subject,
-    kind: input.kind || "练习",
-    targetItemCount: counts[index]
-  }));
+  const scores = allocateAssessmentScores(partitions.flatMap((part, i) => Array(counts[i]).fill(part.itemTypes[0])), { subject, kind: input.kind });
+  let offset = 0;
+  return partitions.map((partition, index) => {
+    const itemScores = scores.slice(offset, offset + counts[index]);
+    offset += counts[index];
+    return {
+      ...partition, orderIndex: index + 1, subject, kind: input.kind || "练习",
+      targetItemCount: counts[index], itemScores, targetScore: itemScores.reduce((sum, score) => sum + score, 0)
+    };
+  });
 }
 
 export async function mapWithConcurrency(items, concurrency, worker) {

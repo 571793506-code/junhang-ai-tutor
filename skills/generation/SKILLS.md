@@ -20,17 +20,29 @@
 
 ## 输入契约
 
+持续工作流入口见 `docs/14-api-contract.md` 的 Shared workflow API and CLI。薄 CLI 为 `node scripts/teaching-workflow.mjs`，只使用指定的教师本地会话调用同一 API。创建、局部修订和模块校验适配器已在关闭的持久化开关后装配；生成 Web 工作台已接入同一契约并完成合成数据浏览器验证，隔离PostgreSQL工作流表事务、HTTP/对话客户端持久化及合成数据的真实发布/归档跨表事务已验收；业务schema迁移、真实教学使用与生产启用仍待完成（见工作台验收记录2026-09-26）。503 不能视为生成成功，needs_input 代表条件或内容未齐，也不能绕过接口直接写库。根据已确认对话填入结构化学科、年级或学生、用途、kind 和 requirement；专项与每日题量使用 requestedItemCount。自然语言局部修订提交 targetQuestionIds 与 instruction，手工修改使用显式 patch；两者均保留 expectedRevision 和 operationKey。Web 仅缓存按教师隔离的最后任务 ID，内容以服务端版本为准；冲突保留本地未保存编辑，不能自动换成最新 revision 覆盖。取消后的任务只读，继续须明确新建；未启用时保留“原有生成与打印”入口。
+
 Web 只提交学科、年级、`kind`、`purpose`、`requestedItemTypes`、`dayPlan`、目标范围、难度、题量、教师要求、知识点和教材标识。服务端组装 `generationContext`、`studentSignals`、`contentContext` 和生成预算；客户端不得提交 prompt、provider、model、raw 或内部预算。
+
+持续工作流会核对保存的教学、目标和规范化 studentSignals 是否仍与服务端证据一致。原错题答案、错误描述或可用学习记录变化后，新修订、确认和恢复返回 `409 WORKFLOW_EVIDENCE_CHANGED`；修订调用前及结果提交前均检查，生成期间变化则保留 needs_input 占位。此时读取并保留旧版本，说明来源变化，由教师决定按当前证据新建任务并重新复核；不得自动刷新快照、修改 expectedRevision 或换 requestKey 重试。历史教师确认、版本读取和原成功命令的同键重放仍有效，不追溯撤销旧记录；旧版缺失 studentSignals 字段不能当成已验证的空证据。
 
 ## 输出契约
 
 服务层返回结构化草稿、`generationPipeline`、审查结果、`gradingSourcePackage` 引用和 `teacher_review` 状态。学生卷与解析卷从答案包派生，未经过 parse、normalize、validate、repair 和教师复核的内容不得发布、归档或导出。
+
+已确认测评版本可通过独立 `assignment` API/CLI 衔接既有作业与导出：先 GET 确认版本，再提交仅含 expectedRevision 的请求。该能力已实现但仍在关闭的持久化开关后，不能视为已上线。服务端验证保存的逐题教师确认、当前权限与来源一致性；同版本重放返回原 Assignment，新版本另建作业，不能覆盖旧题目或旧 PDF。来源包将 sourceId 绑定新 Assignment，保留工作流版本，并记录原来源和发布来源指纹。题号、选项、图形、共享材料、每日标识和 answerFormat 随权威来源保存。
+
+assignment 返回作业 ID，不调用模型或导出 PDF。对该 ID 调用既有 draft-export 后，服务端已有内容确认不会被预览清除；排版未通过仍不能 print-export，解析 PDF 失败不能标记正式导出完成。发布版不接受旧 draft-review 或答案来源导入改写；需要修改时回到工作流修订并重新确认。不得从上传 JSON 的确认人或哈希继承权限，也不得为绕过 503 直接写库或开启未验收开关。讲解尚无该发布路径；HTTP 和 Web 编辑/确认已接入，后端持久化仍未启用。完整契约、错误和重放规则见 docs/14-api-contract.md。
+
+讲解使用独立的 content.explanation，包含 concept、steps、workedExamples（prompt、answer、analysisSteps）和 commonMistakes；不把例题当成测评分数或批改答案包。通过同一 command API/CLI 提交 targetExplanation=true；自然语言 revise 带 instruction，手工 revise 使用 replace_explanation 的完整 value，不能混入 targetQuestionIds。confirm 表示教师明确确认整份讲解，确认身份只由会话写入。创建及修订剥离模型/客户端确认，修订后撤销整份讲解确认；历史恢复追加版本并重查当前权限/教学证据，历史版本不覆盖。保留 expectedRevision 与 operationKey 处理冲突和重放。自然语言修订复用共享 generation 规则、上下文和一次受限修复，手工修改、确认、恢复不调用模型；取消或失败不得提交迟到内容。确认讲解不意味着已发布、已导出或已经 Web 可用。
 
 ## 执行顺序
 
 先用 `normalizeTeachingPurpose` 校验用途。默认 comprehensive 按 `kind` 选择蓝图；focused 只包含指定题型；multi_day 保留每日 dayId、目标和题量；explanation 产出概念、步骤、例题和易错点，不生成试卷答案包或自动审查 PDF。随后通过 `draftAssessmentService -> draftAssessment -> runAssessmentPipeline -> runTeachingTask` 装配共享规则、上下文和校验器。额外调用仅发生在执行器中，不能用页面状态重建第二套 prompt。
 
 ## 模型与复核
+
+首次补弱、巩固练习和复测按runtime-rules中的“补弱、巩固与复测”处理。把教师明确阶段原样保留在requirement或每日goal中，继续使用既有purpose与requestedItemCount，不新增前端私有prompt或把参考样例题量设成默认。验收要分别查看阶段结构、错题证据关联、题量和评分口径；实际发送的generationContext与原要求均应保留。来源记录只能支持历史错误，不自动证明当前掌握。明确的过程分与仅结果满分冲突由共享assessmentScoreIssues拦截，语义不明确的细则仍需教师复核。
 
 调用前读取 `packages/ai/src/model-policy.js` 的任务策略；本文件不另行硬编码模型参数或数值预算。9 月 11 日设计确定 Astra 主生成、Flash 按需提取、Sol 仅执行有限任务或可用性替补，接入进度以实施计划为准，不能把设计当作现有运行结果。evidence/configuration 故障直接 `teacher_review`；模型结果均需结构校验和教师复核。
 

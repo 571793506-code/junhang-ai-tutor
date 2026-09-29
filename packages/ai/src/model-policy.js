@@ -10,7 +10,9 @@ const TEACHING_TASKS = Object.freeze({
   reference: { module: "grading", role: "primary", timeoutMs: 180000, maxTokens: 12000 },
   "extract-requirement": { module: "generation", role: "assist", timeoutMs: 60000, maxTokens: 4000 },
   "extract-material": { module: "generation", role: "assist", timeoutMs: 60000, maxTokens: 8000 },
-  recognize: { module: "grading", role: "assist", timeoutMs: 90000, maxTokens: 8000 },
+  // Two page images share this pool; 24k gives each Flash page enough room
+  // for a complete structured OCR response instead of a truncated JSON tail.
+  recognize: { module: "grading", role: "assist", timeoutMs: 90000, maxTokens: 24000 },
   "rewrite-feedback": { module: "grading", role: "replacement", timeoutMs: 60000, maxTokens: 4000 }
 });
 

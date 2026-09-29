@@ -4,6 +4,10 @@ export declare function validateGradingSourcePackage(
   sourcePackage?: Record<string, unknown>
 ): { ok: boolean; issues: string[] };
 
+export declare function gradingSourcePackageToAssignmentItems(
+  sourcePackage?: Record<string, unknown>
+): Array<Record<string, unknown>>;
+
 export interface EntityBlueprint {
   name: string;
   keyFields: string[];
@@ -521,3 +525,16 @@ export declare function normalizeTeachingPurpose(input?: Record<string, unknown>
   requestedItemTypes: string[];
   dayPlan: Array<{ dayId: string; goal: string; requestedItemTypes: string[]; requestedItemCount: number }>;
 };
+export type TeachingWorkflowType = "generation" | "grading";
+export declare function teachingExplanationContent(value: unknown): Record<string, unknown> | null;
+export declare function applyWorkflowPatch(snapshot?: Record<string, unknown>, patch?: Record<string, unknown>): {
+  snapshot: Record<string, unknown>; affectedQuestionIds: string[]; affectedExplanation?: boolean;
+};
+export declare function normalizeTeachingWorkflow(input?: Record<string, unknown>): {
+  workflowId: string; ownerTeacherId: string; type: TeachingWorkflowType; revision: number; operationKey: string; snapshot: Record<string, unknown>;
+};
+export function allocateAssessmentScores(types: string[], input?: { subject?: string; kind?: string }): number[];
+export function assessmentScoreIssues(item?: { prompt?: unknown; score?: number; metadata?: { score?: number }; rubric?: unknown; itemType?: string }): string[];
+export function normalizeAssessmentOptions(value: unknown): string[];
+export function normalizeAssessmentAnswerFormat(value: unknown): unknown;
+export function assessmentChoiceOptionsValid(value: unknown): boolean;

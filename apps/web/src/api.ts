@@ -493,6 +493,90 @@ export async function exportAssessmentDraft(assignmentId: string) {
   }>(response);
 }
 
+export type TeachingExplanation = {
+  concept: string; steps: string[]; workedExamples: Array<{ prompt: string; answer: unknown; analysisSteps: string[] }>;
+  commonMistakes: string[]; reviewedByTeacher?: boolean;
+};
+export type TeachingQuestion = {
+  id: string; questionNo: string; prompt: string; answer: unknown; score: number; rubric: unknown;
+  analysisSteps: string[]; knowledgePoint: string; commonMistake: string; reviewedByTeacher?: boolean;
+  options?: string[]; sharedMaterialId?: string; dayId?: string; [key: string]: unknown;
+};
+export type TeachingWorkflowSummary = { id: string; module: "generation" | "grading"; revision: number; status: string; request: Record<string, unknown> };
+export type TeachingWorkflowView = TeachingWorkflowSummary & {
+  content: { title?: string; purpose?: string; questions: TeachingQuestion[]; explanation?: TeachingExplanation;
+    sharedMaterials: Array<{ id: string; title?: string; text: string }>; days: Array<{ dayId: string; goal: string; questionCount: number }> };
+  issues: Array<{ code: string; message: string }>;
+};
+export type TeachingWorkflowCommand = {
+  action: "revise" | "confirm" | "restore" | "cancel"; operationKey: string; expectedRevision: number;
+  targetQuestionIds?: string[]; targetExplanation?: true; instruction?: string; patch?: Record<string, unknown>; restoreRevision?: number;
+};
+
+// Keep machine-readable conflicts for the editor, but never render raw server errors.
+async function teachingWorkflowRequest<T>(suffix: string, body?: unknown): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/teaching/workflows${suffix}`, {
+      method: body === undefined ? "GET" : "POST", headers: jsonHeaders(), redirect: "error", signal: AbortSignal.timeout(300000),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) })
+    });
+  } catch { throw Object.assign(new Error("暂未收到操作结果，请刷新任务核对，避免重复提交。"), { code: "WORKFLOW_CONNECTION_FAILED" }); }
+  let data: any;
+  try { data = await response.json(); } catch {
+    const unavailable = response.status === 404 || response.status === 503;
+    throw Object.assign(new Error(unavailable ? "持续编辑服务暂未启用，可继续使用原有生成与打印。" : "服务暂不可用，请稍后检查任务。"),
+      { code: "WORKFLOW_RESPONSE_INVALID", status: response.status, unavailable });
+  }
+  if (!response.ok || data?.ok !== true) {
+    const code = typeof data?.error === "string" && /^(WORKFLOW_|SESSION_)[A-Z_]+$/.test(data.error) ? data.error : "WORKFLOW_REQUEST_FAILED";
+    const unavailable = response.status === 503 && data?.error === "WORKFLOW_UNAVAILABLE" || response.status === 404 && !data?.error;
+    throw Object.assign(new Error(response.status === 409 && code === "WORKFLOW_EVIDENCE_CHANGED"
+      ? "来源依据（如错题、教材或作答记录）已变化。你的本地编辑仍保留，旧版本和已有确认可查看。刷新不会更新旧草稿的依据；请核对当前依据后，决定是否另建任务并重新复核。"
+      : response.status === 409 ? "版本或操作状态已变化。你的编辑已保留，请刷新后比较。"
+      : unavailable ? "持续编辑服务暂未启用，可继续使用原有生成与打印。"
+      : response.status === 401 || response.status === 403 ? "当前登录无权操作，请重新登录或检查权限。"
+      : "操作未完成，请检查教学条件、内容完整性和教师确认状态。"), { code, status: response.status, unavailable });
+  }
+  return normalizeDisplayPayload(data) as T;
+}
+export const listTeachingWorkflows = (module: "generation" | "grading" = "generation") => teachingWorkflowRequest<{ workflows: TeachingWorkflowSummary[] }>(`?module=${module}`);
+export const createTeachingWorkflow = (input: { requestKey: string; module: "generation"; request: Record<string, unknown> }) => teachingWorkflowRequest<{ workflow: TeachingWorkflowView }>("", input);
+export const getTeachingWorkflow = (id: string, revision?: number) => teachingWorkflowRequest<{ workflow: TeachingWorkflowView }>(`/${encodeURIComponent(id)}${revision ? `/revisions/${revision}` : ""}`);
+export const executeTeachingWorkflow = (id: string, command: TeachingWorkflowCommand) => teachingWorkflowRequest<{ workflow: TeachingWorkflowView }>(`/${encodeURIComponent(id)}/commands`, command);
+export const publishTeachingAssignment = (id: string, expectedRevision: number) => teachingWorkflowRequest<{ assignment: { id: string; revision: number; replayed: boolean } }>(`/${encodeURIComponent(id)}/assignment`, { expectedRevision });
+
+export type GradingWorkflowQuestion = {
+  id: string; questionNo: string; printedPrompt?: string; prompt?: string; studentAnswer: unknown; correctAnswer: unknown;
+  status: "correct" | "wrong" | "partial" | "uncertain"; score: number | null; maxScore: number | null;
+  explanation: string; knowledgePoint?: string; rubric?: unknown; analysisSteps?: string[]; errorStep?: string;
+  suggestedPractice?: string; teacherNote?: string; reviewedByTeacher?: boolean; recognitionCorrectedByTeacher?: boolean;
+  confidence?: number; page?: number; sourceImageRef?: string; cropRef?: string;
+  bbox?: { page: number; x: number; y: number; w: number; h: number };
+};
+export type GradingWorkflowPage = { pageNumber: number; imageUrl: string | null; fileName: string; imageRefs: string[]; cropRef?: string | null; qualityStatus: string };
+export type GradingWorkflowView = TeachingWorkflowSummary & {
+  content: { title?: string; questions: GradingWorkflowQuestion[]; pages?: GradingWorkflowPage[];
+    gradingSummary?: { score: number | null; confirmedScore: number | null; totalScore: number | null; unresolvedCount: number; confirmedCount: number } };
+  issues: Array<{ code: string; message: string }>;
+};
+export const createGradingWorkflow = (requestKey: string, request: Record<string, unknown>) => teachingWorkflowRequest<{ workflow: GradingWorkflowView }>("", { module: "grading", requestKey, request });
+export const getGradingWorkflow = (id: string, revision?: number) => teachingWorkflowRequest<{ workflow: GradingWorkflowView }>(`/${encodeURIComponent(id)}${revision ? `/revisions/${revision}` : ""}`);
+export const executeGradingWorkflow = (id: string, command: TeachingWorkflowCommand) => teachingWorkflowRequest<{ workflow: GradingWorkflowView }>(`/${encodeURIComponent(id)}/commands`, command);
+export async function archiveTeachingGrading(id: string, expectedRevision: number) {
+  const result = await teachingWorkflowRequest<{ archive: { id: string; workflowId: string; revision: number; currentRevision: number; status: string; replayed: boolean } }>(`/${encodeURIComponent(id)}/archive`, { expectedRevision });
+  const a = result.archive;
+  if (!a?.id || a.workflowId !== id || a.revision !== expectedRevision || a.currentRevision < a.revision || a.status !== "archived") throw new Error("归档结果尚未确认，请刷新核对。");
+  return a;
+}
+export function teachingImageUrl(value?: string | null) {
+  if (!value) return "";
+  try {
+    const url = new URL(value, new URL(API_BASE_URL, window.location.origin));
+    return ["http:", "https:"].includes(url.protocol) ? url.href : "";
+  } catch { return ""; }
+}
+
 export async function reviewAssessmentDraft(assignmentId: string, decision: "accept" | "reject", feedback?: string) {
   const response = await fetch(`${API_BASE_URL}/api/assessments/${assignmentId}/draft-review`, {
     method: "POST",

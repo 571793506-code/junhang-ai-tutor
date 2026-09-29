@@ -10,7 +10,8 @@ import {
   reviewWithMiniMax
 } from "@junhang/ai";
 import { randomUUID } from "node:crypto";
-import { matchesTeacherConfirmedTextbookChapterScope, matchesTextbookEvidenceScope, normalizeGradeLevel, normalizeTeachingPurpose } from "@junhang/core";
+export * from "./teaching-workflow-assignment.js";
+import { matchesTeacherConfirmedTextbookChapterScope, matchesTextbookEvidenceScope, normalizeGradeLevel, normalizeTeachingPurpose, allocateAssessmentScores, assessmentScoreIssues, normalizeAssessmentOptions, assessmentChoiceOptionsValid, normalizeAssessmentAnswerFormat } from "@junhang/core";
 import { assessmentContentIssues, createTeachingOperationBudget } from "../../ai/src/teaching-pipeline.js";
 import { buildAssessmentPartitions } from "../../ai/src/assessment-partitions.js";
 import {
@@ -28,6 +29,10 @@ export { buildQaLearningRecord, sanitizeQaAnswer, sanitizeQaText } from "./qa-le
 export * from "./student-dictionary.js";
 export * from "./module-capability-status.js";
 export * from "./context-engineering.js";
+export * from "./teaching-workflow-service.js";
+export * from "./teaching-workflow-validation.js";
+export * from "./teaching-workflow-archive.js";
+export * from "./teaching-workflow-publication.js";
 
 function normalizeAssessmentKind(kind) {
   const text = String(kind || "");
@@ -939,6 +944,7 @@ function normalizeReferenceAnswerItem(item, index) {
     questionNo,
     prompt: String(source.prompt ?? source.question ?? source.printedPrompt ?? "").trim(),
     correctAnswer: String(source.correctAnswer ?? source.answer ?? source.standardAnswer ?? source.expectedAnswer ?? "").trim(),
+    itemType: String(source.itemType || source.context?.itemType || "").trim(),
     analysisSteps,
     knowledgePoint: String(source.knowledgePoint || source.point || source.skill || "").trim(),
     score: optionalNumber(source.score),
@@ -958,6 +964,7 @@ function assignmentAnswerReferences(input = {}) {
       questionNo: item.questionNo || item.orderIndex || index + 1,
       prompt: item.prompt,
       correctAnswer: item.answer || item.metadata?.answer || "",
+      itemType: item.itemType || item.metadata?.itemType || item.sourceContext?.itemType || item.metadata?.sourceContext?.itemType,
       analysisSteps: item.rubric || item.metadata?.analysisSteps || item.metadata?.analysis || [],
       knowledgePoint: item.metadata?.knowledgePoint || item.knowledgePoint || "",
       score: item.score || item.metadata?.score,
@@ -1219,19 +1226,6 @@ function normalizeQuestionStatus(value) {
   return "uncertain";
 }
 
-function fallbackBBox(index, total, imageTotal = 1) {
-  const markerCount = Math.max(1, Math.min(total || 1, 10));
-  const row = index % markerCount;
-  const page = Math.min(Math.max(1, Math.floor(index / markerCount) + 1), Math.max(1, Number(imageTotal) || 1));
-  return {
-    page,
-    x: 0.08,
-    y: Math.min(0.88, 0.12 + row * (0.76 / markerCount)),
-    w: 0.84,
-    h: Math.max(0.05, Math.min(0.1, 0.76 / markerCount))
-  };
-}
-
 function manifestQuestionFor(input = {}, questionNo = "") {
   const questions = Array.isArray(input.questionLayoutManifest?.questions) ? input.questionLayoutManifest.questions : [];
   const normalizedQuestionNo = String(questionNo || "");
@@ -1242,36 +1236,51 @@ function manifestQuestionFor(input = {}, questionNo = "") {
 
 function normalizeBBox(value, index, total, input = {}, questionNo = "") {
   const manifest = manifestQuestionFor(input, questionNo);
-  const fallback = manifest?.bbox || fallbackBBox(index, total, input.imageNames?.length || input.uploadedFiles?.length || 1);
-  const source = value && typeof value === "object" ? value : {};
-  return {
-    page: Math.max(1, Math.round(Number(source.page || source.imageIndex || fallback.page) || fallback.page)),
-    x: clampUnit(source.x ?? source.left, fallback.x),
-    y: clampUnit(source.y ?? source.top, fallback.y),
-    w: Math.max(0.04, clampUnit(source.w ?? source.width, fallback.w)),
-    h: Math.max(0.035, clampUnit(source.h ?? source.height, fallback.h))
-  };
+  const source = value && typeof value === "object" ? value : manifest?.bboxSource !== "typed-text-estimate" ? manifest?.bbox : null;
+  if (!source || typeof source !== "object") return null;
+  const raw = [source.page ?? source.imageIndex ?? input.pageNumber, source.x ?? source.left, source.y ?? source.top, source.w ?? source.width, source.h ?? source.height];
+  if (raw.some((part) => part == null || part === "" || typeof part === "boolean" || !Number.isFinite(Number(part)))) return null;
+  const [page, x, y, w, h] = raw.map(Number);
+  if (!Number.isInteger(page) || page < 1 || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > 1 || y + h > 1) return null;
+  return { page, x, y, w, h };
 }
 
 function normalizeSubmissionOcrQuestion(item, index, total, input = {}, referenceByQuestion = new Map()) {
   const source = item && typeof item === "object" ? item : {};
   const questionNo = String(source.questionNo || source.no || source.index || index + 1);
   const reference = referenceByQuestion.get(questionNo) || {};
+  const evidence = Object.fromEntries(["observedWork", "page", "sourceImageRef", "cropRef", "itemType", "type", "context"]
+    .filter((key) => source[key] !== undefined).map((key) => [key, source[key]]));
   return {
+    ...evidence,
     questionNo,
-    printedText: String(source.printedText || source.prompt || source.question || reference.prompt || "").trim(),
-    studentAnswer: String(source.studentAnswer || source.studentAnswerText || source.answer || source.studentWork || "").trim(),
+    printedText: String(source.printedPrompt || source.printedText || source.prompt || source.question || reference.prompt || "").trim(),
+    studentAnswer: Object.hasOwn(source, "studentAnswer")
+      ? source.studentAnswer == null ? null : String(source.studentAnswer).trim()
+      : String(source.studentAnswerText || source.answer || source.studentWork || "").trim(),
     correctAnswer: String(source.correctAnswer || source.expectedAnswer || reference.correctAnswer || "").trim(),
-    confidence: clampUnit(source.confidence, 0.92),
+    confidence: source.confidence === null ? null : clampUnit(source.confidence, 0.92),
     bbox: normalizeBBox(source.bbox || source.box || source.position, index, total, input, questionNo)
   };
 }
 
-function compareObjectiveAnswers(reference = {}, question = {}) {
+function compareObjectiveAnswers(reference = {}, question = {}, itemType = "") {
   const expected = String(reference.correctAnswer || question.correctAnswer || "").normalize("NFKC").trim();
   const actual = String(question.studentAnswer || "").normalize("NFKC").trim();
   const prompt = String(question.printedText || reference.prompt || "");
   if (!expected || !actual || Number(question.confidence ?? 0) < 0.85 || Number(reference.confidence ?? 0) < 0.9) return null;
+  if (itemType === "choice") {
+    const option = (value) => String(value).normalize("NFKC").trim().replace(/^[（(]\s*|\s*[）)]$/g, "").toUpperCase();
+    const expectedOption = option(expected);
+    const actualOption = option(actual);
+    return /^[A-Z]$/.test(expectedOption) && /^[A-Z]$/.test(actualOption) ? expectedOption === actualOption : null;
+  }
+  // A final-answer match cannot award process/rubric points. Keep observed work for the grader.
+  if (/^(calculation|solution|operation|writing|reading)$/i.test(itemType)) return null;
+  if (!["fill", "judgment"].includes(itemType)) {
+    if (String(question.observedWork ?? "").trim()) return null;
+    if (/过程|步骤|列式|答语|思路|展开|单位.*分/.test((reference.analysisSteps || []).join(" "))) return null;
+  }
   if (/言之有理|合理即可|答案不唯一|多种答案|任意|参考答案|示例|开放题|略|酌情|或/.test(expected)) return null;
   if (/说明|分析|理由|为什么|简答|作文|写作|解答|证明|过程|结合|谈谈|概括|赏析|造句|翻译/.test(prompt)) return null;
 
@@ -1313,6 +1322,8 @@ function buildDeterministicGradingPlan(input = {}, ocr = {}, referenceAnswers = 
   const references = Array.isArray(referenceAnswers) ? referenceAnswers : [];
   const questions = Array.isArray(ocr.questions) ? ocr.questions : [];
   const questionByNo = new Map(questions.map((item) => [String(item.questionNo || ""), item]));
+  const sourceByNo = new Map((input.gradingSourcePackage?.questions || []).map((item) => [String(item.questionNo || ""), item]));
+  const assignmentByNo = new Map((input.assignmentItems || []).map((item) => [String(item.questionNo || item.orderIndex || ""), item]));
   const deterministicResults = [];
   const unresolvedReferences = [];
   const unresolvedQuestions = [];
@@ -1320,7 +1331,10 @@ function buildDeterministicGradingPlan(input = {}, ocr = {}, referenceAnswers = 
   for (const reference of references) {
     const questionNo = String(reference.questionNo || "");
     const question = questionByNo.get(questionNo) || normalizeSubmissionOcrQuestion({ questionNo }, 0, 1, input, new Map([[questionNo, reference]]));
-    const comparison = compareObjectiveAnswers(reference, question);
+    const source = sourceByNo.get(questionNo);
+    const assignment = assignmentByNo.get(questionNo);
+    const itemType = source?.context?.itemType || assignment?.itemType || assignment?.metadata?.itemType || reference.itemType || question.itemType || question.type || question.context?.itemType || "";
+    const comparison = compareObjectiveAnswers(reference, question, itemType);
     if (comparison == null) {
       unresolvedReferences.push(reference);
       unresolvedQuestions.push(question);
@@ -1487,9 +1501,9 @@ function buildSubmissionQuestionLayoutManifest(input = {}, ocr = {}, referenceAn
         prompt: question.printedText || reference.prompt || "",
         answer: question.correctAnswer || reference.correctAnswer || "",
         score: optionalNumber(reference.score),
-        page: question.bbox?.page || 1,
-        bbox: question.bbox || fallbackBBox(index, questions.length, 1),
-        bboxSource: "typed-text-estimate"
+        page: question.page ?? question.bbox?.page ?? null,
+        bbox: question.bbox || null,
+        bboxSource: question.bbox ? "recognition" : "unavailable"
       };
     })
   };
@@ -1931,7 +1945,7 @@ function defaultAnswerSpaceMm(itemType) {
 }
 
 function shouldUseEnglishFourLineForPrompt(source = {}, itemType = "") {
-  const answerFormat = String(source.answerFormat || source.renderStyle || "");
+  const answerFormat = String(normalizeAssessmentAnswerFormat(source.answerFormat || source.renderStyle || ""));
   if (/english-four-line|english-writing/i.test(answerFormat)) return true;
   const prompt = String(source.prompt || "");
   if (/\u82f1\u6587\u8bd1\u4e2d\u6587|\u82f1\u8bd1\u4e2d/.test(prompt)) return false;
@@ -1946,7 +1960,7 @@ function shouldUseEnglishFourLineForPrompt(source = {}, itemType = "") {
 
 function buildAssessmentItemMetadata(source = {}, index) {
   const itemType = inferAssessmentItemType(source);
-  const rawAnswerFormat = source.answerFormat || source.renderStyle || null;
+  const rawAnswerFormat = normalizeAssessmentAnswerFormat(source.answerFormat || source.renderStyle || null);
   const answerFormat = shouldUseEnglishFourLineForPrompt(source, itemType) ? "english-four-line" : rawAnswerFormat;
   const configuredSpace = Number(source.answerSpaceMm || source.spaceMm) || defaultAnswerSpaceMm(itemType);
   const needsEnglishFourLine = /english-four-line|english-writing/i.test(String(answerFormat || ""));
@@ -1987,7 +2001,7 @@ function buildAssessmentItemMetadata(source = {}, index) {
     difficulty: source.difficulty || null,
     knowledgePoint: source.knowledgePoint || source.point || null,
     sectionTitle: source.sectionTitle || source.section || null,
-    options: normalizeStringList(source.options || source.choices),
+    options: normalizeAssessmentOptions(source.options || source.choices),
     figure: figure || null,
     answerFormat,
     pinyinWords: Array.isArray(source.pinyinWords) ? source.pinyinWords : [],
@@ -2007,7 +2021,7 @@ function selectPrintableAssessmentItems(items = [], input = {}) {
   return reviewAndRepairAssessmentItems(items, input).items;
 }
 
-function reviewAndRepairAssessmentItems(items = [], input = {}) {
+function reviewAndRepairAssessmentItems(items = [], input = {}, { preserveScores = false } = {}) {
   const kind = normalizeAssessmentKind(input.kind);
   const blueprint = buildAssessmentBlueprint(input);
   const subject = normalizeSubject(input.subject);
@@ -2096,7 +2110,7 @@ function reviewAndRepairAssessmentItems(items = [], input = {}) {
       analysisSteps: ensureAnalysisSteps(item, input)
     }
   }));
-  const scored = assignAssessmentScores(limitedRaw, input);
+  const scored = preserveScores ? { items: limitedRaw, totalScore: limitedRaw.reduce((sum, item) => sum + Number(item.metadata?.score || 0), 0) } : assignAssessmentScores(limitedRaw, input);
   const limited = scored.items;
   rememberAssessmentPrompts(limited, input);
 
@@ -2159,55 +2173,16 @@ function targetAssessmentTotalScore(input = {}) {
   return kind === "试卷" ? 100 : 60;
 }
 
-function scoreSeedForAssessmentItem(item = {}, input = {}) {
-  const subject = normalizeSubject(input.subject);
-  const kind = normalizeAssessmentKind(input.kind);
-  const type = printableType(item);
-  if (subject === "英语" && kind === "试卷") return type === "writing" ? 20 : 2;
-  if (subject === "数学") {
-    if (type === "fill" || type === "choice") return kind === "试卷" ? 2 : 3;
-    if (type === "calculation") return kind === "试卷" ? 5 : 6;
-    return kind === "试卷" ? 6 : 8;
-  }
-  if (subject === "语文") {
-    if (type === "fill") return 3;
-    if (type === "reading") return kind === "试卷" ? 4 : 5;
-    if (type === "writing") return 30;
-    return 4;
-  }
-  return defaultScoreForAssessmentItem(item, input);
-}
-
 function assignAssessmentScores(items = [], input = {}) {
   const totalScore = targetAssessmentTotalScore(input);
-  const scored = items.map((item) => ({
+  const scores = allocateAssessmentScores(items.map(printableType), { subject: normalizeSubject(input.subject), kind: normalizeAssessmentKind(input.kind) });
+  const scored = items.map((item, index) => ({
     ...item,
     metadata: {
       ...(item.metadata || {}),
-      score: scoreSeedForAssessmentItem(item, input)
+      score: scores[index]
     }
   }));
-  const adjustableIndexes = scored
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => printableType(item) !== "writing")
-    .map(({ index }) => index);
-  const indexes = adjustableIndexes.length ? adjustableIndexes : scored.map((_, index) => index);
-  let diff = totalScore - scored.reduce((sum, item) => sum + Number(item.metadata?.score || 0), 0);
-  let cursor = indexes.length - 1;
-  let guard = 0;
-  while (diff !== 0 && indexes.length && guard < 500) {
-    const index = indexes[cursor];
-    const current = Number(scored[index].metadata.score || 0);
-    if (diff > 0) {
-      scored[index].metadata.score = current + 1;
-      diff -= 1;
-    } else if (current > 1) {
-      scored[index].metadata.score = current - 1;
-      diff += 1;
-    }
-    cursor = cursor > 0 ? cursor - 1 : indexes.length - 1;
-    guard += 1;
-  }
   return { items: scored, totalScore };
 }
 
@@ -2330,7 +2305,7 @@ function shouldReplaceReadingSection(items = [], input = {}, blueprint = buildAs
 
 function ensureAnalysisSteps(item = {}, input = {}) {
   const existing = Array.isArray(item.metadata?.analysisSteps) ? item.metadata.analysisSteps.filter(Boolean) : [];
-  if (existing.length >= 3) return existing;
+  if (existing.length) return existing;
   const subject = normalizeSubject(input.subject);
   const type = printableType(item);
   const answer = compactText(item.answer, "见参考答案");
@@ -2357,11 +2332,14 @@ function auditAssessmentDraft(items = [], input = {}, notes = []) {
   const blueprint = buildAssessmentBlueprint(input);
   const sectionCounts = Object.fromEntries(blueprint.sections.map((section) => [section.title, 0]));
   const issues = [];
+  if (Math.abs(items.reduce((sum, item) => sum + Number(item.metadata?.score || 0), 0) - targetAssessmentTotalScore(input)) > 0.001) issues.push("逐题分值之和与目标总分不一致，请同时复核分值和评分细则。");
   for (const item of items) {
+    if (assessmentScoreIssues(item).length) issues.push(`第 ${item.metadata?.sourceIndex || "?"} 题分值、题干标注或评分细则冲突，请教师复核。`);
+    if (printableType(item) === "choice" && !assessmentChoiceOptionsValid(item.metadata?.options)) issues.push(`第 ${item.metadata?.sourceIndex || "?"} 题选择项缺失或格式无效，请教师复核。`);
     const sectionTitle = item.metadata?.sectionTitle || "";
     if (sectionTitle && sectionCounts[sectionTitle] != null) sectionCounts[sectionTitle] += 1;
     if (item.metadata?.score == null) issues.push(`第 ${item.metadata?.sourceIndex || "?"} 题缺少分值。`);
-    if (!Array.isArray(item.metadata?.analysisSteps) || item.metadata.analysisSteps.length < 3) {
+    if (!Array.isArray(item.metadata?.analysisSteps) || item.metadata.analysisSteps.length === 0) {
       issues.push(`第 ${item.metadata?.sourceIndex || "?"} 题解析步骤不足。`);
     }
     if (/如图|图中|画图/.test(item.prompt || "") && !item.metadata?.figure) {
@@ -3924,7 +3902,7 @@ function normalizeAssessmentDraft(result = {}, input = {}) {
   }
   const usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
   const providerUsedDynamicFallback = !result.available || !items.length || result.modelRun?.metadata?.partialGeneration === true;
-  const review = reviewAndRepairAssessmentItems(items.length ? items : buildFallbackAssessmentItems(input), input);
+  const review = reviewAndRepairAssessmentItems(items.length ? items : buildFallbackAssessmentItems(input), input, { preserveScores: result.available && items.length > 0 });
   const usedDynamicFallback = providerUsedDynamicFallback || review.usedRepairFallback;
   const safeItems = review.items;
   const printNotes = [
@@ -4178,6 +4156,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
     assessmentMaxTokens: generationBudget.assessmentMaxTokens,
     generationBudget,
     generationContext,
+    studentSignals: generationContext.studentSignals,
     contentContext: generationContext.teaching.contentContext
   };
   if (input.generationTimeoutMs != null) {

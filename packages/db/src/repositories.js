@@ -523,7 +523,7 @@ export async function createAssignmentDraft(
             orderIndex: index + 1,
             itemType: item.itemType || item.type || "question",
             prompt: item.prompt,
-            answer: item.answer || undefined,
+            answer: item.answer ?? undefined,
             rubric: item.rubric || undefined,
             metadata: item.metadata || undefined
           }))

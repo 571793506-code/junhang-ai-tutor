@@ -6,6 +6,24 @@ import {
   evaluateGenerationQualityResult
 } from "./generation-quality-check.mjs";
 
+test("focused and explanation acceptance follows requested purpose rather than a full exam blueprint", () => {
+  const sample = { name: "focused", purpose: "focused", subject: "数学", kind: "练习", requestedItemCount: 1,
+    requestedItemTypes: ["calculation"], generationProfile: "quiz-standard" };
+  const result = { modelAvailable: true, usedDynamicFallback: false, draftAvailable: true, totalScore: 5, audit: { status: "passed" },
+    generationPipeline: { model: { generationProfile: "quiz-standard" } }, draftItems: [
+      { itemType: "calculation", prompt: "1+1", answer: "2", score: 5, analysisSteps: ["1加1得2"], knowledgePoint: "加法", commonMistake: "别减", rubric: "结果正确5分" }
+    ] };
+  assert.equal(evaluateGenerationQualityResult(sample, result).ok, true);
+  const conflict = structuredClone(result);
+  conflict.draftItems[0].rubric = "本题满分6分。";
+  assert.ok(evaluateGenerationQualityResult(sample, conflict).detail.issues.includes("题干标注或评分细则与逐题分值冲突。"));
+  assert.equal(evaluateGenerationQualityResult({ ...sample, requestedItemCount: 2 }, result).ok, false);
+  const e = { ...result, draftItems: [], parsedDraft: { explanation: { concept: "加法", steps: ["合起来"], workedExamples: [{ prompt: "1+1", answer: "2", analysisSteps: ["合并两组"] }], commonMistakes: ["不要减"] } } };
+  assert.equal(evaluateGenerationQualityResult({ ...sample, purpose: "explanation" }, e).ok, true);
+  e.parsedDraft.explanation.workedExamples[0].analysisSteps = [];
+  assert.equal(evaluateGenerationQualityResult({ ...sample, purpose: "explanation" }, e).ok, false);
+});
+
 test("quiz quality samples use expanded budget for three subject quizzes", () => {
   const cases = buildGenerationQualityCases("quiz");
 
@@ -18,6 +36,20 @@ test("quiz quality samples use expanded budget for three subject quizzes", () =>
   assert.equal(cases.every((item) => item.generationProfile === "quiz-standard"), true);
   assert.equal(cases.every((item) => item.assessmentTotalTimeoutMs === 120000), true);
   assert.equal(cases.every((item) => item.assessmentMaxTokens === 16000), true);
+});
+
+test("choice placeholders are rejected even when a historical audit claimed success", () => {
+  const sample = { purpose: "focused", subject: "数学", kind: "练习", requestedItemCount: 1,
+    requestedItemTypes: ["choice"], generationProfile: "quiz-standard" };
+  const result = { modelAvailable: true, usedDynamicFallback: false, draftAvailable: true, totalScore: 2,
+    audit: { status: "passed" }, generationPipeline: { model: { generationProfile: "quiz-standard" } },
+    draftItems: [{ itemType: "choice", prompt: "1+1=（ ）", answer: "A", rubric: "选A得2分。",
+      metadata: { score: 2, options: ["A. 2", "B. 3"], analysisSteps: ["1加1等于2。"], knowledgePoint: "加法", commonMistake: "不要相乘。" } }] };
+  assert.equal(evaluateGenerationQualityResult(sample, result).ok, true);
+  result.draftItems[0].metadata.options = ["[object Object]", "[object Object]"];
+  const check = evaluateGenerationQualityResult(sample, result);
+  assert.equal(check.ok, false);
+  assert.ok(check.detail.issues.includes("选择题选项缺失或格式无效。"));
 });
 
 test("formal quality samples use formal budget for exams and personalized practice", () => {
@@ -225,6 +257,20 @@ test("generation quality verification accepts a valid Sol escalation sample", ()
 
   assert.equal(check.ok, true);
   assert.equal(check.detail.usedModelEscalation, true);
+});
+
+test("focused quality checks service metadata scores and still reject missing or inconsistent scores", () => {
+  const sample = { purpose: "focused", subject: "数学", kind: "练习", requestedItemTypes: ["calculation"], requestedItemCount: 1, generationProfile: "quiz-standard" };
+  const result = { modelAvailable: true, draftAvailable: true, usedDynamicFallback: false, totalScore: 5,
+    audit: { status: "passed" }, generationPipeline: { model: { generationProfile: "quiz-standard" } },
+    draftItems: [{ itemType: "calculation", prompt: "24+18", answer: "42", rubric: "按过程评分",
+      metadata: { score: 5, analysisSteps: ["24+10+8=42"], knowledgePoint: "加法", commonMistake: "注意进位" } }] };
+  assert.equal(evaluateGenerationQualityResult(sample, result).ok, true);
+  for (const score of [undefined, 4]) {
+    const changed = structuredClone(result);
+    changed.draftItems[0].metadata.score = score;
+    assert.ok(evaluateGenerationQualityResult(sample, changed).detail.issues.includes("逐题分值与总分不一致。"));
+  }
 });
 
 test("generation quality verification metadata is separate from link guard e2e", () => {

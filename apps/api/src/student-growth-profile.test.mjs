@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { buildGradingSourcePackage } from "@junhang/core";
+import { buildTeachingWorkflowArchive } from "@junhang/services";
+import { buildTermReportDraft } from "./student-term-report.js";
 import * as profileModule from "./student-growth-profile.js";
 import {
   buildProfileEvidencePack,
@@ -11,6 +14,32 @@ import {
 } from "./student-growth-profile.js";
 
 const now = new Date("2026-07-05T12:00:00.000Z");
+
+test("archive replacement is selected before the profile period, including a zero-mistake correction", async () => {
+  const source = buildGradingSourcePackage({ id: "paper", items: [{ prompt: "1+1", answer: "2", score: 5 }] }).package;
+  const q = { id: "q1", questionNo: "1", printedPrompt: "1+1", studentAnswer: "3", correctAnswer: "2", status: "wrong", score: 0, maxScore: 5, explanation: "Add one and one.", knowledgePoint: "addition", reviewedByTeacher: true, confirmedBy: "t1" };
+  const args = { actor: { teacherId: "t1" }, workflow: { id: "w1", module: "grading", ownerTeacherId: "t1", currentRevision: 3, request: { studentId: "s1" } },
+    snapshot: { questions: [q], gradingSourcePackage: source }, resolveGradingSource: async () => source, submissionId: "archive-old", confirmedAt: "2026-07-04T09:00:00.000Z" };
+  const old = await buildTeachingWorkflowArchive(args);
+  const next = await buildTeachingWorkflowArchive({ ...args, workflow: { ...args.workflow, currentRevision: 5 }, previousArchive: old,
+    snapshot: { ...args.snapshot, questions: [{ ...q, studentAnswer: "2", status: "correct", score: 5 }] }, submissionId: "archive-new", confirmedAt: "2026-08-01T09:00:00.000Z" });
+  const student = { id: "s1", displayName: "Test student", submissions: [old, next].map((a) => ({ id: a.id, studentId: "s1", status: "GRADED", submittedAt: a.confirmedAt,
+    assignment: { title: "Addition", subject: { name: "数学" } }, content: { workflowArchive: a }, grading: { score: a.snapshot.finalScore, result: { ...a.snapshot, archiveEligible: true } } })),
+    mistakes: [{ id: "old-mistake", studentId: "s1", subject: "数学", prompt: "OBSOLETE_MISTAKE", createdAt: "2026-07-04T09:00:00.000Z", metadata: { sourceSubmissionId: "archive-old", workflowArchiveId: "archive-old" } }] };
+  const pack = buildProfileEvidencePack(student, { now, periodType: "monthly" });
+  assert.equal(pack.gradingEvidence.length, 0); assert.equal(pack.mistakeEvidence.length, 0);
+  const august = buildProfileEvidencePack(student, { now: new Date("2026-08-05T09:00:00.000Z"), periodType: "monthly" });
+  assert.equal(august.gradingEvidence.length, 1); assert.equal(august.gradingEvidence[0].score, 5);
+  assert.deepEqual(august.gradingEvidence[0].knowledgePoints, ["addition"]);
+  assert.equal(august.mistakeEvidence.length, 0);
+  const term = buildTermReportDraft(student, { reportType: "final" });
+  assert.equal(JSON.stringify(term).includes("OBSOLETE_MISTAKE"), false);
+  assert.equal(student.mistakes.length, 1);
+  const invalid = structuredClone(student);
+  invalid.submissions[1].content.workflowArchive.fingerprint = "tampered";
+  const blocked = buildProfileEvidencePack(invalid, { now: new Date("2026-08-05T09:00:00.000Z"), periodType: "monthly" });
+  assert.ok(blocked.blockedEvidence.some((item) => item.id === "archive-new" && item.confidence === "blocked"));
+});
 
 const qaLearningSignal = {
   knowledgePoints: ["小数意义"],

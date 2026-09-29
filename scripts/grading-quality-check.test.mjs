@@ -110,3 +110,43 @@ test("grading evaluator exposes the teacher-confirmed evidence boundary", () => 
   assert.equal(report.evidenceBoundary.productionEligible, false);
   assert.equal(report.productionAccuracyClaim, false);
 });
+
+test("missing and unavailable actuals cannot earn accuracy or production claims", () => {
+  for (const actual of [undefined, { available: false }, { available: true, questionResults: [] },
+    { available: true, usedDynamicFallback: true, questionResults: goldCase().actual.questionResults }]) {
+    const report = evaluateGradingCases([goldCase({ actual })], { teacherReviewedReport: true, productionAccuracyClaim: true });
+    assert.equal(report.ok, false);
+    assert.equal(report.productionAccuracyClaim, false);
+    assert.equal(report.metrics.questionAccuracy, null);
+  }
+});
+
+test("null scores and unrecorded teacher edits stay unknown; absent predictions earn no credit", () => {
+  const sample = goldCase();
+  sample.actual.score = null;
+  sample.actual.questionResults = [];
+  sample.teacherReview.modificationEvidence = "not_recorded";
+  const report = evaluateGradingCases([sample]);
+  assert.equal(report.metrics.scoreMeanAbsoluteError, null);
+  assert.equal(report.metrics.teacherModificationRate, null);
+  assert.equal(report.metrics.questionAccuracy, null);
+  assert.equal(report.ok, false);
+});
+
+test("teacher labels alone cannot establish an independently executed report", () => {
+  const report = evaluateGradingCases([goldCase()], { teacherReviewedReport: true, productionAccuracyClaim: true });
+  assert.equal(report.productionAccuracyClaim, false);
+  assert.equal(report.ok, false);
+  assert.ok(report.executionIssues.some((i) => i.code === "EXECUTION_EVIDENCE_MISSING"));
+});
+
+test("malformed actual question collections are rejected without granting metrics", () => {
+  for (const questions of [{ length: 1 }, "answer", [null]]) {
+    const source = goldCase();
+    source.actual.questionResults = questions;
+    const report = evaluateGradingCases([source]);
+    assert.equal(report.ok, false);
+    assert.equal(report.metrics.questionAccuracy, null);
+    assert.ok(report.executionIssues.some((i) => i.code === "ACTUAL_RESULTS_INCOMPLETE"));
+  }
+});

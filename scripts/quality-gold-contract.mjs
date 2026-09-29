@@ -1,3 +1,11 @@
+import { createHash } from "node:crypto";
+
+export function hashQualityEvidence(value) {
+  const stable = (v) => Array.isArray(v) ? v.map(stable) : v && typeof v === "object"
+    ? Object.fromEntries(Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => [k, stable(v[k])])) : v;
+  return `sha256:${createHash("sha256").update(JSON.stringify(stable(value))).digest("hex")}`;
+}
+
 const VALID_STATUSES = new Set(["correct", "wrong", "partial", "uncertain"]);
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
 

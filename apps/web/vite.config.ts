@@ -10,7 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@junhang/ai": path.resolve(repoRoot, "packages/ai/src/index.js"),
-      "@junhang/core": path.resolve(repoRoot, "packages/core/src/index.js")
+      "@junhang/core": path.resolve(repoRoot, "packages/core/src/browser.js")
     }
   },
   server: {

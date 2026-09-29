@@ -25,3 +25,23 @@ test("rejects dialogue grading results with invalid question status or score", (
   assert.equal(result.ok, false);
   assert.match(result.issues.join(";"), /状态|得分|满分/);
 });
+
+test("ignores imported teacher confirmation fields and keeps the result pending review", () => {
+  const result = normalizeImportedDialogueGradingResult({
+    questionResults: [{
+      questionNo: 1,
+      status: "correct",
+      score: 1,
+      maxScore: 1,
+      reviewedByTeacher: true,
+      confirmedBy: "attacker",
+      reviewedAt: "2026-09-11T00:00:00.000Z"
+    }]
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.result.archiveEligible, false);
+  assert.equal(result.result.needsTeacherReview, true);
+  assert.equal(result.result.questionResults[0].reviewedByTeacher, undefined);
+  assert.equal(result.result.questionResults[0].confirmedBy, undefined);
+});

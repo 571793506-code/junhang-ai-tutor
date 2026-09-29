@@ -123,6 +123,8 @@ function buildInput(row, packageValue, packageQuestions, gradingQuestions, priva
   const metadata = record(row.assignment?.metadata);
   const result = record(row.grading?.result);
   const packageByNo = new Map(packageQuestions.map((item, index) => [questionNo(item, index), item]));
+  const recognitionQuestions = list(content.ocrQuestions).length ? content.ocrQuestions : list(content.ocr?.questions);
+  const recognitionByNo = new Map(recognitionQuestions.map((item, index) => [questionNo(item, index), item]));
   const sanitizedQuestions = packageQuestions.map((item, index) => ({
     questionNo: questionNo(item, index),
     prompt: sanitizeText(item.prompt, privateNames),
@@ -130,16 +132,28 @@ function buildInput(row, packageValue, packageQuestions, gradingQuestions, priva
     maxScore: finiteNumber(item.maxScore),
     analysisSteps: list(item.analysisSteps).map((step) => sanitizeText(step, privateNames)),
     knowledgePoint: sanitizeText(item.knowledgePoint, privateNames),
-    rubric: sanitizeValue(item.rubric, privateNames)
+    rubric: sanitizeValue(item.rubric, privateNames),
+    ...(item.context !== undefined ? { context: sanitizeValue(item.context, privateNames) } : {}),
+    ...(item.itemType !== undefined ? { itemType: sanitizeText(item.itemType, privateNames) } : {}),
+    ...(item.type !== undefined ? { type: sanitizeText(item.type, privateNames) } : {}),
+    ...(item.figure !== undefined ? { figure: sanitizeValue(item.figure, privateNames) } : {})
   }));
   const ocrQuestions = gradingQuestions.map((item, index) => {
     const no = questionNo(item, index);
     const packageQuestion = packageByNo.get(no) || {};
+    // The confirmed answer may contain a teacher correction; process and geometry
+    // come from recognition evidence, never the grader's studentProcess/analysis.
+    const recognition = { ...item, ...record(recognitionByNo.get(no)) };
     return {
       questionNo: no,
       printedPrompt: sanitizeText(packageQuestion.prompt || item.prompt, privateNames),
       studentAnswer: sanitizeValue(item.studentAnswer, privateNames),
-      confidence: finiteNumber(item.confidence)
+      confidence: recognition.confidence == null ? null : finiteNumber(recognition.confidence),
+      ...(recognition.observedWork !== undefined ? { observedWork: sanitizeValue(recognition.observedWork, privateNames) } : {}),
+      ...(recognition.bbox !== undefined ? { bbox: sanitizeValue(recognition.bbox, privateNames) } : {}),
+      ...(recognition.page !== undefined ? { page: finiteNumber(recognition.page) } : {}),
+      ...(recognition.sourceImageRef !== undefined ? { sourceImageRef: sanitizeText(recognition.sourceImageRef, privateNames) } : {}),
+      ...(recognition.cropRef !== undefined ? { cropRef: sanitizeText(recognition.cropRef, privateNames) } : {})
     };
   });
 
@@ -163,7 +177,11 @@ function buildInput(row, packageValue, packageQuestions, gradingQuestions, priva
         questionNo: item.questionNo,
         prompt: item.prompt,
         correctAnswer: item.correctAnswer,
-        maxScore: item.maxScore
+        maxScore: item.maxScore,
+        ...(item.context !== undefined ? { context: item.context } : {}),
+        ...(item.itemType !== undefined ? { itemType: item.itemType } : {}),
+        ...(item.type !== undefined ? { type: item.type } : {}),
+        ...(item.figure !== undefined ? { figure: item.figure } : {})
       }))
     },
     ocrQuestions

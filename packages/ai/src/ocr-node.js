@@ -203,17 +203,32 @@ async function recognizeWithFlash(config, images, execution) {
     const result = await runTeachingPipelineUnit(runTeachingTask, config, "recognize", { pageNumber }, {
       ...execution,
       evidenceSufficient: Boolean(dataUrl),
+      // A page OCR response must be complete JSON; splitting its small shared
+      // allowance between an initial response and a repair causes truncation.
+      disableSolEscalation: true,
       call: (route, messages, options) => call(route, messages.map((message) => message.role === "user" ? {
         ...message, content: [{ type: "text", text: message.content }, { type: "image_url", image_url: { url: dataUrl } }]
       } : message), options)
     }, pool, allowance, (candidate) => {
-      return typeof candidate.printedText === "string" && typeof candidate.studentAnswerText === "string" &&
-        Array.isArray(candidate.questions) && candidate.questions.every((q) =>
+      const source = candidate && typeof candidate === "object" ? candidate : {};
+      const normalized = {
+        ...source,
+        text: String(source.text || source.ocrText || "").trim(),
+        printedText: String(source.printedText || source.questionText || "").trim(),
+        studentAnswerText: String(source.studentAnswerText || source.handwritingText || source.answersText || "").trim(),
+        confidence: Number.isFinite(Number(source.confidence)) ? Number(source.confidence) : null,
+        questions: Array.isArray(source.questions)
+          ? source.questions.map((question, questionIndex) => normalizeOcrQuestion(question, pageNumber, questionIndex))
+          : []
+      };
+      if (candidate && typeof candidate === "object") Object.assign(candidate, normalized);
+      return typeof normalized.printedText === "string" && typeof normalized.studentAnswerText === "string" &&
+        Array.isArray(normalized.questions) && normalized.questions.every((q) =>
           q && typeof q.printedPrompt === "string" && typeof q.studentAnswer === "string" &&
           typeof q.questionNo === "string" && q.questionNo.trim() &&
           Number.isFinite(q.confidence) && q.confidence >= 0 && q.confidence <= 1)
         ? [] : ["ocr_structure_invalid"];
-    }, "只做识别，不批改不给分。区分印刷题干和学生手写作答，空白或不可辨认作答保留空字符串。输出严格 JSON {text,printedText,studentAnswerText,confidence,questions:[{questionNo,printedPrompt,studentAnswer,observedWork,confidence,bbox:{page,x,y,w,h},warnings:string[]}]}。坐标为 0 到 1 的相对坐标。");
+    }, "只做识别，不批改不给分。区分印刷题干和学生手写作答，空白或不可辨认作答保留空字符串。为节省输出，text 可为空或一句摘要，printedText 与 studentAnswerText 只写汇总，不要重复整页全文；不要输出 warnings、markdown 或解释。输出严格 JSON {text,printedText,studentAnswerText,confidence,questions:[{questionNo,printedPrompt,studentAnswer,observedWork,confidence,bbox:{page,x,y,w,h}]}]}。坐标为 0 到 1 的相对坐标。");
     if (result.status !== "success") return { page: pageNumber, questions: [], failed: true };
     const candidate = result.candidate;
     return {

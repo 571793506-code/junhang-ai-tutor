@@ -4,6 +4,7 @@ import { describeModelError } from "./model-escalation.js";
 import { resolveTaskModelPolicy, resolveTeachingTaskPolicy } from "./model-policy.js";
 import { loadTeachingRulePack } from "./teaching-rules.js";
 import { runTeachingUnit } from "./teaching-model-runner.js";
+import { collectUpstreamFailureDiagnostics } from "./upstream-failure-diagnostics.js";
 import {
   QA_BLOCKED_ANSWER,
   QA_LEARNING_SIGNAL_SCHEMA_VERSION,
@@ -368,6 +369,7 @@ export async function callOpenAiCompatibleChat({
         });
         responseError.status = response.status;
         responseError.code = "invalid_upstream_response";
+        responseError.upstreamDiagnostics = collectUpstreamFailureDiagnostics(response.headers, "", { secret: apiKey });
         throw responseError;
       }
     }
@@ -399,6 +401,7 @@ export async function callOpenAiCompatibleChat({
     const requestError = new Error(`${response.status} ${message}`);
     requestError.status = response.status;
     requestError.code = body?.error?.code || body?.code || null;
+    requestError.upstreamDiagnostics = collectUpstreamFailureDiagnostics(response.headers, message, { secret: apiKey });
     throw requestError;
   }
 

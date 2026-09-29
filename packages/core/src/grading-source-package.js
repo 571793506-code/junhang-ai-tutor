@@ -113,7 +113,7 @@ export function buildGradingSourcePackage(assignment = {}, options = {}) {
 
   const questions = items.map((item, index) => {
     const itemMetadata = asRecord(item?.metadata);
-    const questionNo = normalizedText(item?.orderIndex ?? index + 1) || String(index + 1);
+    const questionNo = normalizedText(itemMetadata.sourceQuestionNo ?? item?.orderIndex ?? index + 1) || String(index + 1);
     const prompt = normalizedText(item?.prompt);
     const correctAnswer = answerForQuestion(item, itemMetadata, answerKey, index, questionNo);
     const maxScore = numberFromMetadata(itemMetadata, "score", "points") ?? positiveNumber(item?.score) ?? positiveNumber(item?.points);
@@ -127,6 +127,9 @@ export function buildGradingSourcePackage(assignment = {}, options = {}) {
       knowledgePoint: normalizedText(itemMetadata.knowledgePoint ?? itemMetadata.point ?? item?.knowledgePoint ?? item?.point),
       rubric: hasMeaningfulValue(rubric) ? rubric : ""
     };
+    // Optional context binds materials, options and figures to the fingerprint.
+    const sourceContext = item.sourceContext ?? itemMetadata.sourceContext;
+    if (hasMeaningfulValue(sourceContext)) question.context = normalizeJsonValue(sourceContext);
     if (!prompt) issues.push(`第 ${questionNo} 题缺少题干。`);
     if (!hasMeaningfulValue(correctAnswer)) issues.push(`第 ${questionNo} 题缺少标准答案。`);
     if (maxScore == null) issues.push(`第 ${questionNo} 题分值必须大于 0。`);
@@ -214,7 +217,8 @@ export function normalizeImportedGradingSourcePackage(sourcePackage = {}, option
       maxScore,
       analysisSteps,
       knowledgePoint,
-      rubric: hasMeaningfulValue(rubric) ? rubric : ""
+      rubric: hasMeaningfulValue(rubric) ? rubric : "",
+      ...(hasMeaningfulValue(raw.context) ? { context: normalizeJsonValue(raw.context) } : {})
     };
   });
   const questionNos = questions.map((question) => question.questionNo);
@@ -249,4 +253,37 @@ export function normalizeImportedGradingSourcePackage(sourcePackage = {}, option
 export function gradingSourceQuestionMap(sourcePackage = {}) {
   const questions = Array.isArray(sourcePackage.questions) ? sourcePackage.questions : [];
   return new Map(questions.map((question) => [String(question.questionNo || ""), question]));
+}
+
+// Project canonical content into the existing Assignment/print contract. Review
+// extensions and provenance remain outside items; content cannot grant approval.
+export function gradingSourcePackageToAssignmentItems(sourcePackage = {}) {
+  let previousMaterial = null;
+  return (Array.isArray(sourcePackage.questions) ? sourcePackage.questions : []).map((question) => {
+    const context = asRecord(question.context);
+    const material = asRecord(context.sharedMaterial);
+    const day = asRecord(context.day);
+    const materialKey = material.text ? stableJson({ material, day }) : null;
+    const showPassage = Boolean(materialKey && materialKey !== previousMaterial);
+    previousMaterial = materialKey;
+    return {
+      itemType: normalizedText(context.itemType) || "question",
+      prompt: question.prompt,
+      answer: question.correctAnswer,
+      rubric: question.rubric,
+      metadata: {
+        sourceQuestionNo: question.questionNo,
+        score: question.maxScore,
+        analysisSteps: structuredClone(question.analysisSteps),
+        knowledgePoint: question.knowledgePoint,
+        ...(context.answerFormat ? { answerFormat: context.answerFormat } : {}),
+        ...(hasMeaningfulValue(question.context) ? { sourceContext: structuredClone(question.context) } : {}),
+        ...(context.options ? { options: structuredClone(context.options) } : {}),
+        ...(context.figure ? { figure: structuredClone(context.figure) } : {}),
+        ...(context.commonMistake ? { commonMistake: context.commonMistake } : {}),
+        ...(day.dayId ? { dayId: day.dayId } : {}),
+        ...(material.text ? { passageGroupId: material.id, passageTitle: material.title || "", passageText: material.text, showPassage } : {})
+      }
+    };
+  });
 }

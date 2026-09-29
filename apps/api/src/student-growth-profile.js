@@ -1,4 +1,4 @@
-import { sanitizeQaText } from "@junhang/services";
+import { sanitizeQaText, selectCurrentTeachingEvidence } from "@junhang/services";
 
 const SUBJECTS = ["语文", "数学", "英语"];
 const QA_SCHEMA_VERSION = "qa-learning-signal-v1";
@@ -11,6 +11,7 @@ const PROJECT_TIME_ZONE_OFFSET = "+08:00";
 const PROJECT_TIME_ZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 export function buildProfileEvidencePack(student, options = {}) {
+  student = selectCurrentTeachingEvidence(student);
   const now = options.now instanceof Date ? options.now : new Date();
   const periodType = options.periodType === "weekly" ? "weekly" : "monthly";
   const period = buildPeriod(periodType, now);
@@ -22,7 +23,9 @@ export function buildProfileEvidencePack(student, options = {}) {
   const qaSessions = filterByPeriod(student.qaSessions || [], period, (item) => item.createdAt);
   const voiceInteractions = filterByPeriod(student.voiceInteractions || [], period, (item) => item.occurredAt);
   const gradingEvidence = [];
-  const blockedEvidence = [];
+  const blockedEvidence = (student.teachingArchiveIssues || []).map((item) => ({
+    id: item.id, type: "grading", confidence: "blocked", reason: "归档版本、确认内容或替代关系未通过校验，需教师核查。"
+  }));
 
   submissions.forEach((submission) => {
     const result = safeObject(submission.grading?.result);
@@ -1048,7 +1051,7 @@ function subjectFromValue(value) {
 }
 
 function extractKnowledgePoints(result) {
-  const questions = Array.isArray(result.questionResults) ? result.questionResults : [];
+  const questions = Array.isArray(result.questions) ? result.questions : Array.isArray(result.questionResults) ? result.questionResults : [];
   return questions.map((item) => item.knowledgePoint || item.point).filter(Boolean).slice(0, 5);
 }
 

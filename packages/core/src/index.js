@@ -10,3 +10,7 @@ export * from "./dialogue-grading-import.js";
 export * from "./grading-source-package.js";
 export * from "./module-capability-registry.js";
 export * from "./teaching-purpose.js";
+export * from "./teaching-workflow.js";
+export * from "./assessment-scoring.js";
+export * from "./assessment-options.js";
+export * from "./assessment-answer-format.js";

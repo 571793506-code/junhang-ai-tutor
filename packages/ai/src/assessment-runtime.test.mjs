@@ -98,6 +98,26 @@ test("shared token reservations and concurrency remain bounded across days", asy
   assert.ok(peak <= 2); assert.ok(reserved <= 1200);
   assert.equal(result.modelRun.metadata.attempts.length, 6); assert.equal(result.available, false);
 });
+
+test("four-part comprehensive generation gives each partition a complete first response budget", async () => {
+  const firstBudgets = [];
+  let active = 0;
+  let peak = 0;
+  const result = await draftAssessment({}, { ...input, purpose: "comprehensive", kind: "小测", assessmentMaxTokens: 16000 }, {
+    maxTokens: 16000,
+    call: async (_route, _messages, options) => {
+      firstBudgets.push(options.maxTokens);
+      active += 1; peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return { text: JSON.stringify(valid()), usage: { completion_tokens: 20 } };
+    }
+  });
+  assert.equal(firstBudgets.length >= 4, true);
+  assert.equal(firstBudgets.every((value) => value >= 4000), true);
+  assert.equal(peak, 4);
+  assert.equal(result.modelRun.metadata.attempts.some((attempt) => attempt.maxTokens < 4000), false);
+});
 test("focused English omits reading and explanation uses a separate schema", async () => {
   const focused = await draftAssessment({}, { ...input, subject: "英语", requestedItemTypes: ["fill"] }, { call: async (_route, messages) => {
     assert.deepEqual(JSON.parse(messages[1].content).partition.itemTypes, ["fill"]);

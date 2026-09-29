@@ -5,6 +5,27 @@ import { buildPythonExtractorEnv, evaluateGenerationLayoutPdf } from "./generati
 
 const source = fs.readFileSync(new URL("./generation-layout-check.mjs", import.meta.url), "utf8");
 
+test("plain math calculation worksheets need no decorative header but still reject empty pages", () => {
+  const text = "四年级数学四则混合运算专项练习\n1. 57×4－128\n2. 620－（46＋79）×4";
+  const base = { name: "focused-draft-review-student.pdf", text, pages: 1,
+    pageMetrics: [{ text, bottomBlankMm: 70, drawingCount: 0 }] };
+  assert.equal(evaluateGenerationLayoutPdf(base).ok, true);
+  assert.equal(evaluateGenerationLayoutPdf(base).detail.purpose, "focused");
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, pages: 2, pageMetrics: [...base.pageMetrics, { text: "", bottomBlankMm: 297 }] }).ok, false);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, pages: 2 }).ok, false);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, text: text.replace("专项练习", "单元试卷") }).ok, false);
+});
+
+test("purpose-specific pages can be compact but cannot hide a blank page or overflow", () => {
+  const base = { name: "数学练习-draft-review-test.pdf", pages: 1, text: "专项练习 · A4 · 第1/1页\n1. 用竖式计算24+18", pageMetrics: [{ bottomBlankMm: 90, text: "用竖式计算", drawingCount: 0 }] };
+  assert.equal(evaluateGenerationLayoutPdf(base).ok, true);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, text: base.text.replace("专项练习", "每日练习") }).ok, true);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, name: "英语小测-题目.pdf" }).ok, true);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, text: base.text.replace("专项练习", "练习") }).ok, false);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, pages: 2 }).ok, false);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, pageMetrics: [{ bottomBlankMm: 255, text: "留白页" }] }).ok, false);
+});
+
 test("layout checker forces Python PDF extraction to emit UTF-8 on Windows", () => {
   assert.equal(buildPythonExtractorEnv({}).PYTHONIOENCODING, "utf-8");
   assert.equal(buildPythonExtractorEnv({}).PYTHONUTF8, "1");
@@ -253,4 +274,16 @@ test("layout check still rejects sparse final math pages without work-space sign
 
   assert.equal(check.ok, false);
   assert.ok(check.issues.includes("末页底部留白 132.0mm，疑似题量或作答区分配不足。"));
+});
+
+test("a single-page short focused task need not fill A4 but an empty page is still rejected", () => {
+  const base = { name: "语文-draft-review-student.pdf", pages: 1,
+    text: "四年级语文专项\n专项练习 · A4 · 第1/1页\n1. （5分） 修改病句。\n2. （5分） 修改病句。\n3. （5分） 修改病句。\n4. （5分） 修改病句。",
+    pageMetrics: [{ page: 1, bottomBlankMm: 189.9, drawingCount: 4 }] };
+  assert.equal(evaluateGenerationLayoutPdf(base).ok, true);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, pageMetrics: [{ ...base.pageMetrics[0], text: base.text }] }).ok, true);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, text: "专项练习 · A4 · 第1/1页\n本页留白" }).ok, false);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, pageMetrics: [{ ...base.pageMetrics[0], text: "本页留白" }] }).ok, false);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, pages: 2 }).ok, false);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, text: base.text.replace("专项练习", "练习") }).ok, false);
 });

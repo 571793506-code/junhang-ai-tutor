@@ -97,6 +97,40 @@ test("teacher-confirmed conversation grading becomes a de-identified gold case",
   assert.equal(JSON.stringify(result.caseValue).includes("internal-provider"), false);
 });
 
+test("gold collection preserves available context, recognition work and geometry", () => {
+  const row = reviewedRow();
+  row.assignment.metadata.gradingSourcePackage.questions[0].context = {
+    itemType: "calculation",
+    sharedMaterial: { id: "material-1", text: "脱敏材料" }
+  };
+  row.grading.result.questionResults[0].observedWork = "1+1=2";
+  row.grading.result.questionResults[0].bbox = { page: 1, x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
+  row.grading.result.questionResults[0].page = 1;
+  row.grading.result.questionResults[0].sourceImageRef = "upload-1";
+  row.grading.result.questionResults[0].cropRef = "crop-1";
+  const result = buildGradingGoldCase(row);
+  assert.equal(result.ok, true);
+  assert.equal(result.caseValue.input.gradingSourcePackage.questions[0].context.itemType, "calculation");
+  assert.equal(result.caseValue.input.questionLayoutManifest.questions[0].context.sharedMaterial.id, "material-1");
+  assert.equal(result.caseValue.input.ocrQuestions[0].observedWork, "1+1=2");
+  assert.deepEqual(result.caseValue.input.ocrQuestions[0].bbox, { page: 1, x: 0.1, y: 0.2, w: 0.3, h: 0.1 });
+  assert.equal(result.caseValue.input.ocrQuestions[0].sourceImageRef, "upload-1");
+});
+
+test("collection retains original recognition evidence without deriving work from grading reasoning", () => {
+  const row = reviewedRow();
+  row.content.ocrQuestions = [{ questionNo: "1", observedWork: "学生甲写了 1+1=2", confidence: 0.6, bbox: { page: 2, x: 0.1, y: 0.2, w: 0.3, h: 0.1 }, sourceImageRef: "学生甲.jpg" }];
+  row.grading.result.questionResults[0].studentProcess = ["GRADING_REASONING_NOT_RECOGNITION"];
+  const question = buildGradingGoldCase(row).caseValue.input.ocrQuestions[0];
+  assert.equal(question.observedWork, "[REDACTED]写了 1+1=2");
+  assert.equal(question.confidence, 0.6);
+  assert.equal(question.bbox.page, 2);
+  assert.equal(question.sourceImageRef, "[REDACTED].jpg");
+  assert.doesNotMatch(JSON.stringify(question), /GRADING_REASONING/);
+  delete row.content.ocrQuestions;
+  assert.equal(buildGradingGoldCase(row).caseValue.input.ocrQuestions[0].observedWork, undefined);
+});
+
 test("unconfirmed and incomplete records stay in the blocked report", () => {
   const pending = reviewedRow({
     id: "submission-pending",

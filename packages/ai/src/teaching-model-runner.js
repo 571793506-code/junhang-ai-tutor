@@ -1,13 +1,58 @@
 import { classifyTaskFailure, resolveTeachingTaskPolicy } from "./model-policy.js";
 import { inspectEncodingPayload } from "@junhang/core";
+import { sanitizeUpstreamFailureDiagnostics } from "./upstream-failure-diagnostics.js";
 
 const INTERNAL_KEYS = new Set([
   "__proto__", "constructor", "prototype", "prompt", "systemPrompt", "messages",
   "provider", "providerId", "model", "modelRun", "raw", "debug", "attempts", "rulePack",
   "rulePath", "root", "budget", "generationBudget", "reasoningEffort", "apiKey", "outputContract",
   "assessmentTotalTimeoutMs", "assessmentMaxTokens", "generationTimeoutMs", "generationMaxTokens",
-  "confirmedBy", "confirmedAt", "archiveEligible", "finalScore"
+  "confirmedBy", "confirmedAt", "archiveEligible", "finalScore", "upstreamDiagnostics"
 ]);
+
+const DIAGNOSTIC_ISSUES = new Set([
+  "title_missing", "question_results_missing", "question_alignment_invalid",
+  "student_evidence_insufficient", "judgment_evidence_missing", "max_score_invalid",
+  "question_score_invalid", "reference_structure_invalid", "reference_alignment_invalid",
+  "ocr_structure_invalid", "invalid_encoding", "internal_model_disclosure",
+  "explanation_incomplete", "item_count_mismatch", "item_score_missing", "prompt_score_conflict",
+  "rubric_score_conflict", "rubric_process_conflict", "partition_score_mismatch", "teaching_feedback_missing", "figure_missing",
+  "choice_options_missing", "rubric_missing", "missing_sections", "missing_items", "missing_item_type",
+  "disallowed_item_type", "incomplete_item", "reading_passage_missing", "reading_passage_inconsistent",
+  "reading_passage_groups_insufficient", "reading_passage_too_short", "reading_context_questions_insufficient"
+]);
+
+function diagnosticIssue(code) {
+  // Partition identity is attached by the pipeline. Do not retain arbitrary text
+  // from a validator; only the known terminal code is safe for internal traces.
+  const known = typeof code === "string" && code.startsWith("partition:") ? code.split(":").at(-1) : code;
+  return DIAGNOSTIC_ISSUES.has(known) ? known : "domain_validation_failed";
+}
+
+const TRANSPORT_CODES = new Set([
+  "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN",
+  "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_SOCKET"
+]);
+const UPSTREAM_CODES = new Set([
+  ...TRANSPORT_CODES, "invalid_upstream_response", "invalid_api_key", "invalid_request_error",
+  "authentication_error", "permission_denied", "model_not_found", "unsupported_parameter",
+  "unsupported_value", "context_length_exceeded", "insufficient_quota", "rate_limit_exceeded",
+  "server_error", "service_unavailable", "overloaded_error", "no_available_channel"
+]);
+
+function failureDiagnostics(error) {
+  // Do not infer a status from arbitrary error text or retain unknown upstream codes.
+  const upstreamStatus = Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? error.status : null;
+  const code = error?.code || error?.cause?.code;
+  const upstreamCode = code == null ? null : UPSTREAM_CODES.has(code) ? code : "unknown";
+  const failureCode = ["invalid_json", "invalid_structure"].includes(code) ? code
+    : /MODEL_TIMEOUT/.test(String(error?.message || "")) ? "MODEL_TIMEOUT"
+    : code === "invalid_upstream_response" ? code
+    : upstreamStatus >= 400 ? "http_error"
+    : TRANSPORT_CODES.has(code) ? "transport_error" : "unknown_failure";
+  const upstreamDiagnostics = sanitizeUpstreamFailureDiagnostics(error?.upstreamDiagnostics);
+  return { failureCode, upstreamStatus, upstreamCode, ...(upstreamDiagnostics ? { upstreamDiagnostics } : {}) };
+}
 
 // Defense in depth; business fields and actor permissions are validated by the service.
 function stripInternal(value, depth = 0) {
@@ -86,6 +131,8 @@ export async function runTeachingUnit(
     ];
     const attempt = { role: reason, providerId: route.providerId, model: route.model, reasoningEffort: route.reasoningEffort, timeoutMs, maxTokens, status: "ERROR", usage: null, cost: "unknown" };
     attempts.push(attempt);
+    const startedAt = now();
+    attempt.startedAt = new Date(startedAt).toISOString();
     let classification;
     try {
       const response = await boundedCall(call, route, messages, { timeoutMs, signal, maxTokens });
@@ -112,11 +159,20 @@ export async function runTeachingUnit(
         return { status: "success", candidate, issueCodes: [], internal };
       }
       classification = { triggerClass: "quality" };
+      attempt.failureCode = "validation_failed";
+      attempt.validationIssueCodes = [...new Set(issues.map(diagnosticIssue))];
     } catch (error) {
       if (signal?.aborted) return stop("TEACHING_CANCELLED");
-      if (error?.code === "TEACHING_DEADLINE") return stop("TEACHING_BUDGET_EXHAUSTED");
+      if (error?.code === "TEACHING_DEADLINE") {
+        attempt.failureCode = "TEACHING_DEADLINE";
+        attempt.triggerClass = "availability";
+        return stop("TEACHING_BUDGET_EXHAUSTED");
+      }
       classification = classifyTaskFailure(error, { evidenceSufficient });
+      Object.assign(attempt, failureDiagnostics(error));
       issues = [classification.triggerClass === "quality" ? "invalid_output" : classification.triggerClass];
+    } finally {
+      attempt.elapsedMs = Math.max(0, now() - startedAt);
     }
     attempt.triggerClass = classification.triggerClass;
     if (index === policy.maxAdditionalAttempts) return stop("TEACHING_ATTEMPTS_EXHAUSTED");

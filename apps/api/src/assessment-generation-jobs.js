@@ -37,7 +37,7 @@ function visibleJob(job) {
   };
 }
 
-export function createAssessmentGenerationJobs({ concurrency = 2, idFactory = randomUUID } = {}) {
+export function createAssessmentGenerationJobs({ concurrency = 2, idFactory = randomUUID, workflowRepository = null } = {}) {
   const jobs = new Map();
   const queue = [];
   const idleWaiters = [];
@@ -53,6 +53,13 @@ export function createAssessmentGenerationJobs({ concurrency = 2, idFactory = ra
     return job;
   };
 
+  const cancelWorkflow = (job) => {
+    if (!workflowRepository || !job.workflow) return Promise.resolve();
+    job.cancellationWrite ||= workflowRepository.cancel({ workflowId: job.workflow.id, ownerTeacherId: job.teacherId })
+      .catch(() => { job.persistenceFailed = true; });
+    return job.cancellationWrite;
+  };
+
   const runNext = () => {
     while (running < concurrency && queue.length) {
       const job = queue.shift();
@@ -61,19 +68,48 @@ export function createAssessmentGenerationJobs({ concurrency = 2, idFactory = ra
       job.startedAt = timestamp();
       update(job, { status: "generating", message: "正在生成内容草稿。" });
       void Promise.resolve()
-        .then(() => job.run({
-          signal: job.controller.signal,
-          job: visibleJob(job),
-          setStage: (status, message) => {
-            if (!ACTIVE_STATUSES.has(job.status) || job.controller.signal.aborted) return;
-            update(job, { status, message });
+        .then(async () => {
+          if (workflowRepository) {
+            job.workflow = await workflowRepository.create({
+              requestKey: `${job.id}:request`,
+              request: job.request || {},
+              snapshot: {},
+              ...job.workflowInput,
+              ownerTeacherId: job.teacherId,
+              module: "generation",
+              id: job.id
+            });
+            if (job.controller.signal.aborted) throw cancellationError();
+            job.workflowOperation = { workflowId: job.workflow.id, ownerTeacherId: job.teacherId, expectedRevision: job.workflow.currentRevision, operationKey: `job:${job.id}` };
+            await workflowRepository.beginOperation(job.workflowOperation);
+            job.operationStarted = true;
           }
-        }))
+          if (job.controller.signal.aborted) throw cancellationError();
+          return job.run({
+            signal: job.controller.signal,
+            job: visibleJob(job),
+            setStage: (status, message) => {
+              if (!ACTIVE_STATUSES.has(job.status) || job.controller.signal.aborted) return;
+              update(job, { status, message });
+            },
+            saveCheckpoint: async (unitId, candidate) => {
+              if (job.controller.signal.aborted) throw cancellationError();
+              return workflowRepository?.saveCheckpoint({ ...job.workflowOperation, unitId, candidate });
+            }
+          });
+        })
         .then(async (result) => {
+          job.result = result;
           if (job.controller.signal.aborted || job.status === "cancelling") {
-            await result?.discard?.().catch(() => {});
-            update(job, { status: "cancelled", message: "本次生成已取消。", completedAt: timestamp(), assignmentId: null, draftAsset: null, layoutValidation: null });
-            return;
+            throw cancellationError();
+          }
+          if (workflowRepository) {
+            if (!result?.workflowSnapshot || typeof result.workflowSnapshot !== "object" || Array.isArray(result.workflowSnapshot)) {
+              throw new Error("WORKFLOW_SNAPSHOT_REQUIRED");
+            }
+            // Cancellation is accepted until this final atomic save starts.
+            job.committing = true;
+            await workflowRepository.commitRevision({ ...job.workflowOperation, operation: "complete", snapshot: result.workflowSnapshot, affectedQuestionIds: result.affectedQuestionIds || [] });
           }
           update(job, {
             status: "ready_for_review",
@@ -84,19 +120,28 @@ export function createAssessmentGenerationJobs({ concurrency = 2, idFactory = ra
             completedAt: timestamp()
           });
         })
-        .catch((error) => {
+        .catch(async (error) => {
+          try { await job.result?.discard?.(); } catch { job.persistenceFailed = true; }
           if (isCancellation(error, job.controller.signal)) {
-            update(job, { status: "cancelled", message: "本次生成已取消。", completedAt: timestamp(), assignmentId: null, draftAsset: null, layoutValidation: null });
-            return;
+            await cancelWorkflow(job);
+            if (!job.persistenceFailed) {
+              update(job, { status: "cancelled", message: "本次生成已取消。", completedAt: timestamp(), assignmentId: null, draftAsset: null, layoutValidation: null });
+              return;
+            }
+          } else if (job.operationStarted) {
+            try { await workflowRepository.endOperation({ ...job.workflowOperation, status: "failed" }); }
+            catch { job.persistenceFailed = true; }
           }
           update(job, {
             status: "failed",
             message: "生成未完成，可修改要求后重新发起。",
-            error: "GENERATION_FAILED",
+            error: job.persistenceFailed ? "WORKFLOW_PERSISTENCE_FAILED" : "GENERATION_FAILED",
             completedAt: timestamp()
           });
         })
         .finally(() => {
+          delete job.result;
+          job.committing = false;
           running -= 1;
           runNext();
           publishIdle();
@@ -106,7 +151,7 @@ export function createAssessmentGenerationJobs({ concurrency = 2, idFactory = ra
   };
 
   return {
-    enqueue({ teacherId, kind, subject, title, targetLabel, request, run }) {
+    enqueue({ teacherId, kind, subject, title, targetLabel, request, run, workflowInput }) {
       const now = timestamp();
       const job = {
         id: idFactory(),
@@ -116,6 +161,7 @@ export function createAssessmentGenerationJobs({ concurrency = 2, idFactory = ra
         title,
         targetLabel,
         request,
+        workflowInput: workflowInput || null,
         run,
         status: "queued",
         message: "已加入生成队列。",
@@ -150,6 +196,7 @@ export function createAssessmentGenerationJobs({ concurrency = 2, idFactory = ra
     cancel(teacherId, id) {
       const job = jobs.get(id);
       if (!job || job.teacherId !== teacherId) return null;
+      if (job.committing) return visibleJob(job);
       if (["ready_for_review", "failed", "cancelled"].includes(job.status)) return visibleJob(job);
       if (job.status === "queued") {
         const queueIndex = queue.indexOf(job);
@@ -160,6 +207,7 @@ export function createAssessmentGenerationJobs({ concurrency = 2, idFactory = ra
       }
       update(job, { status: "cancelling", message: "正在停止本次生成。" });
       job.controller.abort(cancellationError());
+      void cancelWorkflow(job);
       return visibleJob(job);
     },
 

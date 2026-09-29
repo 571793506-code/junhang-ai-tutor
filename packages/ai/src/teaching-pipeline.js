@@ -1,4 +1,4 @@
-import { normalizeTeachingPurpose } from "@junhang/core";
+import { normalizeTeachingPurpose, assessmentScoreIssues, normalizeAssessmentOptions, assessmentChoiceOptionsValid } from "@junhang/core";
 import { buildAssessmentPartitions, mapWithConcurrency } from "./assessment-partitions.js";
 import { resolveTeachingTaskPolicy } from "./model-policy.js";
 import { validateAssessmentPartition } from "./model-escalation.js";
@@ -63,12 +63,27 @@ export function assessmentContentIssues(parsed, partition) {
   const validation = validateAssessmentPartition(parsed, partition);
   const items = (Array.isArray(parsed.sections) ? parsed.sections : []).flatMap((section) => Array.isArray(section?.items) ? section.items : []);
   const issues = [...validation.issues];
+  for (const item of items) issues.push(...assessmentScoreIssues(item));
+  if (partition.itemScores && (items.length !== partition.itemScores.length || items.some((item, i) => item.score !== partition.itemScores[i]))) issues.push("partition_score_mismatch");
   if (partition.targetItemCount && items.length !== partition.targetItemCount) issues.push("item_count_mismatch");
   if (items.some((item) => !Number.isFinite(item.score) || item.score <= 0)) issues.push("item_score_missing");
   if (items.some((item) => !present(item.knowledgePoint) || !present(item.commonMistake))) issues.push("teaching_feedback_missing");
   if (items.some((item) => /如图|图中|画图/.test(item.prompt) && !item.figure)) issues.push("figure_missing");
-  if (items.some((item) => item.itemType === "choice" && (!Array.isArray(item.options) || item.options.length < 2))) issues.push("choice_options_missing");
+  for (const item of items.filter((item) => item.itemType === "choice")) {
+    item.options = normalizeAssessmentOptions(item.options);
+    if (!assessmentChoiceOptionsValid(item.options)) issues.push("choice_options_missing");
+  }
   return issues;
+}
+
+function normalizeDailyPrompt(prompt, dayId) {
+  if (typeof prompt !== "string" || !dayId) return prompt;
+  // Only strip a leading generated label bound to this exact partition. Never
+  // remove matching text from the actual problem or another day's identifier.
+  const escaped = dayId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const label = new RegExp(`^\\s*(?:第\\s*\\d+\\s*题\\s*)?[（(【\\[]${escaped}[-_]\\d+(?:\\s*[，,]\\s*\\d+(?:\\.\\d+)?\\s*分)?[）)】\\]]\\s*[：:]?\\s*`);
+  const normalized = prompt.replace(label, "");
+  return normalized.trim() ? normalized : prompt;
 }
 
 export async function runAssessmentPipeline(config, input, execution, runTask) {
@@ -80,22 +95,39 @@ export async function runAssessmentPipeline(config, input, execution, runTask) {
   const context = safeInput.generationContext?.teaching?.contentContext || safeInput.contentContext;
   const textbookRequested = Boolean(input.textbookAssetId || safeInput.generationContext?.teaching?.textbook?.assetId);
   const evidenceSufficient = execution.evidenceSufficient !== false && (!textbookRequested || context?.approvedOnly === true && context?.textbookContext?.resolved === true && context?.matches?.length > 0);
-  const units = await mapWithConcurrency(partitions, resolveTeachingTaskPolicy("generation", config).maxConcurrency, async (partition) => {
+  const partitionConcurrency = purpose.purpose === "comprehensive" && partitions.length >= 4
+    ? partitions.length
+    : resolveTeachingTaskPolicy("generation", config).maxConcurrency;
+  const units = await mapWithConcurrency(partitions, partitionConcurrency, async (partition) => {
     const contract = partition.purpose === "explanation"
       ? "输出 {title, explanation:{concept,steps:string[],workedExamples:[{prompt,answer,analysisSteps:string[]}],commonMistakes:string[]}}。不要输出试卷分区。"
-      : "输出 {title,layout,sections:[{title,type,items:[{itemType,prompt,answer,score,analysisSteps:string[],knowledgePoint,commonMistake,options?,figure?,answerFormat?,passageGroupId?,passageText?,passageTitle?,passageQuestionIndex?}]}],printNotes:string[]}。只生成 partition 指定题型和题量，同一阅读题组带完整材料。";
-    const result = await runTeachingPipelineUnit(runTask, config, "generation", { ...safeInput, partition }, { ...execution, evidenceSufficient }, pool, allowance, (candidate) => assessmentContentIssues(candidate, partition), contract);
+      : "输出 {title,layout,sections:[{title,type,items:[{itemType,prompt,answer,score,rubric,analysisSteps:string[],knowledgePoint,commonMistake,options?,figure?,answerFormat?,passageGroupId?,passageText?,passageTitle?,passageQuestionIndex?}]}],printNotes:string[]}。只生成 partition 指定题型和题量，同一阅读题组带完整材料。rubric 写明给分依据。prompt 只写题目正文，不加题号、分值或 partition/dayId 等内部编号；编号与分值由结构化字段及展示层提供。";
+    const firstResponseBudget = purpose.purpose === "comprehensive" && partitions.length >= 4;
+    const result = await runTeachingPipelineUnit(runTask, config, "generation", { ...safeInput, partition }, {
+      ...execution,
+      evidenceSufficient,
+      // Four formal quiz partitions otherwise reserve half of each partition's
+      // allowance for repair and truncate the first structured response.
+      ...(firstResponseBudget ? { disableSolEscalation: true } : {})
+    }, pool, allowance, (candidate) => {
+      const issues = assessmentContentIssues(candidate, partition);
+      if (execution.requireRubric === true && partition.purpose !== "explanation" && (candidate.sections || []).some((section) =>
+        (section.items || []).some((item) => typeof item.rubric !== "string" || !item.rubric.trim()))) issues.push("rubric_missing");
+      return issues;
+    }, contract + (partition.itemScores ? " partition.itemScores按题目顺序规定score，评分细则给分点总和必须与对应score一致，分区总分必须等于partition.targetScore。" : ""));
     return { id: partition.id, partition, result };
   });
   if (execution.signal?.aborted) throw execution.signal.reason || new Error("ASSESSMENT_GENERATION_CANCELLED");
   const successful = units.filter((unit) => unit.result.status === "success");
   const merged = successful.length ? {
-    title: successful[0].result.candidate.title,
+    title: purpose.purpose === "multi_day" ? input.title || `${input.grade || input.targetGrade || ""}${input.subject || ""}${purpose.dayPlan.length}天${input.kind || "练习"}`
+      : purpose.purpose === "comprehensive" ? input.title || `${input.grade || input.targetGrade || ""}${input.subject || ""}${input.kind || "练习"}`
+        : successful[0].result.candidate.title,
     ...(purpose.purpose === "explanation" ? { explanation: successful[0].result.candidate.explanation } : {
       layout: successful[0].result.candidate.layout || { paper: "A4", pages: input.kind === "试卷" ? 4 : 2 },
       sections: successful.flatMap((unit) => unit.result.candidate.sections.map((section) => ({
         ...section, ...(unit.partition.dayId ? { dayId: unit.partition.dayId } : {}),
-        items: section.items.map((item) => ({ ...item, ...(unit.partition.dayId ? { dayId: unit.partition.dayId } : {}) }))
+        items: section.items.map((item) => ({ ...item, ...(unit.partition.dayId ? { dayId: unit.partition.dayId, prompt: normalizeDailyPrompt(item.prompt, unit.partition.dayId) } : {}) }))
       })))
     }),
     purpose: purpose.purpose, printNotes: successful.flatMap((unit) => unit.result.candidate.printNotes || [])

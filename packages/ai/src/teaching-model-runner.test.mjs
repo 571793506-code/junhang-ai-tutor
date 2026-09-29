@@ -153,6 +153,16 @@ test("a stalled transport is aborted at the deadline without a replacement", asy
   assert.equal(result.status, "review_required");
   assert.equal(calls, 1);
   assert.equal(transportSignal.aborted, true);
+  assert.equal(result.internal.attempts[0].failureCode, "TEACHING_DEADLINE");
+  assert.equal(result.internal.attempts[0].triggerClass, "availability");
+});
+
+test("diagnostics distinguish invalid JSON from domain fields without retaining raw output", async () => {
+  const task = setup([{ text: "SECRET invalid json" }, { text: "{}" }]);
+  const result = await task.run();
+  assert.equal(result.internal.attempts[0].failureCode, "invalid_json");
+  assert.deepEqual(result.internal.attempts[1].validationIssueCodes, ["title_missing"]);
+  assert.doesNotMatch(JSON.stringify(result.internal), /SECRET/);
 });
 
 test("public projections never expose internal attempts or unconfirmed student drafts", async () => {
@@ -162,6 +172,44 @@ test("public projections never expose internal attempts or unconfirmed student d
   for (const role of ["student", "parent", "unknown"]) {
     assert.deepEqual(projectTeachingResult(result, role), { status: "review_required" });
   }
+});
+
+test("upstream diagnostics retain bounded status and known codes without secrets or extra calls", async () => {
+  const cases = [
+    [failure(400, "unsupported_parameter"), 400, "unsupported_parameter", "http_error"],
+    [failure(429, "insufficient_quota"), 429, "insufficient_quota", "http_error"],
+    [Object.assign(new Error("fetch failed at https://private.test/key SECRET"), { cause: { code: "ECONNRESET" } }), null, "ECONNRESET", "transport_error"],
+    [failure(200, "invalid_upstream_response"), 200, "invalid_upstream_response", "invalid_upstream_response"],
+    [failure(503, "SECRET https://private.test/key"), 503, "unknown", "http_error"],
+    [failure(900, "SECRET"), null, "unknown", "unknown_failure"],
+    [new Error("SECRET 401 https://private.test/key"), null, null, "unknown_failure"]
+  ];
+  for (const [error, status, code, failureCode] of cases) {
+    const task = setup([error]);
+    task.budget.additionalAttemptsUsed = 1;
+    const result = await task.run();
+    const attempt = result.internal.attempts[0];
+    assert.equal(attempt.upstreamStatus, status);
+    assert.equal(attempt.upstreamCode, code);
+    assert.equal(attempt.failureCode, failureCode);
+    assert.equal(task.calls.length, 1);
+    assert.equal(task.budget.remainingTokens, 0);
+    assert.doesNotMatch(JSON.stringify(result), /SECRET|private\.test/);
+    for (const role of ["teacher", "student", "parent"]) {
+      assert.doesNotMatch(JSON.stringify(projectTeachingResult(result, role)), /upstream|failureCode|triggerClass/);
+    }
+  }
+});
+
+test("generation diagnostics preserve known failure codes but never arbitrary partition identifiers or text", async () => {
+  const task = setup([good()], { repairIssues: () => ["rubric_score_conflict", "partition_score_mismatch",
+    "partition:PRIVATE_PARTITION:incomplete_item", "partition:PRIVATE_PARTITION:PRIVATE_TEXT", "PRIVATE_TEXT"] });
+  task.budget.additionalAttemptsUsed = 1;
+  const result = await task.run();
+  assert.equal(result.candidate, null);
+  assert.deepEqual(result.internal.attempts[0].validationIssueCodes,
+    ["rubric_score_conflict", "partition_score_mismatch", "incomplete_item", "domain_validation_failed"]);
+  assert.doesNotMatch(JSON.stringify(result.internal), /PRIVATE_/);
 });
 
 test("encoding defects and model names in prose fail closed after a bounded repair", async () => {

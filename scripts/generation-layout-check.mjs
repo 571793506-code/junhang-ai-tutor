@@ -116,7 +116,12 @@ export function evaluateGenerationLayoutPdf(pdf = {}) {
   const pages = Number(pdf.pages || 0);
   const kind = inferKind(name, text);
   const subject = inferSubject(name, text);
-  const targetPages = expectedStudentPages(kind);
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const plainCalculationSheet = subject === "数学" && /数学.*(?:专项|计算)练习$/.test(lines[0] || "") && lines.length > 1 &&
+    lines.slice(1).every((line) => /^\d+[.、]\s*[0-9\s.+＋\-−－×÷*/()（）\[\]＝=]+$/.test(line));
+  const purpose = plainCalculationSheet || /(?:^|\n)\s*专项练习\s*·\s*A4\s*·\s*第/.test(text) ? "focused"
+    : /(?:^|\n)\s*每日练习\s*·\s*A4\s*·\s*第/.test(text) ? "multi_day" : "comprehensive";
+  const targetPages = purpose === "comprehensive" ? expectedStudentPages(kind) : null;
   const pageMetrics = Array.isArray(pdf.pageMetrics) ? pdf.pageMetrics : [];
   const issues = [];
 
@@ -138,6 +143,11 @@ export function evaluateGenerationLayoutPdf(pdf = {}) {
   }
 
   const headerLabels = parseHeaderPageTotals(text);
+  if (plainCalculationSheet) {
+    if (pageMetrics.length !== pages || pageMetrics.some((metric) => !/^\s*\d+[.、]\s*\S/m.test(pageMetricText(metric)))) {
+      issues.push("计算专项练习含空白页或缺少逐页题目证据。");
+    }
+  } else if (purpose !== "comprehensive" && headerLabels.length !== pages) issues.push("专项/每日练习页码缺失或分页溢出。");
   const staleHeaderTotals = [...new Set(headerLabels.map((item) => item.total).filter((total) => total && total !== pages))];
   for (const total of staleHeaderTotals) {
     issues.push(`页眉总页数 ${total} 与真实页数 ${pages} 不一致。`);
@@ -166,8 +176,15 @@ export function evaluateGenerationLayoutPdf(pdf = {}) {
   const hasIntentionalMathWorkArea = hasIntentionalMathWorkSpace(finalMetric, subject);
   const finalBlankLimit = hasIntentionalMathWorkArea ? (kind === "试卷" ? 260 : 145) : kind === "试卷" ? 180 : 125;
   const hasIntentionalWritingArea = hasWriting && finalDrawingCount >= 16;
+  // A bounded one-page task may legitimately use only part of A4. Task counts
+  // are checked against the request by content validation, not inferred from
+  // page fullness. Empty pages and all multi-page pagination checks still apply.
+  const finalPageText = typeof finalMetric.text === "string"
+    ? stripTemplateGuidanceText(finalMetric.text) : questionText;
+  const compactSinglePageTask = purpose !== "comprehensive" && pages === 1 &&
+    /^\s*\d+[.、]\s*\S/m.test(finalPageText);
 
-  if (finalBlankMm >= finalBlankLimit && !hasIntentionalWritingArea) {
+  if (finalBlankMm >= finalBlankLimit && !hasIntentionalWritingArea && !compactSinglePageTask) {
     if (hasWriting) {
       issues.push(`写作页底部留白 ${finalBlankMm.toFixed(1)}mm，且缺少足够写作线/方格信号。`);
     } else {
@@ -175,7 +192,7 @@ export function evaluateGenerationLayoutPdf(pdf = {}) {
     }
   }
 
-  if (subject === "英语" && (kind === "小测" || kind === "练习")) {
+  if (purpose === "comprehensive" && subject === "英语" && (kind === "小测" || kind === "练习")) {
     if (/文章选词填空|完形填空|短文语法填空|词形变化/.test(questionText)) {
       issues.push("英语小测/练习不得出现试卷式文章选词填空、完形填空或短文语法填空。");
     }
@@ -194,6 +211,8 @@ export function evaluateGenerationLayoutPdf(pdf = {}) {
     detail: {
       subject,
       kind,
+      purpose,
+      compactSinglePageTask,
       pages,
       targetPages,
       headerLabels,

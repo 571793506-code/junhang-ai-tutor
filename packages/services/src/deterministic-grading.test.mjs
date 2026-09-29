@@ -1,6 +1,197 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { gradeSubmissionService } from "./index.js";
+import { buildGradingSourcePackage } from "@junhang/core";
+
+test("verified source package choice type wins over conflicting OCR and legacy assignment types", async () => {
+  const source = buildGradingSourcePackage({ id: "choice-source", items: [{ orderIndex: "6", prompt: "选择正确结果。",
+    answer: "C", score: 2, rubric: "按结构、过程与结果综合判分。", sourceContext: { itemType: "choice" } }] }).package;
+  let calls = 0;
+  const result = await gradeSubmissionService({}, { subject: "数学", totalScore: 2, gradingSourcePackage: source,
+    assignmentItems: [{ questionNo: "6", itemType: "calculation", prompt: "选择正确结果。", answer: "C", score: 2, rubric: "按步骤评分。" }],
+    ocrQuestions: [{ questionNo: "6", itemType: "calculation", studentAnswer: "D", observedWork: "草稿计算", confidence: 1 }]
+  }, { persist: false, gradingRunner: async () => { calls++; return { available: false, gradingText: "" }; } });
+  assert.equal(calls, 0);
+  assert.equal(result.structured.questionResults[0].score, 0);
+  assert.equal(result.structured.questionResults[0].status, "wrong");
+});
+
+test("process grading keeps original recognition evidence through the service boundary", async () => {
+  let received;
+  const observedWork = "=30×20+2×4\n=768";
+  const result = await gradeSubmissionService({}, {
+    subject: "数学", totalScore: 5,
+    referenceAnswers: [{ questionNo: "23", prompt: "32×24", correctAnswer: "768", score: 5, confidence: 1 }],
+    ocrQuestions: [{ questionNo: "23", printedPrompt: "32×24=(30+2)×(20+4)", studentAnswer: "768",
+      observedWork, confidence: 0.96, itemType: "calculation", page: 2,
+      sourceImageRef: "page-2", cropRef: "q23", bbox: { page: 2, x: 0.4, y: 0.5, w: 0.4, h: 0.3 } }]
+  }, { persist: false, gradingRunner: async (_config, input) => {
+    received = input;
+    return { available: true, gradingText: JSON.stringify({ questionResults: [{ questionNo: "23", studentAnswer: "768",
+      status: "partial", score: 2, maxScore: 5, confidence: 0.96, explanation: "展开漏项，最终结果不能代替过程。" }] }) };
+  }});
+  assert.ok(received, "A matching final answer must not skip process grading");
+  const question = received.ocrQuestions[0];
+  assert.equal(question.observedWork, observedWork);
+  assert.equal(question.printedText, "32×24=(30+2)×(20+4)");
+  assert.equal(question.sourceImageRef, "page-2");
+  assert.equal(question.cropRef, "q23");
+  assert.equal(question.page, 2);
+  assert.equal(question.itemType, "calculation");
+  assert.equal(result.structured.questionResults[0].status, "partial");
+  assert.equal(result.structured.questionResults[0].score, 2);
+});
+
+test("explicit unknown recognition remains null and original work reaches the grader", async () => {
+  let received;
+  await gradeSubmissionService({}, {
+    subject: "数学", totalScore: 5,
+    referenceAnswers: [{ questionNo: "1", prompt: "说明计算方法。", correctAnswer: "10", score: 5, confidence: 1 }],
+    ocrQuestions: [{ questionNo: "1", printedPrompt: "说明计算方法。", studentAnswer: null,
+      answer: "must-not-fill-missing-recognition", observedWork: "840÷84", confidence: null, page: 3, sourceImageRef: "page-3" }]
+  }, { persist: false, gradingRunner: async (_config, input) => {
+    received = input;
+    return { available: false, gradingText: "", error: "TEACHING_EVIDENCE_MISSING" };
+  }});
+  assert.equal(received.ocrQuestions[0].studentAnswer, null);
+  assert.equal(received.ocrQuestions[0].confidence, null);
+  assert.equal(received.ocrQuestions[0].observedWork, "840÷84");
+  assert.equal(received.ocrQuestions[0].bbox, null, "No source coordinates must remain unknown");
+});
+
+test("trusted process rubric prevents local full marks even when no work was recognized", async () => {
+  let calls = 0;
+  await gradeSubmissionService({}, {
+    subject: "数学", totalScore: 5,
+    assignmentItems: [{ questionNo: "1", prompt: "32×24", answer: "768", score: 5, rubric: "按结构、过程与结果综合判分。" }],
+    ocrQuestions: [{ questionNo: "1", printedText: "32×24", studentAnswer: "768", confidence: 0.96 }]
+  }, { persist: false, gradingRunner: async () => {
+    calls++;
+    return { available: false, gradingText: "", error: "TEACHING_EVIDENCE_MISSING" };
+  }});
+  assert.equal(calls, 1);
+});
+
+test("a confirmed choice is scored by option despite a legacy process rubric", async () => {
+  for (const [studentAnswer, expectedScore] of [["D", 0], ["C", 2]]) {
+    let calls = 0;
+    const result = await gradeSubmissionService({}, {
+      subject: "数学", totalScore: 2,
+      assignmentItems: [{ questionNo: "6", itemType: "choice", prompt: "计算结果是（ ）。", answer: "C", score: 2,
+        rubric: "按结构、过程与结果综合判分。" }],
+      ocrQuestions: [{ questionNo: "6", printedPrompt: "计算结果是（ ）。", studentAnswer,
+        itemType: "choice", confidence: 1 }]
+    }, { persist: false, gradingRunner: async () => {
+      calls++;
+      return { available: false, gradingText: "", error: "TEACHING_EVIDENCE_MISSING" };
+    } });
+    assert.equal(calls, 0);
+    assert.equal(result.structured.questionResults[0].score, expectedScore);
+    assert.equal(result.structured.questionResults[0].status, expectedScore ? "correct" : "wrong");
+    assert.equal(result.structured.needsTeacherReview, true);
+  }
+});
+
+test("trusted calculation and solution types retain process scoring without OCR type hints", async () => {
+  for (const itemType of ["calculation", "solution"]) {
+    let calls = 0;
+    await gradeSubmissionService({}, {
+      subject: "数学", totalScore: 5,
+      assignmentItems: [{ questionNo: "1", itemType, prompt: "32×24", answer: "768", score: 5 }],
+      ocrQuestions: [{ questionNo: "1", studentAnswer: "768", confidence: 1, itemType: "choice" }]
+    }, { persist: false, gradingRunner: async () => {
+      calls++;
+      return { available: false, gradingText: "", error: "TEACHING_EVIDENCE_MISSING" };
+    } });
+    assert.equal(calls, 1, "OCR type must not override the trusted process question type");
+  }
+});
+
+test("choice scoring preserves uncertainty for missing, ambiguous or low-confidence recognition", async () => {
+  for (const [studentAnswer, confidence] of [[null, 1], ["CD", 1], ["C", null], ["D", 0.4]]) {
+    let calls = 0;
+    const result = await gradeSubmissionService({}, {
+      subject: "数学", totalScore: 2,
+      assignmentItems: [{ questionNo: "6", itemType: "choice", prompt: "选出结果。", answer: "C", score: 2 }],
+      ocrQuestions: [{ questionNo: "6", studentAnswer, confidence }]
+    }, { persist: false, gradingRunner: async () => {
+      calls++;
+      return { available: false, gradingText: "", error: "TEACHING_EVIDENCE_MISSING" };
+    } });
+    assert.equal(calls, 1);
+    assert.equal(result.structured.questionResults[0].score, null);
+  }
+});
+
+test("explicit fill and judgment questions do not acquire process points from legacy prose", async () => {
+  for (const itemType of ["fill", "judgment"]) {
+    let calls = 0;
+    const result = await gradeSubmissionService({}, {
+      subject: "数学", totalScore: 2,
+      assignmentItems: [{ questionNo: "1", itemType, prompt: "填入结果。", answer: "4", score: 2, rubric: "按结构、过程与结果综合判分。" }],
+      ocrQuestions: [{ questionNo: "1", studentAnswer: "4", observedWork: "2+2=4", confidence: 1 }]
+    }, { persist: false, gradingRunner: async () => {
+      calls++;
+      return { available: false, gradingText: "", error: "TEACHING_EVIDENCE_MISSING" };
+    } });
+    assert.equal(calls, 0);
+    assert.equal(result.structured.questionResults[0].score, 2);
+  }
+});
+
+test("recovered work reaches the real model HTTP payload without grading confirmation labels", async () => {
+  const { createServer } = await import("node:http");
+  const bodies = [];
+  const server = createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    bodies.push(JSON.parse(body));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ questionResults: [{
+      questionNo: "24", status: "correct", score: 5, maxScore: 5, studentAnswer: "112本", correctAnswer: "112本",
+      explanation: "列式、计算、单位及答语完整。", confidence: 0.95
+    }] }) } }], usage: { completion_tokens: 40 } }));
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const work = "16×25-6×48=400-288=112（本）\n答：还剩112本。";
+  try {
+    const result = await gradeSubmissionService({ GPT56_API_KEY: "synthetic", GPT56_BASE_URL: `http://127.0.0.1:${server.address().port}` }, {
+      subject: "数学", totalScore: 5,
+      assignmentItems: [{ questionNo: "24", prompt: "16包书，每包25本，借出6班各48本，还剩多少本？", answer: "112本", score: 5, rubric: "列式2分、计算2分、单位和答语1分。" }],
+      ocrQuestions: [{ questionNo: "24", printedPrompt: "16包书，每包25本，借出6班各48本，还剩多少本？", studentAnswer: "112本", observedWork: work,
+        confidence: null, page: 3, sourceImageRef: "page-3", cropRef: "q24", teacherReview: { confirmedBy: "must-not-send" } }]
+    }, { persist: false });
+    assert.equal(bodies.length, 1);
+    const payload = JSON.parse(bodies[0].messages.find(message => message.role === "user").content);
+    assert.equal(payload.ocrQuestions[0].observedWork, work);
+    assert.equal(payload.ocrQuestions[0].confidence, null);
+    assert.equal(payload.ocrQuestions[0].cropRef, "q24");
+    assert.equal(payload.ocrQuestions[0].page, 3);
+    assert.equal(payload.ocrQuestions[0].bbox, null);
+    assert.equal(payload.questionLayoutManifest.questions[0].page, 3);
+    assert.equal(payload.questionLayoutManifest.questions[0].bbox, null);
+    assert.doesNotMatch(JSON.stringify(bodies), /must-not-send|teacherReview/);
+    assert.equal(result.available, true);
+    assert.equal(result.structured.needsTeacherReview, true);
+    assert.equal(result.structured.questionResults[0].bbox, null);
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+});
+
+test("invalid recognition boxes never become estimated locations", async () => {
+  for (const bbox of [{}, { page: 1, x: null, y: 0.2, w: 0.3, h: 0.1 }, { page: 1, x: 0.9, y: 0.2, w: 0.3, h: 0.1 }]) {
+    let received;
+    await gradeSubmissionService({}, {
+      subject: "数学", totalScore: 5,
+      referenceAnswers: [{ questionNo: "1", prompt: "说明计算方法。", correctAnswer: "10", score: 5, confidence: 1 }],
+      ocrQuestions: [{ questionNo: "1", printedText: "说明计算方法。", studentAnswer: "10", confidence: 0.96, bbox }]
+    }, { persist: false, gradingRunner: async (_config, input) => {
+      received = input;
+      return { available: false, gradingText: "", error: "TEACHING_EVIDENCE_MISSING" };
+    }});
+    assert.equal(received.ocrQuestions[0].bbox, null);
+    assert.equal(received.questionLayoutManifest.questions[0].bbox, null);
+  }
+});
 
 test("fully objective grading uses known answers without remote grading", async () => {
   let gradingCalls = 0;

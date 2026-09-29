@@ -1,11 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { draftAssessmentService } from "./index.js";
 
 import {
   buildGenerationContext,
   buildStudentProfileContext,
   buildSubmissionGradingContext
 } from "./context-engineering.js";
+
+test("generation preserves bounded mistake answers and evidence references without carrying private metadata", () => {
+  const { generationContext } = buildGenerationContext({ subject: "数学" }, { studentSignals: [{
+    type: "unresolved_mistake", ref: "mistake:m1", prompt: "48×6－137", studentAnswer: "191", correctAnswer: "151",
+    cause: "计算错误", privateNote: "PRIVATE", raw: "PRIVATE"
+  }, { studentAnswer: "x".repeat(900), correctAnswer: "y".repeat(900) }] });
+  assert.equal(generationContext.studentSignals[0].studentAnswer, "191");
+  assert.equal(generationContext.studentSignals[0].correctAnswer, "151");
+  assert.equal(generationContext.studentSignals[0].ref, "mistake:m1");
+  assert.equal(generationContext.studentSignals[1].studentAnswer.length, 600);
+  assert.equal(generationContext.studentSignals[1].correctAnswer.length, 600);
+  assert.doesNotMatch(JSON.stringify(generationContext), /PRIVATE/);
+});
+
+test("generation runner receives the same bounded signals at both context paths", async () => {
+  let observed;
+  await assert.rejects(() => draftAssessmentService({}, { subject: "数学", grade: "四年级", kind: "练习",
+    purpose: "focused", requestedItemTypes: ["calculation"], requestedItemCount: 1, requirement: "错题补弱",
+    studentSignals: [{ type: "unresolved_mistake", ref: "m1", studentAnswer: "191", correctAnswer: "151", raw: "PRIVATE" }] },
+  { persist: false, assessmentDraftRunner: async (_config, input) => { observed = input; throw new Error("STOP_BEFORE_CALL"); } }), /STOP_BEFORE_CALL/);
+  assert.deepEqual(observed.studentSignals, observed.generationContext.studentSignals);
+  assert.equal(observed.studentSignals[0].studentAnswer, "191");
+  assert.doesNotMatch(JSON.stringify(observed), /PRIVATE/);
+});
 
 test("builds generationContext from server evidence and ignores client internals", () => {
   const result = buildGenerationContext({

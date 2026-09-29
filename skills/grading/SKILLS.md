@@ -21,7 +21,21 @@
 
 ## 输入契约
 
+持续工作流入口见 `docs/14-api-contract.md` 的 Shared workflow API and CLI。薄 CLI 为 `node scripts/teaching-workflow.mjs`；从已登记 studentId/submissionId 创建草稿，原始作答、答案包和证据绑定由服务端读取。先读取当前版本，再携带题目 ID、expectedRevision 和稳定 operationKey 提交修订或教师确认；自然语言修订携带 instruction，手工修正使用显式 patch。创建/重判/校验适配器及 Web 工作台已实现并通过合成契约测试，隔离PostgreSQL工作流表事务、HTTP/对话客户端持久化及合成数据的真实发布/归档跨表事务已验收；生产开关仍关闭，业务schema迁移及真实教学质量仍待验收（见工作台验收记录2026-09-26）。可信服务端归档可复用未变化的确认；工作流 confirm 不触发独立 archive 命令，不得用导入 JSON 的确认人或时间代替服务端教师凭据。
+
 批改上下文分开保存 `printedPrompt`、`studentAnswer`、`ocrQuestions`、答案来源、图片质量和教师修正。Web 不得提交 `finalScore`、`archiveEligible`、provider、model 或 raw；服务端确定题号对齐和允许发送给模型的未解决题目。
+
+## 持续批改工作台与对话共用动作
+
+教师 Web 的“批改复核 → 持续批改与版本”和 CLI 使用同一工作流 API；组件不拼接核心 prompt、不选择模型。当前开关关闭时显示“暂未启用”，日常上传、识别、来源登记与旧批次筛选继续使用原入口。
+
+- 先读取当前版本及题目 ID，对照服务端原图、作答与可信参考答案。bbox 只有在页码、图片引用、裁剪空间一致且坐标有效时才能叠加；不能用不同裁剪区域的坐标标记整页。
+- 修正识别提交 `action:"revise"`、`targetQuestionIds:[id]`、`patch:{type:"correct_recognition",questionId:id,value:{studentAnswer:"核对后的作答"}}`。必须保留 expectedRevision 和 operationKey。null 是未可靠识别；只有教师核对确为空白才提交空字符串，不能把模糊字迹猜成空白。
+- 服务端记录识别修正凭据并只重批该题，保留原 OCR 置信度和坐标。完整 replace_question 中修改 studentAnswer 也走该路径，不沿用上传的评分。识别修正不等于评分确认，改后仍需教师检查。
+- 新建草稿与逐题重判须保留独立的 observedWork、原图页码和图片/裁剪引用，计算题和应用题不能仅凭最终答案丢掉原过程。observedWork 属于服务端绑定的原始识别证据，评分修改不能删除或伪造它；未知 OCR 置信度保持 null，仅已验证的教师答案修正可在本次调用使用有效可信度1，保存版本仍保留原置信度。
+- 仅改评分或解析时，读取完整当前题后提交 `replace_question` patch；不改 studentAnswer、不携带 instruction 时不调用模型。按要求重判则用 instruction，只提交当前题目标。受影响题撤销确认，未变化题保留原确认。
+- confirm 只选教师已检查的题，不能把“已核对”扩展为所有题。全部确认后另行 archive，归档接口只接收 expectedRevision，由服务端再次检查来源、权限和证据。已有可信对话归档可复用未变化确认；上传 JSON 不能凭确认字段绕过检查。
+- 409 冲突保留本地编辑，重新读取并比较后再发起新操作，不直接改 expectedRevision 自动覆盖。历史版本只读；恢复追加新版本，不改旧归档。归档重放使用原版本；同版本不会重复写入。
 
 ## 输出契约
 
@@ -93,6 +107,10 @@
 - 无答案键时的参考答案草稿；
 - 低置信项；
 - 需要老师确认的分数和题目。
+
+## 连带错误复核
+
+连带错误的复核依据仍是本题权威rubric与observedWork，执行runtime-rules中的“判断与给分”。分别检查根源错误、保留项、独立新错及最终答案项；不得从相邻题推定本题未规定的给分口径。已有评分规则模糊且影响分数时保留uncertain/null。诊断夹具scripts/test-support/teaching-practice-cases.mjs中的预期分来自合成规则，不是历史学生金标，也不覆盖已确认的2、2、1、1结果分。
 
 ## 禁止项
 

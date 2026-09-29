@@ -32,6 +32,8 @@ test("quiz and practice plans cover every service-layer blueprint section", () =
   const englishPractice = buildAssessmentPartitions({ subject: "英语", kind: "练习" });
 
   assert.equal(mathQuiz.length, 4);
+  assert.equal(mathQuiz.reduce((sum, part) => sum + part.targetScore, 0), 60);
+  assert.deepEqual(mathQuiz.find((part) => part.id === "calculation").itemScores, [4, 4, 4, 4]);
   assert.deepEqual(mathQuiz.map((item) => item.id), ["fill", "choice", "calculation", "solution"]);
   assert.equal(mathQuiz.flatMap((item) => item.itemTypes).includes("writing"), false);
   assert.equal(englishPractice.length, 4);

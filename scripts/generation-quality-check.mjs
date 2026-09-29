@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { draftAssessmentService } from "@junhang/services";
+import { assessmentScoreIssues, assessmentChoiceOptionsValid } from "@junhang/core";
 
 function findUp(fileName, startDir = process.cwd()) {
   let current = path.resolve(startDir);
@@ -137,6 +138,7 @@ function flattenItems(result = {}) {
       const metadata = item?.metadata || {};
       return {
         ...(typeof item === "string" ? { prompt: item } : item),
+        score: item?.score ?? metadata.score,
         analysisSteps: item?.analysisSteps || metadata.analysisSteps || [],
         commonMistake: item?.commonMistake || metadata.commonMistake || "",
         knowledgePoint: item?.knowledgePoint || metadata.knowledgePoint || "",
@@ -170,6 +172,8 @@ function progress(message) {
 export function evaluateGenerationQualityResult(sample, result = {}) {
   const issues = [];
   const items = flattenItems(result);
+  if (items.some((item) => itemType(item) === "choice" && !assessmentChoiceOptionsValid(item.options ?? item.metadata?.options))) issues.push("选择题选项缺失或格式无效。");
+  if (items.some((item) => assessmentScoreIssues(item).some((code) => code.endsWith("_conflict")))) issues.push("题干标注或评分细则与逐题分值冲突。");
   const itemTypes = new Set(items.map(itemType).filter(Boolean));
   const sectionTitles = items.length
     ? items.map((item) => String(item.sectionTitle || "")).filter(Boolean)
@@ -222,6 +226,23 @@ export function evaluateGenerationQualityResult(sample, result = {}) {
   }
   if (result.audit?.status !== "passed") {
     issues.push("服务层本地审查未通过。");
+  }
+  const purpose = sample.purpose || "comprehensive";
+  if (purpose !== "comprehensive") {
+    if (purpose === "explanation") {
+      const e = result.parsedDraft?.explanation;
+      if (!e?.concept || !e.steps?.length || !e.workedExamples?.length || !e.commonMistakes?.length ||
+        e.workedExamples.some((x) => !x.prompt || x.answer == null || !x.analysisSteps?.length)) issues.push("讲解必须包含概念、步骤、例题解析和易错点。");
+      if (items.length) issues.push("讲解不能混入试卷题目。");
+    } else {
+      if (!items.length || items.some((q) => q.answer == null || !q.analysisSteps?.length || !q.knowledgePoint || !q.commonMistake || !(q.rubric || q.metadata?.rubric))) issues.push("专项或每日题目缺少答案、解析、考点、易错点或评分依据。");
+      if (purpose === "focused" && (items.some((q) => !sample.requestedItemTypes?.includes(itemType(q))) || sample.requestedItemCount != null && items.length !== sample.requestedItemCount)) issues.push("专项题型或题量不符合要求。");
+      if (purpose === "multi_day" && (!sample.dayPlan?.length || items.some((q) => !sample.dayPlan.some((d) => d.dayId === (q.dayId || q.metadata?.dayId) && d.requestedItemTypes?.includes(itemType(q)))) ||
+        sample.dayPlan.some((d) => items.filter((q) => (q.dayId || q.metadata?.dayId) === d.dayId).length !== d.requestedItemCount))) issues.push("每日目标、题型或题量不符合要求。");
+      const summed = items.reduce((sum, q) => sum + Number(q.score), 0);
+      if (!Number.isFinite(summed) || summed <= 0 || Math.abs(summed - totalScore) > 0.001) issues.push("逐题分值与总分不一致。");
+    }
+    return { name: sample.name || purpose, ok: issues.length === 0, detail: { purpose, itemCount: items.length, totalScore, issues, ...modelDiagnostics } };
   }
   if (sample.kind === "试卷" && totalScore !== 100) issues.push("试卷质量样本总分应为 100。");
   if (sample.kind !== "试卷" && totalScore !== 60) issues.push("小测/练习质量样本总分应为 60。");

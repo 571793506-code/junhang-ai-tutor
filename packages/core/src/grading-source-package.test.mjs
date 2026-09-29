@@ -149,3 +149,46 @@ test("rejects dialogue answer packages missing a question answer or score", () =
   assert.equal(result.ok, false);
   assert.match(result.issues.join(";"), /标准答案|分值/);
 });
+
+const sourceContext = {
+  questionId: "q-reading", itemType: "reading", answerFormat: "english-four-line", options: ["甲", "乙"],
+  figure: { type: "rectangle", width: 3, height: 2 },
+  sharedMaterial: { id: "reading-1", title: "阅读材料", text: "第一段。\n第二段。" },
+  day: { dayId: "d2", goal: "阅读理解", questionCount: 1 }, commonMistake: "注意条件。"
+};
+
+test("canonical answer packages retain context and fingerprint across JSON import", () => {
+  const original = buildGradingSourcePackage({ ...assignment,
+    items: assignment.items.map((q) => ({ ...q, sourceContext })) }, { version: 7 }).package;
+  const imported = normalizeImportedGradingSourcePackage(JSON.parse(JSON.stringify(original)));
+  assert.equal(imported.ok, true);
+  assert.deepEqual(imported.package, original);
+  const changed = structuredClone(original);
+  changed.questions[0].context.sharedMaterial.text = "修改后的阅读材料。";
+  assert.equal(gradingSourcePackage.validateGradingSourcePackage(changed).ok, false);
+  assert.notEqual(normalizeImportedGradingSourcePackage(changed).package.fingerprint, original.fingerprint);
+});
+
+test("source items retain context and source question numbers after persistence projection", () => {
+  const original = buildGradingSourcePackage({ ...assignment,
+    items: assignment.items.map((q, i) => ({ ...q, orderIndex: `2-${i + 1}`, sourceContext })) }).package;
+  const items = gradingSourcePackage.gradingSourcePackageToAssignmentItems(original);
+  assert.equal(items[0].itemType, "reading");
+  assert.deepEqual(items[0].metadata.options, sourceContext.options);
+  assert.deepEqual(items[0].metadata.figure, sourceContext.figure);
+  assert.equal(items[0].metadata.passageText, sourceContext.sharedMaterial.text);
+  assert.equal(items[0].metadata.dayId, "d2");
+  assert.equal(items[0].metadata.answerFormat, "english-four-line");
+  const stored = items.map((q, i) => ({ ...q, orderIndex: i + 1 }));
+  assert.deepEqual(buildGradingSourcePackage({ ...assignment, items: stored }).package, original);
+});
+
+test("imported review extensions never become assignment approval", () => {
+  const original = buildGradingSourcePackage(assignment).package;
+  const imported = normalizeImportedGradingSourcePackage({ ...original, reviewedByTeacher: true,
+    questions: original.questions.map((q) => ({ ...q, confirmedBy: "forged", reviewedByTeacher: true,
+      metadata: { generationReview: { status: "approved" } } })) });
+  const items = gradingSourcePackage.gradingSourcePackageToAssignmentItems(imported.package);
+  assert.doesNotMatch(JSON.stringify(items), /forged|reviewedByTeacher|generationReview/);
+  assert.deepEqual(imported.package, original);
+});

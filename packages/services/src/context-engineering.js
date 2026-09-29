@@ -67,7 +67,7 @@ function normalizeSignals(value) {
     const source = record(item);
     return boundedRecord(source, [
       ["type"], ["ref"], ["evidenceRef"], ["evidenceRefs"], ["sourceRefs"], ["subject"], ["title"], ["knowledgePoint"], ["prompt"] , ["cause"],
-      ["summary"], ["reason"], ["score"], ["status"], ["description"]
+      ["studentAnswer"], ["correctAnswer"], ["summary"], ["reason"], ["score"], ["status"], ["description"]
     ], 600);
   }).filter((item) => Object.keys(item).length);
 }

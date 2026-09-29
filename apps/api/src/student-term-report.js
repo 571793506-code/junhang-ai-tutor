@@ -1,4 +1,5 @@
 import { buildInteractionEvidence } from "./student-growth-profile.js";
+import { selectCurrentTeachingEvidence } from "@junhang/services";
 
 const SUBJECTS = ["语文", "数学", "英语"];
 const TERM_REPORT_TEMPLATES = {
@@ -35,6 +36,7 @@ export function termReportTypeLabel(value) {
 }
 
 export function buildTermReportDraft(student, options = {}) {
+  student = selectCurrentTeachingEvidence(student);
   const reportType = normalizeTermReportType(options.reportType);
   const template = TERM_REPORT_TEMPLATES[reportType];
   const now = options.now instanceof Date ? options.now : new Date();
