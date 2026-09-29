@@ -4,7 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./src/index.d.ts",
+      "browser": "./src/browser.js",
+      "default": "./src/index.js"
+    },
     "./grading-source-package": "./src/grading-source-package.js"
   },
   "types": "./src/index.d.ts"

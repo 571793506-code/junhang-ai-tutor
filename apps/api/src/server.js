@@ -23,11 +23,11 @@ import {
   normalizeTeachingPurpose
 } from "@junhang/core";
 import {
-  GRADING_SOURCE_PACKAGE_SCHEMA_VERSION,
   gradingSourceQuestionMap,
-  normalizeImportedGradingSourcePackage,
-  validateGradingSourcePackage
+  gradingSourcePackageToAssignmentItems,
+  normalizeImportedGradingSourcePackage
 } from "@junhang/core/grading-source-package";
+import { buildSubmissionGradeInputFromRecord as buildSubmissionGradeInput, gradingSourcePackageForAssignment, gradingSourceReference } from "./submission-grade-input.js";
 import { recognizeImages } from "@junhang/ai/ocr-node";
 import {
   createClassroomBroadcast,
@@ -35,6 +35,9 @@ import {
   createAssignmentDraft,
   createReadingTask,
   createStudentWithAccessCode,
+  createTeachingWorkflowRepository,
+  createTeachingWorkflowArchiveRepository,
+  createTeachingWorkflowAssignmentRepository,
   disableStudentAccess,
   hashAccessCode,
   listTeacherStudents,
@@ -55,6 +58,9 @@ import {
   matchApprovedContentContext,
   buildModuleCapabilityStatus,
   buildStudentProfileContext,
+  createTeachingWorkflowService,
+  createTeachingWorkflowArchiveService,
+  createTeachingWorkflowAssignmentService,
   queryStudentDictionaryService,
   validateAssessmentContentContext
 } from "@junhang/services";
@@ -66,13 +72,19 @@ import {
 } from "./approved-content-context.js";
 import { assessmentPageBalanceFillRatio, buildAssessmentLayoutValidation } from "./assessment-layout-validation.js";
 import { createAssessmentGenerationJobs } from "./assessment-generation-jobs.js";
+import { createTeachingWorkflowRouter } from "./teaching-workflow-routes.js";
+import { createTeachingWorkflowArchiveResolvers } from "./teaching-workflow-archive-resolvers.js";
+import { createTeachingWorkflowExecution } from "./teaching-workflow-execution.js";
+import { createTeachingWorkflowGenerationResolver, createTeachingAssignmentTargetAuthorizer } from "./teaching-workflow-generation-resolver.js";
+import { checkTeachingAssignmentAccess, teachingAssignmentPreviewReview, rejectPublishedAssignmentSourceMutation } from "./teaching-assignment-guard.js";
 import { prepareTeacherRequirementEmergency, TEACHER_REQUIREMENT_EMERGENCY } from "./assessment-generation-emergency.js";
 import { normalizeAssessmentTargetScope } from "./assessment-target-scope.js";
 import { isNoMarkdownDocumentsError, summarizeContentIndexState } from "./content-index-state.js";
 import { createEncodingGuardMiddleware } from "./encoding-guard-middleware.js";
 import { loadRuntimeConfig, publicConfigSummary } from "./env.js";
 import { gradingQuestionReviewState, requireAllQuestionsReviewedForArchive } from "./grading-review-gates.js";
-import { filterNewReviewedMistakes } from "./grading-mistake-archive.js";
+import { filterNewReviewedMistakes, loadCurrentTeachingEvidence } from "./grading-mistake-archive.js";
+import { isImmutableTeachingArchive, rejectArchivedSubmissionMutation } from "./teaching-archive-guard.js";
 import { hydrateQuestionDraftsFromOcr } from "./grading-workbench-question-drafts.js";
 import {
   EXTERNAL_GRADING_RECOGNITION_SCHEMA_VERSION,
@@ -115,7 +127,39 @@ const port = Number(config.API_PORT || 8787);
 const host = String(config.API_HOST || "127.0.0.1");
 const execFileAsync = promisify(execFile);
 const workspaceRoot = findWorkspaceRoot();
-const assessmentGenerationJobs = createAssessmentGenerationJobs({ concurrency: 5 });
+const workflowPersistenceEnabled = process.env.TEACHING_WORKFLOW_PERSISTENCE_ENABLED === "true";
+const teachingWorkflowRepository = workflowPersistenceEnabled && typeof prisma.teachingWorkflow?.findUnique === "function" && typeof prisma.teachingWorkflowRevision?.findUnique === "function"
+  ? createTeachingWorkflowRepository(prisma)
+  : null;
+if (teachingWorkflowRepository) {
+  void teachingWorkflowRepository.markInterrupted().catch((error) => {
+    console.warn("Teaching workflow restart recovery was not applied:", error?.message || error);
+  });
+}
+const assessmentGenerationJobs = createAssessmentGenerationJobs({ concurrency: 5, workflowRepository: teachingWorkflowRepository });
+const teachingWorkflowArchiveResolvers = teachingWorkflowRepository
+  ? createTeachingWorkflowArchiveResolvers({ prisma })
+  : null;
+const teachingWorkflowExecution = teachingWorkflowRepository ? createTeachingWorkflowExecution({ config,
+  resolveGradingContext: teachingWorkflowArchiveResolvers.resolveGradingContext,
+  resolveGenerationInput: createTeachingWorkflowGenerationResolver({ prisma,
+    authorizeStudent: teachingWorkflowArchiveResolvers.authorizeStudent,
+    prepareInput: ({ actor, request }) => prepareAssessmentDraftInput({ session: { role: "teacher", teacherId: actor.teacherId }, body: request }, { confirmedSignalsOnly: true })
+  })
+}) : null;
+const teachingWorkflowService = teachingWorkflowRepository
+  ? createTeachingWorkflowService({ repository: teachingWorkflowRepository, ...teachingWorkflowExecution, resolveConfirmedArchive: teachingWorkflowArchiveResolvers.resolveConfirmedArchive })
+  : null;
+const teachingWorkflowArchiveService = teachingWorkflowRepository
+  ? createTeachingWorkflowArchiveService({ repository: createTeachingWorkflowArchiveRepository(prisma),
+    authorizeStudent: teachingWorkflowArchiveResolvers.authorizeStudent,
+    resolveArchiveEvidence: teachingWorkflowArchiveResolvers.resolveArchiveEvidence })
+  : null;
+const teachingWorkflowAssignmentService = teachingWorkflowRepository
+  ? createTeachingWorkflowAssignmentService({ repository: createTeachingWorkflowAssignmentRepository(prisma),
+    authorizeTarget: createTeachingAssignmentTargetAuthorizer({ authorizeStudent: teachingWorkflowArchiveResolvers.authorizeStudent }),
+    validateSnapshot: teachingWorkflowExecution.validateSnapshot })
+  : null;
 
 app.use(
   cors({
@@ -131,6 +175,12 @@ app.use(express.urlencoded({ extended: true, limit: "8mb" }));
 app.use(createEncodingGuardMiddleware({ enabled: config.ENCODING_GUARD_ENABLED !== "false" }));
 app.use("/uploads", express.static(storageUploadRoot()));
 app.use("/generated", express.static(storageGeneratedRoot()));
+app.use("/api/teaching", createTeachingWorkflowRouter({
+  service: teachingWorkflowService,
+  archiveService: teachingWorkflowArchiveService,
+  assignmentService: teachingWorkflowAssignmentService,
+  requireTeacher: requireSession(config, ["teacher"])
+}));
 
 app.get("/", (req, res) => {
   const requestHost = String(req.headers.host || `127.0.0.1:${port}`);
@@ -341,90 +391,7 @@ function buildExternalRecognitionPacketFromRecognition(content, recognition, ima
 }
 
 async function buildSubmissionGradeInputFromRecord(submission, recognition = null) {
-  const content = safeJson(submission.content, {});
-  const assignment = submission.assignment || {};
-  const assignmentMetadata = safeJson(assignment.metadata, {});
-  const dialogueAnswerPackage = safeJson(content.dialogueAnswerPackage, null);
-  const gradingSourcePackage = gradingSourcePackageForAssignment(assignment);
-  const importedSourcePackage = dialogueAnswerPackage && validateGradingSourcePackage(dialogueAnswerPackage).ok
-    ? dialogueAnswerPackage
-    : null;
-  // Assignment is the single source of truth. The submission copy remains a
-  // legacy fallback for records created before shared package persistence.
-  const authoritativeSourcePackage = gradingSourcePackage || importedSourcePackage;
-  const gradingResult = safeJson(submission.grading?.result, {});
-  const questionLayoutManifest =
-    safeJson(assignmentMetadata.questionLayoutManifest, null) ||
-    safeJson(assignmentMetadata.latestQuestionLayoutManifest, null) ||
-    await findLatestQuestionLayoutManifest(submission.assignmentId);
-  const ocr = {
-    ...safeJson(content.ocr, {}),
-    ...(recognition
-      ? {
-          status: recognition.status,
-          text: recognition.text || safeJson(content.ocr, {}).text || content.ocrText || "",
-          studentAnswerText: recognition.studentAnswerText || safeJson(content.ocr, {}).studentAnswerText || content.studentAnswerText || "",
-          printedText: recognition.printedText || safeJson(content.ocr, {}).printedText || content.printedText || "",
-          confidence: recognition.confidence,
-          engine: recognition.engine,
-          reason: recognition.reason,
-          questions: recognition.questions,
-          imageQuality: recognition.imageQuality
-        }
-      : {})
-  };
-  return {
-    assignmentId: submission.assignmentId,
-    studentId: submission.studentId,
-    subject: assignment.subject?.name || assignmentMetadata.subject || content.subject || gradingResult.evidence?.subject || "",
-    kind: assignmentMetadata.kind || content.kind || "",
-    title: assignment.title || "图片提交批改记录",
-    uploadedBy: content.uploadedBy || assignmentMetadata.uploadedBy || "teacher",
-    imageNames: content.imageNames || assignmentMetadata.imageNames || [],
-    uploadedFiles: content.imageFiles || [],
-    ocrText: ocr.manualText || ocr.text || content.ocrText || "",
-    studentAnswerText: content.studentAnswerText || content.ocrStudentAnswerText || ocr.studentAnswerText || "",
-    printedText: content.printedText || ocr.printedText || "",
-    ocrStatus: ocr.status || content.ocrStatus || "PENDING",
-    ocrConfidence: ocr.confidence ?? null,
-    ocrEngine: ocr.engine || null,
-    ocrReason: ocr.reason || null,
-    ocrQuestions: ocr.questions || content.ocrQuestions || [],
-    imageQuality: ocr.imageQuality || content.imageQuality || null,
-    manualText: ocr.manualText || content.manualText || null,
-    pageNumber: ocr.pageNumber ?? content.pageNumber ?? null,
-    questionRange: ocr.questionRange ?? content.questionRange ?? null,
-    assignmentItems: authoritativeSourcePackage
-      ? authoritativeSourcePackage.questions.map((question) => ({
-          questionNo: question.questionNo,
-          prompt: question.prompt,
-          answer: question.correctAnswer,
-          rubric: question.rubric,
-          score: question.maxScore,
-          metadata: {
-            analysisSteps: question.analysisSteps,
-            knowledgePoint: question.knowledgePoint
-          }
-        }))
-      : assignment.items?.map((item) => ({
-          questionNo: item.orderIndex,
-          prompt: item.prompt,
-          answer: item.answer,
-          rubric: item.rubric,
-          metadata: item.metadata || {}
-        })) || [],
-    answerKey: authoritativeSourcePackage
-      ? Object.fromEntries(authoritativeSourcePackage.questions.map((question) => [question.questionNo, question.correctAnswer]))
-      : assignmentMetadata.answerKey || null,
-    questionLayoutManifest,
-    assignmentAnalysis: {
-      subject: assignment.subject?.name || assignmentMetadata.subject || null,
-      kind: assignmentMetadata.kind || null,
-      difficulty: assignment.difficulty || null,
-      questionLayoutManifest,
-      gradingSource: gradingSourceReference(authoritativeSourcePackage)
-    }
-  };
+  return buildSubmissionGradeInput(submission, recognition, { findLatestQuestionLayoutManifest });
 }
 
 function queuedSubmissionResult(input = {}, submission = null) {
@@ -549,6 +516,7 @@ async function createQueuedPhotoSubmission(input = {}) {
 async function markSubmissionProcessingFailed(submissionId, error) {
   const message = error instanceof Error ? error.message : String(error);
   const submission = await prisma.submission.findUnique({ where: { id: submissionId } });
+  if (isImmutableTeachingArchive(submission)) return;
   const content = safeJson(submission?.content, {});
   await prisma.submission.update({
     where: { id: submissionId },
@@ -591,6 +559,7 @@ async function recognizeAndGradeSubmissionRecord(submissionId, { force = false }
     include: { student: true, grading: true, assignment: { include: { subject: true, items: { orderBy: { orderIndex: "asc" } } } } }
   });
   if (!submission) return null;
+  if (isImmutableTeachingArchive(submission)) throw Object.assign(new Error("WORKFLOW_ARCHIVE_IMMUTABLE"), { code: "WORKFLOW_ARCHIVE_IMMUTABLE", status: 409 });
 
   const content = safeJson(submission.content, {});
   const currentOcr = safeJson(content.ocr, {});
@@ -903,23 +872,6 @@ function safeJson(value, fallback) {
   return value && typeof value === "object" ? value : fallback;
 }
 
-function gradingSourcePackageForAssignment(assignment = {}) {
-  const metadata = safeJson(assignment.metadata, {});
-  const sourcePackage = safeJson(metadata.gradingSourcePackage, null);
-  if (!sourcePackage || sourcePackage.schemaVersion !== GRADING_SOURCE_PACKAGE_SCHEMA_VERSION) return null;
-  if (sourcePackage.sourceId !== assignment.id || !Array.isArray(sourcePackage.questions) || !sourcePackage.questions.length) return null;
-  if (!validateGradingSourcePackage(sourcePackage).ok) return null;
-  return sourcePackage;
-}
-
-function gradingSourceReference(sourcePackage = null) {
-  if (!sourcePackage) return null;
-  return {
-    sourceId: sourcePackage.sourceId,
-    version: sourcePackage.version,
-    fingerprint: sourcePackage.fingerprint
-  };
-}
 
 function readContentIndexSummary(indexPath = path.resolve(workspaceRoot, "exports/content-index/index.json")) {
   if (!fs.existsSync(indexPath)) {
@@ -1998,6 +1950,18 @@ function sectionTitleForItem(item) {
   }[printableItemType(item)] || "练习题";
 }
 
+function chineseWritingLineCount(item, subject = "") {
+  const metadata = safeJson(item?.metadata, {});
+  const format = metadata.answerFormat;
+  if (!readableText(subject, "").includes("语文") ||
+      !["fill", "solution", "operation", "reading"].includes(printableItemType(item)) ||
+      (Array.isArray(metadata.options) && metadata.options.length) ||
+      !format || typeof format !== "object" || Array.isArray(format) || format.type !== "writingLines") return 0;
+  // Only the bounded line count is supported. Never render model-provided text,
+  // styles or geometry; keep the same space estimate for pagination and output.
+  return Number.isInteger(format.lineCount) && format.lineCount > 0 ? Math.min(format.lineCount, 8) : 2;
+}
+
 function answerSpaceMm(item, subject = "", kind = "") {
   const metadata = safeJson(item?.metadata, {});
   const type = printableItemType(item);
@@ -2007,6 +1971,11 @@ function answerSpaceMm(item, subject = "", kind = "") {
   const options = Array.isArray(metadata.options) ? metadata.options : [];
   const configured = Number(metadata.answerSpaceMm);
   const answerFormat = String(metadata.answerFormat || "");
+  const writingLineCount = chineseWritingLineCount(item, subject);
+  if (writingLineCount) return writingLineCount * 7.3 + 2;
+  if (["focused", "multi_day"].includes(metadata.printPurpose) && subjectText.includes("数学") && type === "calculation") {
+    return Math.max(metadata.printCalculationSheet || /验算/.test(String(item.prompt || "")) ? 48 : 32, Math.min(configured || 0, 64));
+  }
   if (type === "writing" && answerFormat === "english-four-line") return configured > 0 ? Math.max(18, Math.min(configured, 54)) : 32;
   if (type === "writing" && answerFormat === "chinese-square-grid") return configured > 0 ? Math.max(72, Math.min(configured, isExam ? 96 : 148)) : isExam ? 96 : 132;
   if (answerFormat === "english-four-line" && type === "fill") return configured > 0 ? Math.max(10, Math.min(configured, 16)) : 10;
@@ -2165,6 +2134,8 @@ function renderAnswerSpace(item, itemType, spaceMm, subject = "") {
   if (needsTianzige(item, metadata)) return renderTianzige(item, metadata);
   if (metadata.answerFormat === "english-four-line") return renderEnglishFourLineSpace(spaceMm, itemType);
   if (metadata.answerFormat === "chinese-square-grid") return renderChineseSquareGrid(spaceMm);
+  const writingLineCount = chineseWritingLineCount(item, subject);
+  if (writingLineCount) return `<div class="ruled-lines">${Array.from({ length: writingLineCount }).map(() => "<span></span>").join("")}</div>`;
   if (metadata.answerFormat === "ruled" || metadata.answerFormat === "reading-lines") {
     const lines = 1;
     return `<div class="ruled-lines compact">${Array.from({ length: lines }).map(() => "<span></span>").join("")}</div>`;
@@ -2191,14 +2162,22 @@ function renderAnswerSpace(item, itemType, spaceMm, subject = "") {
   return spaceMm > 0 ? `<div class="answer-space" style="min-height:${spaceMm}mm"></div>` : "";
 }
 
-function renderStudentItem({ item, number, showSection, subject, kind = "", suppressWritingSpace = false }) {
+function calculationSheetPrompt(prompt) {
+  const text = readableText(prompt, "");
+  const expression = text.replace(/^用脱式计算[，,]\s*写出每一步计算[。．.：:]?\s*/, "");
+  // Only strip a repeated generic instruction before a plain expression.
+  return /^[0-9\s.+＋\-−－×÷*/()（）\[\]＝=]+$/.test(expression) ? expression : text;
+}
+
+function renderStudentItem({ item, number, showSection, subject, kind = "", suppressWritingSpace = false, calculationSheet = false }) {
   const metadata = safeJson(item?.metadata, {});
+  const questionNo = metadata.sourceQuestionNo ?? number;
   const itemType = printableItemType(item);
   const spaceMm = answerSpaceMm(item, subject, kind);
   const options = Array.isArray(metadata.options) ? metadata.options : [];
   const compactOptions = options.length <= 4 && options.every((option) => String(option || "").length <= 18);
   const subjectText = readableText(subject, "");
-  const promptText = readableText(item?.prompt || item, "");
+  const promptText = calculationSheet ? calculationSheetPrompt(item?.prompt || item) : readableText(item?.prompt || item, "");
   const promptAlreadyHasAnswerBox = /[（(][\s　_＿]*[）)]/.test(promptText);
   const needsChoiceAnswerBox = subjectText.includes("英语") && options.length > 0 && !promptAlreadyHasAnswerBox;
   const choiceAnswerBox = needsChoiceAnswerBox ? '<span class="choice-answer-box">（　　　）</span>' : "";
@@ -2218,16 +2197,41 @@ function renderStudentItem({ item, number, showSection, subject, kind = "", supp
   const scoreText = questionScoreText(item);
   return `${showSection ? `<h2 class="section-title">${escapeHtml(sectionTitleForItem(item))}</h2>` : ""}
     ${(itemType === "reading" || metadata.showPassage) ? renderReadingPassage(metadata) : ""}
-    <div class="item item-${itemType}" data-question-id="${escapeHtml(item?.id || `question-${number}`)}" data-question-no="${escapeHtml(number)}">
-      <div class="prompt"><strong>${number}.</strong><span class="score">${scoreText}</span> ${escapeHtml(promptText)}${choiceAnswerBox}</div>
+    <div class="item item-${itemType}" data-question-id="${escapeHtml(item?.id || `question-${number}`)}" data-question-no="${escapeHtml(questionNo)}">
+      <div class="prompt"><strong>${escapeHtml(questionNo)}.</strong>${calculationSheet ? "" : `<span class="score">${scoreText}</span>`} ${escapeHtml(promptText)}${choiceAnswerBox}</div>
       ${optionsHtml}
       ${bodyHtml}
     </div>`;
 }
 
-function splitSequentialPages(items = [], pageCount = 2, subject = "", kind = "") {
+function assessmentPrintPlan(assignment) {
+  const metadata = safeJson(assignment.metadata, {});
+  const purpose = metadata.purpose || metadata.generationContext?.request?.purpose || "comprehensive";
+  const adaptive = ["focused", "multi_day"].includes(purpose);
+  const profile = metadata.printProfile || {};
+  const subject = readableText(profile.subject || metadata.subject || assignment.subject?.name, "英语");
+  const kind = readableKind(metadata.kind, "练习");
+  const calculationSheet = purpose === "focused" && subject.includes("数学") && Boolean(assignment.items?.length) &&
+    assignment.items.every((item) => printableItemType(item) === "calculation");
+  const days = new Map((metadata.dayPlan || []).map((day, i) => [day.dayId, { ...day, number: i + 1 }]));
+  for (const item of assignment.items || []) {
+    const day = item.metadata?.sourceContext?.day;
+    if (day?.dayId && !days.has(day.dayId)) days.set(day.dayId, { ...day, number: days.size + 1 });
+  }
+  const items = (assignment.items || []).map((item) => {
+    if (!adaptive) return item;
+    const itemMetadata = safeJson(item.metadata, {});
+    const day = days.get(itemMetadata.dayId || itemMetadata.sourceContext?.day?.dayId);
+    const title = day ? `第${day.number}天：${day.goal || "每日练习"}` : sectionTitleForItem(item).replace(/^[一二三四五六七八九十]+、/, "");
+    return { ...item, metadata: { ...itemMetadata, printPurpose: purpose, printCalculationSheet: calculationSheet, sectionTitle: title } };
+  });
+  const pages = splitSequentialPages(items, Number(profile.pages || 2), subject, kind, { adaptive, calculationSheet });
+  return { purpose, adaptive, calculationSheet, items, pages, subject, kind };
+}
+
+function splitSequentialPages(items = [], pageCount = 2, subject = "", kind = "", options = {}) {
   const safePageCount = Math.max(1, pageCount);
-  const pages = Array.from({ length: safePageCount }).map((_, pageIndex) => ({ pageIndex, items: [], heightPx: 0 }));
+  const pages = Array.from({ length: options.adaptive ? 1 : safePageCount }).map((_, pageIndex) => ({ pageIndex, items: [], heightPx: 0 }));
   const weighted = items.map((item, index) => {
     const type = printableItemType(item);
     const metadata = safeJson(item?.metadata, {});
@@ -2241,7 +2245,7 @@ function splitSequentialPages(items = [], pageCount = 2, subject = "", kind = ""
     const spaceMm = answerSpaceMm(item, subject, kind);
     const answerSpaceHeightPx = answerFormat === "english-four-line"
       ? Math.ceil((type === "fill" ? 9 : Math.max(16, spaceMm)) * 2.35)
-      : spaceMm > 0 ? Math.ceil(spaceMm * 3.2) : 0;
+      : spaceMm > 0 ? Math.ceil(spaceMm * (options.adaptive ? 96 / 25.4 : 3.2)) : 0;
     const promptLineCount = Math.max(1, Math.ceil(readableText(item?.prompt, "").length / 110));
     const baseHeightPx =
       compactChoice ? 34 :
@@ -2250,12 +2254,45 @@ function splitSequentialPages(items = [], pageCount = 2, subject = "", kind = ""
       type === "reading" && optionCount ? 42 :
       type === "reading" ? 48 :
       type === "writing" ? 30 :
-      type === "calculation" ? 52 :
+      type === "calculation" ? (options.adaptive ? 40 : 52) :
       type === "operation" ? 64 :
       50;
     const estimatedHeightPx = passageHeightPx + baseHeightPx + answerSpaceHeightPx + Math.max(0, promptLineCount - 1) * 18;
     return { item, number: index + 1, estimatedHeightPx };
   });
+  if (options.calculationSheet) {
+    // Pair questions in reading order. A row consumes its taller card's height;
+    // larger requested work areas must reduce capacity instead of overflowing.
+    for (let index = 0; index < weighted.length; index += 2) {
+      const row = weighted.slice(index, index + 2);
+      const rowHeightPx = Math.max(...row.map(({ item }) =>
+        answerSpaceMm(item, subject, kind) * 96 / 25.4 + 48 +
+        Math.max(0, Math.ceil(calculationSheetPrompt(item.prompt).length / 28) - 1) * 24));
+      let page = pages[pages.length - 1];
+      if (page.items.length && (page.items.length >= 10 || page.heightPx + rowHeightPx > (page.pageIndex === 0 ? 930 : 970))) {
+        page = { pageIndex: pages.length, items: [], heightPx: 0 };
+        pages.push(page);
+      }
+      page.items.push(...row.map((entry) => ({ ...entry, estimatedRowHeightPx: rowHeightPx })));
+      page.heightPx += rowHeightPx;
+    }
+    // Keep a short final page balanced with its predecessor without shrinking
+    // work areas or separating a left/right pair.
+    for (let index = pages.length - 1; index > 0; index--) {
+      const page = pages[index];
+      const previous = pages[index - 1];
+      while (previous.items.length - page.items.length > 2 && previous.items.length % 2 === 0) {
+        const row = previous.items.slice(-2);
+        const rowHeightPx = row[0].estimatedRowHeightPx;
+        if (page.heightPx + rowHeightPx > 970) break;
+        previous.items.splice(-2);
+        previous.heightPx -= rowHeightPx;
+        page.items.unshift(...row);
+        page.heightPx += rowHeightPx;
+      }
+    }
+    return pages;
+  }
   const subjectText = readableText(subject, "");
   const kindText = readableText(kind, "");
   const pageBalanceFillRatio = assessmentPageBalanceFillRatio({
@@ -2276,6 +2313,7 @@ function splitSequentialPages(items = [], pageCount = 2, subject = "", kind = ""
   }, 0);
   const idealPageBudgetPx = Math.ceil(totalEstimatedHeightPx / planningPageCount);
   const pageBudgetFor = (index) => {
+    if (options.adaptive) return index === 0 ? 850 : 930;
     const minBudgetPx = safePageCount >= 4
       ? subjectText.includes("语文") ? 800 : subjectText.includes("英语") ? 620 : subjectText.includes("数学") ? 470 : 580
       : subjectText.includes("英语") ? (kindText.includes("小测") ? 860 : 800) : subjectText.includes("数学") ? 650 : subjectText.includes("语文") ? 800 : 720;
@@ -2292,12 +2330,14 @@ function splitSequentialPages(items = [], pageCount = 2, subject = "", kind = ""
     const pageBudgetPx = pageBudgetFor(pageIndex);
     const nextSection = Boolean(page.items.length && sectionTitleForItem(page.items[page.items.length - 1].item) !== sectionTitleForItem(entry.item));
     const sectionTitlePx = nextSection || !page.items.length ? 38 : 0;
-    if (pageIndex < planningPageCount - 1 && page.items.length && page.heightPx + entry.estimatedHeightPx + sectionTitlePx > pageBudgetPx) {
+    if ((options.adaptive || pageIndex < planningPageCount - 1) && page.items.length && page.heightPx + entry.estimatedHeightPx + sectionTitlePx > pageBudgetPx) {
       pageIndex += 1;
+      if (options.adaptive) pages.push({ pageIndex, items: [], heightPx: 0 });
     }
     pages[pageIndex].items.push(entry);
     pages[pageIndex].heightPx += entry.estimatedHeightPx + sectionTitlePx;
   }
+  if (options.adaptive) return pages;
   for (let index = 1; index < planningPageCount; index += 1) {
     const pageBudgetPx = pageBudgetFor(index);
     while (pages[index].items.length < 2 && pages[index - 1].items.length > 3) {
@@ -2359,15 +2399,17 @@ function ensureEvenHtmlPages(html) {
 function printableAssignmentHtml(assignment, options = {}) {
   const metadata = safeJson(assignment.metadata, {});
   const profile = metadata.printProfile || {};
-  const items = assignment.items || [];
-  const pageCount = Number(profile.pages || 2);
+  const plan = assessmentPrintPlan(assignment);
+  const pageItems = plan.pages;
+  const pageCount = pageItems.length;
   const kind = readableKind(metadata.kind, "练习");
   const subject = readableText(profile.subject || metadata.subject || assignment.subject?.name, "英语");
   const columns = 1;
-  const pageItems = splitSequentialPages(items, pageCount, subject, kind);
   const badgeText = options.badgeText || "AI生成 · 教师复核后打印";
   const footText = options.footText || "AI生成内容需教师复核后使用";
   const titleSuffix = options.titleSuffix || "";
+  const subtitle = plan.adaptive ? `共${plan.items.length}题` : profile.answerSpace || "";
+  const sheetTitle = plan.calculationSheet ? assignment.title.replace(/\s*[（(]待教师复核(?:草稿|稿)?[）)]\s*$/, "") : assignment.title;
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -2438,9 +2480,16 @@ h1 { margin: 4px 0 2px; font-size: 16pt; text-align: center; font-family: "SimHe
 .foot { display: none; }
 .blank-page { display: flex; align-items: center; justify-content: center; color: #9aa7b5; font-size: 12px; }
 .blank-page-inner { border: 1px dashed #c8d4df; padding: 12px 18px; }
+.calculation-sheet { color: #111; font-size: 12pt; }
+.calculation-sheet .page { display: flow-root; }
+.calculation-sheet h1 { margin: 3mm 0 8mm; }
+.calculation-sheet .items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3mm 4mm; }
+.calculation-sheet .item { margin: 0; padding: 2mm; border: 0.25mm solid #d9dde2; background: #fff; min-width: 0; }
+.calculation-sheet .prompt { overflow-wrap: anywhere; }
+.calculation-sheet .calculation-space { margin: 1mm 0 0; }
 </style>
 </head>
-<body>
+<body${plan.calculationSheet ? ' class="calculation-sheet"' : ""}>
 ${pageItems.map(({ pageIndex, items: currentItems }) => {
   const isFirstPage = pageIndex === 0;
   const previousPageItems = pageIndex > 0 ? pageItems[pageIndex - 1]?.items || [] : [];
@@ -2453,16 +2502,16 @@ ${pageItems.map(({ pageIndex, items: currentItems }) => {
       ))
     );
   return `<section class="page">
-  <div class="head ${isFirstPage ? "" : "head-compact"}">
-    <div>${isFirstPage ? `<span class="badge">${escapeHtml(badgeText)}</span>` : ""}<h1>${escapeHtml(isFirstPage ? assignment.title : `${assignment.title}（续）`)}</h1>${isFirstPage ? `<div class="subtitle">${escapeHtml(subject)} · ${escapeHtml(profile.answerSpace || "")}</div>` : ""}</div>
-    <strong>${escapeHtml(kind)} · A4 · 第${pageIndex + 1}/${pageCount}页</strong>
+  ${plan.calculationSheet ? (isFirstPage ? `<h1>${escapeHtml(sheetTitle)}</h1>` : "") : `<div class="head ${isFirstPage ? "" : "head-compact"}">
+    <div>${isFirstPage ? `<span class="badge">${escapeHtml(badgeText)}</span>` : ""}<h1>${escapeHtml(isFirstPage ? assignment.title : `${assignment.title}（续）`)}</h1>${isFirstPage ? `<div class="subtitle">${escapeHtml(subject)} · ${escapeHtml(subtitle)}</div>` : ""}</div>
+    <strong>${escapeHtml(plan.purpose === "focused" ? "专项练习" : plan.purpose === "multi_day" ? "每日练习" : kind)} · A4 · 第${pageIndex + 1}/${pageCount}页</strong>
   </div>
   ${isFirstPage ? `<div class="meta">${(profile.headerFields || ["姓名", "日期", "得分"]).map((field) => `<span>${escapeHtml(field)}：</span>`).join("")}</div>` : ""}
-  ${isFirstPage ? `<div class="sections">${escapeHtml((profile.recommendedSections || []).join(" / "))}</div>` : ""}
+  ${isFirstPage && !plan.adaptive ? `<div class="sections">${escapeHtml((profile.recommendedSections || []).join(" / "))}</div>` : ""}`}
   <div class="items">${currentItems.length ? currentItems.map(({ item, number }, index, list) => {
     const currentSection = sectionTitleForItem(item);
     const previousSection = index > 0 ? sectionTitleForItem(list[index - 1]?.item) : previousPageLastSection;
-    return renderStudentItem({ item, number, showSection: !previousSection || previousSection !== currentSection, subject, kind, suppressWritingSpace });
+    return renderStudentItem({ item, number, showSection: !plan.calculationSheet && (!previousSection || previousSection !== currentSection), subject, kind, suppressWritingSpace, calculationSheet: plan.calculationSheet });
   }).join("") : '<div class="blank-page-inner">本页留白，便于双面打印。</div>'}</div>
   ${footText ? "" : ""}
 </section>`;
@@ -2514,7 +2563,8 @@ function buildQuestionLayoutManifest(assignment, options = {}) {
   const pageCount = Number(profile.pages || options.pageCount || 2);
   const kind = readableKind(metadata.kind, "练习");
   const subject = readableText(profile.subject || metadata.subject || assignment.subject?.name, "英语");
-  const pageItems = splitSequentialPages(items, pageCount, subject, kind);
+  const plan = assessmentPrintPlan(assignment);
+  const pageItems = plan.pages;
   const questions = [];
   for (const page of pageItems) {
     const entries = page.items || [];
@@ -2527,22 +2577,24 @@ function buildQuestionLayoutManifest(assignment, options = {}) {
       return Math.max(34, Number(entry.estimatedHeightPx || 50) + sectionWeight);
     });
     const totalWeight = Math.max(1, weights.reduce((sum, value) => sum + value, 0));
-    const top = page.pageIndex === 0 ? 0.15 : 0.08;
+    const top = plan.calculationSheet ? (page.pageIndex === 0 ? 0.112 : 14 / 297) : page.pageIndex === 0 ? 0.15 : 0.08;
     const usableHeight = page.pageIndex === 0 ? 0.79 : 0.86;
     let cursor = top;
     for (const [index, entry] of entries.entries()) {
       const item = entry.item || {};
       const itemMetadata = safeJson(item.metadata, {});
-      const questionNo = String(entry.number || questions.length + 1);
+      const questionNo = String(itemMetadata.sourceQuestionNo ?? entry.number ?? questions.length + 1);
       const sourceQuestion = sourceQuestions.get(questionNo) || null;
-      const height = Math.max(0.045, Math.min(0.26, (weights[index] / totalWeight) * usableHeight));
+      const height = plan.calculationSheet
+        ? entry.estimatedRowHeightPx / (297 * 96 / 25.4)
+        : Math.max(0.045, Math.min(0.26, (weights[index] / totalWeight) * usableHeight));
       const bboxHeight = Math.max(0.035, Math.min(height, Math.max(0.035, 0.94 - cursor)));
       const bbox = {
         page: page.pageIndex + 1,
-        x: 0.06,
+        x: plan.calculationSheet ? Number(((15 + (index % 2) * 92) / 210).toFixed(4)) : 0.06,
         y: Number(Math.min(0.94, cursor).toFixed(4)),
-        w: 0.88,
-        h: Number(bboxHeight.toFixed(4))
+        w: plan.calculationSheet ? Number((88 / 210).toFixed(4)) : 0.88,
+        h: Number((plan.calculationSheet ? Math.max(0.035, bboxHeight - 3 / 297) : bboxHeight).toFixed(4))
       };
       questions.push({
         assignmentItemId: item.id || null,
@@ -2558,6 +2610,7 @@ function buildQuestionLayoutManifest(assignment, options = {}) {
         knowledgePoint: sourceQuestion?.knowledgePoint || formatPrintableValue(itemMetadata.knowledgePoint || itemMetadata.point || ""),
         commonMistake: formatPrintableValue(itemMetadata.commonMistake || ""),
         score: optionalNumber(sourceQuestion?.maxScore) ?? questionScoreNumber(item),
+        ...(sourceQuestion?.context ? { context: sourceQuestion.context } : {}),
         page: page.pageIndex + 1,
         bbox,
         answerSpace: {
@@ -2565,7 +2618,7 @@ function buildQuestionLayoutManifest(assignment, options = {}) {
           estimatedMm: answerSpaceMm(item, subject, kind)
         }
       });
-      cursor += height;
+      if (!plan.calculationSheet || index % 2 === 1) cursor += height;
     }
   }
   return {
@@ -2675,7 +2728,8 @@ function answerAnalysisHtml(assignment) {
   const gradingSourcePackage = gradingSourcePackageForAssignment(assignment);
   const sourceQuestions = gradingSourceQuestionMap(gradingSourcePackage || {});
   const profile = metadata.printProfile || {};
-  const items = assignment.items || [];
+  const plan = assessmentPrintPlan(assignment);
+  const items = plan.items;
   const answerKey = safeJson(metadata.answerKey, null);
   const kind = readableKind(metadata.kind, "练习");
   const subject = readableText(profile.subject || metadata.subject || assignment.subject?.name, "英语");
@@ -2696,6 +2750,7 @@ h1 { margin: 4px 0 2px; font-size: 15pt; text-align: center; font-family: "SimHe
 .item { break-inside: avoid; margin: 0 0 5px; padding: 4px 0 6px; border-bottom: 1px dashed #c6d1dd; }
 .prompt { font-weight: 700; line-height: 1.36; }
 .answer, .analysis, .point, .mistake { margin-top: 3px; }
+${plan.calculationSheet ? ".answer { display: grid; grid-template-columns: 58px minmax(0, 1fr); align-items: start; } .answer-text { white-space: pre-line; }" : ""}
 .label { display: inline-block; min-width: 58px; color: #1d5b8f; font-weight: 700; }
 .steps { margin: 2px 0 0 58px; padding-left: 15px; }
 .steps li { margin: 1px 0; }
@@ -2712,17 +2767,22 @@ h1 { margin: 4px 0 2px; font-size: 15pt; text-align: center; font-family: "SimHe
   </div>
   ${(items.length ? items : [{ prompt: "请教师补充题目内容。", answer: "", rubric: "" }]).map((item, index) => {
     const metadata = safeJson(item.metadata, {});
-    const sourceQuestion = sourceQuestions.get(String(item.orderIndex || index + 1)) || null;
+    const questionNo = String(metadata.sourceQuestionNo ?? item.orderIndex ?? index + 1);
+    const sourceQuestion = sourceQuestions.get(questionNo) || null;
     const answer = sourceQuestion
       ? formatPrintableValue(sourceQuestion.correctAnswer)
       : formatPrintableValue(item.answer) || formatPrintableValue(answerKey?.[index] || answerKey?.[String(index + 1)] || "");
     const point = sourceQuestion?.knowledgePoint || formatPrintableValue(metadata.knowledgePoint || metadata.point || "");
     const steps = sourceQuestion?.analysisSteps?.length ? sourceQuestion.analysisSteps : printableAnalysisSteps(item);
+    const scoring = plan.calculationSheet ? formatPrintableValue(sourceQuestion?.rubric || item.rubric || metadata.rubric || "") : "";
     const commonMistake = formatPrintableValue(metadata.commonMistake || "");
-    return `<div class="item">
-      <div class="prompt">${index + 1}. ${escapeHtml(sourceQuestion?.prompt || item.prompt || item)}</div>
-      <div class="answer"><span class="label">答案</span>${answer ? escapeHtml(answer) : "<span class='empty'>等待教师补充或复核</span>"}</div>
+    const dayHeading = plan.purpose === "multi_day" && (index === 0 || sectionTitleForItem(items[index - 1]) !== sectionTitleForItem(item))
+      ? `<h2>${escapeHtml(sectionTitleForItem(item))}</h2>` : "";
+    return `${dayHeading}<div class="item">
+      <div class="prompt">${escapeHtml(questionNo)}. ${escapeHtml(sourceQuestion?.prompt || item.prompt || item)}</div>
+      <div class="answer"><span class="label">答案</span><span class="answer-text">${answer ? escapeHtml(answer) : "<span class='empty'>等待教师补充或复核</span>"}</span></div>
       <div class="analysis"><span class="label">解析步骤</span><ol class="steps">${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol></div>
+      ${scoring ? `<div class="scoring"><span class="label">评分标准</span>${escapeHtml(scoring)}</div>` : ""}
       ${point ? `<div class="point"><span class="label">考点</span>${escapeHtml(point)}</div>` : ""}
       ${commonMistake ? `<div class="mistake"><span class="label">易错提醒</span>${escapeHtml(commonMistake)}</div>` : ""}
     </div>`;
@@ -2967,7 +3027,11 @@ async function exportAssessmentPaperAsset(req, assignment, options = {}) {
   const titleSuffix = options.titleSuffix || "题目";
   const assetRole = options.role || "student-paper";
   const assetKind = options.kind || "assessment-print";
-  const paperHtmlResult = ensureEvenHtmlPages(normalizeGeneratedHtml(printableAssignmentHtml(assignment, options.htmlOptions || {})));
+  const printPlan = assessmentPrintPlan(assignment);
+  const paperHtml = normalizeGeneratedHtml(printableAssignmentHtml(assignment, options.htmlOptions || {}));
+  const paperHtmlResult = printPlan.adaptive
+    ? { html: paperHtml, pageCount: printPlan.pages.length, addedBlankPage: false }
+    : ensureEvenHtmlPages(paperHtml);
   const htmlFileName = `${assignment.id}-${suffix}.html`;
   const pdfFileName = `${assignment.id}-${suffix}.pdf`;
   fs.mkdirSync(storageGeneratedRoot(), { recursive: true });
@@ -2984,7 +3048,7 @@ async function exportAssessmentPaperAsset(req, assignment, options = {}) {
   const layoutValidation = buildAssessmentLayoutValidation({
     subject: readableText(metadata.printProfile?.subject || metadata.subject || assignment.subject?.name, "英语"),
     kind: readableKind(metadata.kind, "练习"),
-    plannedPageCount: Number(metadata.printProfile?.pages) || paperHtmlResult.pageCount,
+    plannedPageCount: printPlan.adaptive ? printPlan.pages.length : Number(metadata.printProfile?.pages) || paperHtmlResult.pageCount,
     htmlPageCount: paperHtmlResult.pageCount,
     pdfPageCount: evenPdf.pageCount,
     measuredPageCount: measuredLayout.pageCount,
@@ -3061,13 +3125,14 @@ async function exportAssessmentDraftForReview(req, assignment, options = {}) {
     note: "Draft review PDF generated for teacher approval before final export."
   });
   throwIfAssessmentGenerationCancelled(options.signal);
+  const previewReview = teachingAssignmentPreviewReview(metadata, exported.layoutValidation, options.trustedWorkflow === true);
   const generationPipeline = mergeGenerationPipeline(metadata, {
     stage: "draft_pdf_ready",
     gates: {
       draftPdfExported: true,
       layoutValidationPassed: exported.layoutValidation.ok,
-      teacherReviewStatus: "pending_teacher_review",
-      finalExportAllowed: false,
+      teacherReviewStatus: previewReview.reviewStatus,
+      finalExportAllowed: previewReview.finalExportAllowed,
       finalExported: false
     },
     assets: {
@@ -3083,7 +3148,7 @@ async function exportAssessmentDraftForReview(req, assignment, options = {}) {
     data: {
       metadata: {
         ...metadata,
-        draftReviewStatus: "pending_teacher_review",
+        draftReviewStatus: previewReview.reviewStatus,
         draftReviewAssetId: exported.asset.id,
         draftReviewUpdatedAt: new Date().toISOString(),
         layoutValidation: exported.layoutValidation,
@@ -3404,6 +3469,7 @@ function mapGradingWorkbench(submission) {
 
 function reviewedMistakesFromResult(result = {}, submission) {
   const subject = submission.assignment?.subject?.name || safeJson(submission.assignment?.metadata, {}).subject || "unknown";
+  const sourceVersion = result.workflowRevision ?? result.sourceRevision ?? result.gradingSource?.version ?? null;
   const explicitMistakes = Array.isArray(result.mistakes) ? result.mistakes : [];
   const questionMistakes = Array.isArray(result.questionResults)
     ? result.questionResults
@@ -3415,7 +3481,7 @@ function reviewedMistakesFromResult(result = {}, submission) {
           cause: item.errorStep || item.explanation || "教师复核确认后归档。",
           point: item.knowledgePoint || subject,
           severity: item.status === "partial" ? "partial" : "normal",
-          metadata: { questionNos: [String(item.questionNo || "").trim()].filter(Boolean) }
+          metadata: { questionNos: [String(item.questionNo || "").trim()].filter(Boolean), ...(sourceVersion == null ? {} : { sourceVersion }) }
         }))
     : [];
   return (explicitMistakes.length ? explicitMistakes : questionMistakes)
@@ -3433,6 +3499,7 @@ function reviewedMistakesFromResult(result = {}, submission) {
         submissionId: submission.id,
         sourceSubmissionId: submission.id,
         assignmentId: submission.assignmentId,
+        ...(sourceVersion == null ? {} : { sourceVersion }),
         reviewStatus: "teacher_reviewed",
         severity: mistake.severity || "normal"
       }
@@ -3594,6 +3661,10 @@ app.get("/api/bootstrap", requireDatabase, requireSession(config, ["student", "t
   const visibleAssignments = assignments.filter((assignment) => {
     const metadata = safeJson(assignment.metadata, {});
     if (req.session.role === "teacher" && metadata.teacherId && metadata.teacherId !== req.session.teacherId) return false;
+    if (metadata.workflowPublication) {
+      if (req.session.role !== "teacher" && metadata.draftReviewStatus !== "accepted") return false;
+      if (metadata.targetStudentId) return visibleStudentIds.has(metadata.targetStudentId);
+    }
     return (metadata.targetStudentId && visibleStudentIds.has(metadata.targetStudentId)) ||
       (metadata.targetGrade && visibleStudents.some((student) => student.grade === metadata.targetGrade)) ||
       assignment.submissions?.some((submission) => visibleStudentIds.has(submission.studentId));
@@ -3779,6 +3850,7 @@ function buildAssessmentStudentSignals(student) {
   for (const mistake of (student.mistakes || []).filter((item) => !item.masteryResolved).slice(0, 12)) {
     signals.push({
       type: "unresolved_mistake",
+      ref: mistake.id ? `mistake:${mistake.id}` : null,
       subject: mistake.subject || null,
       knowledgePoint: mistake.knowledgePoint?.name || safeJson(mistake.metadata, {}).point || null,
       prompt: mistake.prompt || null,
@@ -3791,6 +3863,7 @@ function buildAssessmentStudentSignals(student) {
     const grading = safeJson(submission.grading?.result, {});
     signals.push({
       type: "recent_grading",
+      ref: submission.id ? `submission:${submission.id}` : null,
       subject: submission.assignment?.subject?.name || safeJson(submission.assignment?.metadata, {}).subject || null,
       title: submission.assignment?.title || null,
       score: submission.grading?.score ?? grading.score ?? null,
@@ -3800,6 +3873,7 @@ function buildAssessmentStudentSignals(student) {
   for (const task of (student.tasks || []).slice(0, 6)) {
     signals.push({
       type: "recent_task",
+      ref: task.id ? `task:${task.id}` : null,
       subject: task.subject?.name || safeJson(task.metadata, {}).subject || null,
       title: task.title || null,
       status: task.status || null,
@@ -3828,7 +3902,7 @@ function assessmentContentContextFailure(contentContext, contentContextValidatio
   };
 }
 
-async function prepareAssessmentDraftInput(req) {
+async function prepareAssessmentDraftInput(req, { confirmedSignalsOnly = true } = {}) {
   const input = assessmentDraftInputFromRequest(req);
   try {
     Object.assign(input, normalizeTeachingPurpose(input));
@@ -3852,6 +3926,11 @@ async function prepareAssessmentDraftInput(req) {
   const database = await checkDatabaseStatus();
   if (database.ok && input.studentId) {
     const studentSources = await loadStudentProfileSources(input.studentId);
+    if (confirmedSignalsOnly && studentSources) {
+      studentSources.submissions = (studentSources.submissions || []).filter((submission) => submission.grading?.result?.archiveEligible === true &&
+        submission.grading.needsReview === false && submission.grading.result.needsTeacherReview !== true);
+      studentSources.mistakes = (studentSources.mistakes || []).filter((mistake) => mistake.metadata?.reviewStatus === "teacher_reviewed");
+    }
     input.studentSignals = buildAssessmentStudentSignals(studentSources);
   }
   const contentContext = database.ok
@@ -4051,7 +4130,11 @@ app.post("/api/assessments/generation-jobs", requireDatabase, requireSession(con
     title: readableText(input.title, `${input.subject || "教学"}${input.kind || "练习"}草稿`),
     targetLabel,
     request: assessmentGenerationJobRequest(input),
-    run: async ({ signal, setStage }) => {
+    workflowInput: {
+      request: assessmentGenerationJobRequest(input),
+      snapshot: { kind: input.kind || "练习", subject: input.subject || null, targetLabel }
+    },
+    run: async ({ signal, setStage, saveCheckpoint }) => {
       let assignmentId = null;
       let draftAssetId = null;
       const discard = () => discardAssessmentGenerationJob(assignmentId, draftAssetId);
@@ -4070,6 +4153,11 @@ app.post("/api/assessments/generation-jobs", requireDatabase, requireSession(con
           include: { subject: true, items: { orderBy: { orderIndex: "asc" } } }
         });
         if (!assignment) throw new Error("ASSIGNMENT_NOT_FOUND");
+        await saveCheckpoint?.("assessment-draft", {
+          assignmentId,
+          itemIds: assignment.items.map((item) => item.id),
+          itemCount: assignment.items.length
+        });
         const exported = input.purpose === "explanation"
           ? { asset: null, layoutValidation: null }
           : await exportAssessmentDraftForReview(req, assignment, { signal });
@@ -4100,6 +4188,20 @@ app.post("/api/assessments/generation-jobs", requireDatabase, requireSession(con
           assignmentId,
           draftAsset: exported.asset,
           layoutValidation: exported.layoutValidation,
+          workflowSnapshot: {
+            assignmentId: assignment.id,
+            kind: input.kind || null,
+            subject: input.subject || null,
+            targetLabel,
+            items: assignment.items.map((item) => ({
+              id: item.id,
+              orderIndex: item.orderIndex,
+              prompt: item.prompt,
+              answer: item.answer,
+              explanation: item.explanation,
+              metadata: item.metadata
+            }))
+          },
           message: "草稿已生成，等待教师审查。",
           discard
         };
@@ -4133,7 +4235,8 @@ app.post("/api/assessments/:assignmentId/draft-export", requireDatabase, require
   const metadata = safeJson(assignment.metadata, {});
   if (metadata.targetStudentId && !(await assertTeacherStudentScope(req, res, metadata.targetStudentId))) return;
 
-  const exported = await exportAssessmentDraftForReview(req, assignment);
+  if (!(await checkTeachingAssignmentAccess(req, res, assignment, teachingWorkflowAssignmentService))) return;
+  const exported = await exportAssessmentDraftForReview(req, assignment, { trustedWorkflow: metadata.workflowPublication != null });
   const generationPipeline = exported.generationPipeline;
   await auditEvent(req, {
     studentId: metadata.targetStudentId || null,
@@ -4148,7 +4251,7 @@ app.post("/api/assessments/:assignmentId/draft-export", requireDatabase, require
   res.json({
     ok: true,
     asset: exported.asset,
-    reviewStatus: "pending_teacher_review",
+    reviewStatus: generationPipeline.gates.teacherReviewStatus,
     layoutValidation: exported.layoutValidation,
     generationPipeline
   });
@@ -4168,6 +4271,8 @@ app.post("/api/assessments/:assignmentId/draft-review", requireDatabase, require
   }
   const metadata = safeJson(assignment.metadata, {});
   if (metadata.targetStudentId && !(await assertTeacherStudentScope(req, res, metadata.targetStudentId))) return;
+  if (!(await checkTeachingAssignmentAccess(req, res, assignment, teachingWorkflowAssignmentService))) return;
+  if (rejectPublishedAssignmentSourceMutation(res, assignment)) return;
   if (decision === "accept" && metadata.layoutValidation?.ok !== true) {
     return res.status(409).json({
       ok: false,
@@ -4228,6 +4333,7 @@ app.post("/api/assessments/:assignmentId/print-export", requireDatabase, require
   }
   const metadata = safeJson(assignment.metadata, {});
   if (metadata.targetStudentId && !(await assertTeacherStudentScope(req, res, metadata.targetStudentId))) return;
+  if (!(await checkTeachingAssignmentAccess(req, res, assignment, teachingWorkflowAssignmentService))) return;
   if (metadata.layoutValidation?.ok !== true) {
     return res.status(409).json({
       ok: false,
@@ -4268,6 +4374,9 @@ app.post("/api/assessments/:assignmentId/print-export", requireDatabase, require
     ok: false,
     reason: error instanceof Error ? error.message : String(error)
   }));
+  if (metadata.workflowPublication && analysisPdfResult.ok !== true) {
+    return res.status(503).json({ ok: false, error: "ASSESSMENT_ANALYSIS_PDF_UNAVAILABLE", message: "解析 PDF 未生成，本次正式导出尚未完成，请保留当前内容后重试。" });
+  }
   const analysisEvenPdf = analysisPdfResult.ok ? ensureEvenPdfPages(analysisPdfPath) : { pageCount: null, addedBlankPage: false };
   const analysisOutputFileName = analysisPdfResult.ok ? analysisPdfFileName : analysisHtmlFileName;
   const asset = paperExport.asset;
@@ -4883,18 +4992,9 @@ app.post("/api/grading/source-packages/dialogue", requireDatabase, requireSessio
     grade: targetGrade || normalized.package.grade || null,
     difficulty: optionalText(body.difficulty) || null,
     metadata: sourceMetadata,
-    items: normalized.package.questions.map((question) => ({
-      itemType: optionalText(question.itemType) || "question",
-      prompt: question.prompt,
-      answer: question.correctAnswer,
-      rubric: question.rubric || undefined,
-      metadata: {
-        score: question.maxScore,
-        analysisSteps: question.analysisSteps,
-        knowledgePoint: question.knowledgePoint
-      }
-    }))
+    items: gradingSourcePackageToAssignmentItems(normalized.package)
   });
+  const registeredSource = gradingSourcePackageForAssignment(assignment);
   await auditEvent(req, {
     studentId: studentId || null,
     feature: "grading-source-package",
@@ -4902,18 +5002,18 @@ app.post("/api/grading/source-packages/dialogue", requireDatabase, requireSessio
     metadata: {
       assignmentId: assignment.id,
       sourceId: normalized.originalSourceId || null,
-      fingerprint: normalized.package.fingerprint,
+      fingerprint: registeredSource.fingerprint,
       questionCount: normalized.package.questions.length
     }
   });
   res.status(201).json({
     ok: true,
     assignment: mapAssignment({ ...assignment, subject: assignment.subject || null, submissions: [] }),
-    gradingSource: gradingSourceReference(normalized.package),
+    gradingSource: gradingSourceReference(registeredSource),
     imported: {
       originalSourceId: normalized.originalSourceId || null,
       originalFingerprint: normalized.originalFingerprint || null,
-      fingerprint: normalized.package.fingerprint,
+      fingerprint: registeredSource.fingerprint,
       questionCount: normalized.package.questions.length
     }
   });
@@ -4932,6 +5032,7 @@ app.patch("/api/grading/workbench/:submissionId/dialogue-answer-package", requir
     return res.status(404).json({ ok: false, error: "WORKBENCH_NOT_FOUND", message: "未找到批改工作台记录。" });
   }
   if (!(await assertTeacherStudentScope(req, res, submission.studentId))) return;
+  if (rejectArchivedSubmissionMutation(res, submission)) return;
 
   const body = getBody(req);
   let imported = body.answerPackage || body.gradingResult;
@@ -4954,6 +5055,7 @@ app.patch("/api/grading/workbench/:submissionId/dialogue-answer-package", requir
   // assignment package canonical; the submission still retains the import
   // origin for audit and teacher review.
   if (!dialogueResultImport) {
+    if (rejectPublishedAssignmentSourceMutation(res, submission.assignment)) return;
     const assignmentMetadata = safeJson(submission.assignment?.metadata, {});
     await prisma.assignment.update({
       where: { id: submission.assignmentId },
@@ -5069,6 +5171,7 @@ app.patch("/api/grading/workbench/:submissionId/questions/:questionId", requireD
     return res.status(404).json({ ok: false, error: "WORKBENCH_NOT_FOUND", message: "未找到批改工作台记录。" });
   }
   if (!(await assertTeacherStudentScope(req, res, submission.studentId))) return;
+  if (rejectArchivedSubmissionMutation(res, submission)) return;
 
   const body = getBody(req);
   const currentResult = safeJson(submission.grading.result, {});
@@ -5165,6 +5268,7 @@ app.patch("/api/grading/workbench/:submissionId/answer-source", requireDatabase,
     return res.status(404).json({ ok: false, error: "WORKBENCH_NOT_FOUND", message: "未找到批改工作台记录。" });
   }
   if (!(await assertTeacherStudentScope(req, res, submission.studentId))) return;
+  if (rejectArchivedSubmissionMutation(res, submission)) return;
   const content = safeJson(submission.content, {});
   const currentPacket = safeJson(content.externalGradingRecognition, null);
   if (!currentPacket) {
@@ -5216,6 +5320,7 @@ app.post("/api/review/submissions/:submissionId/recognize", requireDatabase, req
     return res.status(404).json({ ok: false, error: "SUBMISSION_NOT_FOUND", message: "未找到提交记录。" });
   }
   if (!(await assertTeacherStudentScope(req, res, submission.studentId))) return;
+  if (rejectArchivedSubmissionMutation(res, submission)) return;
 
   const requestedForce = req.body?.force === true || req.query.force === "true";
   const processed = await recognizeAndGradeSubmissionRecord(submission.id, { force: requestedForce });
@@ -5266,6 +5371,7 @@ app.patch("/api/review/submissions/:submissionId/ocr", requireDatabase, requireS
     return res.status(404).json({ ok: false, error: "SUBMISSION_NOT_FOUND", message: "未找到提交记录。" });
   }
   if (!(await assertTeacherStudentScope(req, res, submission.studentId))) return;
+  if (rejectArchivedSubmissionMutation(res, submission)) return;
 
   const body = getBody(req);
   const content = safeJson(submission.content, {});
@@ -5314,6 +5420,7 @@ app.patch("/api/review/submissions/:submissionId/ocr", requireDatabase, requireS
 }));
 
 async function archiveSubmissionReview(req, res, submission, body = {}, action = "mark-submission-reviewed") {
+  if (rejectArchivedSubmissionMutation(res, submission)) return null;
   const currentResult = safeJson(submission.grading?.result, {});
   const content = safeJson(submission.content, {});
   const recognitionPacket = safeJson(content.externalGradingRecognition, null);
@@ -5359,7 +5466,8 @@ async function archiveSubmissionReview(req, res, submission, body = {}, action =
         select: { metadata: true }
       })
     : [];
-  const reviewedMistakes = filterNewReviewedMistakes(existingMistakes, reviewedMistakeCandidates, submission.id);
+  const sourceVersion = currentResult.workflowRevision ?? currentResult.sourceRevision ?? currentResult.gradingSource?.version ?? null;
+  const reviewedMistakes = filterNewReviewedMistakes(existingMistakes, reviewedMistakeCandidates, submission.id, { sourceVersion });
   if (reviewedMistakes.length) {
     await prisma.mistakeRecord.createMany({ data: reviewedMistakes });
   }
@@ -5585,7 +5693,7 @@ app.delete("/api/students/:studentId/access", requireDatabase, requireSession(co
 }));
 
 async function loadStudentProfileSources(studentId) {
-  return prisma.student.findUnique({
+  const student = await prisma.student.findUnique({
     where: { id: studentId },
     include: {
       accessCodes: { where: { status: "ACTIVE" }, take: 1 },
@@ -5604,6 +5712,7 @@ async function loadStudentProfileSources(studentId) {
       voiceInteractions: { orderBy: { occurredAt: "desc" }, take: 50 }
     }
   });
+  return loadCurrentTeachingEvidence(prisma, student);
 }
 
 function normalizeProfilePeriodType(value, fallback = "weekly") {

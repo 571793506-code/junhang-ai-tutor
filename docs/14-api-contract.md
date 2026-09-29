@@ -283,6 +283,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 将已生成内容导出为“内容审查 PDF 草稿”，只供教师打开 PDF 审查，不在 Web/小程序内展示完整题面。
   - 返回 `asset.url`、`reviewStatus=pending_teacher_review`、`layoutValidation` 和更新后的 `generationPipeline`。
   - `layoutValidation` 比较目标页数、HTML 预分页、浏览器测量页数和 PDF 实际页数；页数不一致时 `ok=false`，题目坐标清单同时标记为不可用，但仍保留草稿 PDF 供教师查看问题。
+  - 专项（focused）与多日（multi_day）按同一服务端打印计划计算实际目标页数，学生卷、解析卷和题目坐标清单读取同一答案包的每日目标；不自动补双面空白页。综合测评仍沿用既定2/4页目标。实际PDF页数与计算出的目标不同仍阻断正式导出，不能用实际页数反向覆盖目标来通过校验。
 - `POST /api/assessments/:assignmentId/draft-review`
   - 教师提交 `{ decision: "accept" | "reject" }`。
   - 只有 Assignment 中的 `layoutValidation.ok=true` 才允许 `accept`；否则返回 `409 ASSESSMENT_LAYOUT_INVALID`。`reject` 后前端按原要求重新生成新草稿；返回更新后的 `generationPipeline`。
@@ -447,6 +448,146 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 - Web 教师端默认显示登录校验页，通过 `POST /api/teacher-login` 后才能进入终端控制、学生权限、任务生成、试卷批改和档案计划。
 - 课堂平板端保留设备绑定入口，根据设备绑定码进入对应平板状态。
 - 为了方便演示，页面可以保留“示例账号进入”按钮；该按钮也必须调用真实登录接口，不能绕过权限校验。
+
+## Shared workflow API and CLI
+
+2026-09-11 接口层已实现，所有路由要求教师 Bearer 会话。`TEACHING_WORKFLOW_PERSISTENCE_ENABLED` 默认关闭，关闭或 Prisma Client 不具备新表模型时返回 `503 WORKFLOW_UNAVAILABLE`（归档路由为 `WORKFLOW_ARCHIVE_UNAVAILABLE`，作业发布路由为 `WORKFLOW_ASSIGNMENT_UNAVAILABLE`），不访问新增表。开启开关不能代替迁移验收。
+
+- `POST /api/teaching/workflows`：接收 `{requestKey,module,request}`，module 为 generation 或 grading；教师归属取 session，客户端 snapshot、ownerTeacherId、model、provider、prompt 和内部上下文字段不会进入创建器。createDraft 已在关闭的持久化开关后装配；缺少执行器的部署仍返回 `503 WORKFLOW_EXECUTION_UNAVAILABLE`，不创建空任务。持久化可用时，同 requestKey 的既有任务可只读重放。
+- `GET /api/teaching/workflows?module=generation|grading`：读取当前教师该模块最近至多 100 项任务，返回 `{ok:true,workflows:[{id,module,revision,status,request}]}`。不返回快照、内容、内部上下文或凭据；模块必须明确指定。未登录/非教师拒绝，服务未启用返回 503。Web 用它恢复对话已创建的任务，不能根据列表状态自动确认内容。
+- `GET /api/teaching/workflows/:id`：读取本教师当前版本。
+- `GET /api/teaching/workflows/:id/revisions/:revision`：读取正整数历史版本，返回原工作流 ID；历史内容不覆盖当前版本。
+- `POST /api/teaching/workflows/:id/commands`：接收 `{action,operationKey,expectedRevision,targetQuestionIds?,targetExplanation?,instruction?,patch?,restoreRevision?}`。支持接口动作 revise、confirm、restore、cancel；resume 尚未接通。restoreRevision 映射为服务层 revision。人工 patch 的 type 为 replace_question、replace_shared_material、replace_day 或 replace_explanation。
+- `POST /api/teaching/workflows/:id/archive`：单独提交 `{expectedRevision}`，只归档已确认且证据有效的批改版本。教师身份取 session，版本快照、学生、答案来源和分数由服务端读取；请求中的额外字段不能授权发布。首次成功返回 201，已成功版本重放返回 200，响应为 `{ok:true,archive:{id,workflowId,revision,currentRevision,status:"archived",replayed}}`，不返回内部快照或来源包。
+- `POST /api/teaching/workflows/:id/assignment`：单独提交 `{expectedRevision}`，把已确认生成版本发布为独立 Assignment。教师、题目、范围和来源取服务端版本；额外输入不能覆盖。首次返回 201，同版本重放返回 200，响应为 `{ok:true,assignment:{id,workflowId,revision,currentRevision,status:"assignment_ready",replayed}}`。不调用模型、不导出 PDF；讲解暂不支持。
+
+除列表、独立归档及作业发布路由外，响应格式为 `{ok:true,workflow:{id,module,revision,status,request,content,issues}}`；ok 表示成功取得任务状态，不表示内容已生成或已确认。content 使用题目及共享材料白名单，模型原始输出、内部配置和教师凭据不返回。request 仅保留教学业务字段；不会把完整 generationContext 作为客户端可写字段。409 表示版本或请求键冲突，客户端必须保留尚未提交的编辑内容；不能替换 expectedRevision 后自动覆盖新版本。
+
+创建契约（2026-09-14）：调用模型前以教师身份和 requestKey 的唯一索引登记任务。版本 1 为不可变请求占位，状态从 queued 进入 running；只有插入占位的请求可取得执行权。另一请求即使来自其他服务实例，也只读取同一个任务；同 key 改模块或原始请求返回 409，失败、取消和中断后的重试也不会自动重新调用模型。服务保留原始 request；服务器解析的 resolvedRequest 随校验通过的内容存入内部快照，subjectRef 随版本提交更新。
+
+模型结果经校验后追加版本 2，进入 ready_for_review，首次完成返回 HTTP 201。重复请求读到 queued/running 返回 202；读到完成、failed、needs_input、interrupted 或 cancelled 返回 200 和真实状态。没有内容的占位会返回 `issues[].code=WORKFLOW_CREATION_INCOMPLETE`，不能因 2xx、ok=true 或 CLI 退出码为 0 把它称为生成成功。客户端继续操作时读取返回的 revision，不假定首个草稿是版本 1。占位不能确认、修订或恢复成内容版本；未接通 resume 前，处理失败原因后须由教师主动用新 requestKey 发起新任务，不能自动换 key 重试。
+
+原始请求占位只证明任务已登记，不表示目标学生/资料范围已获授权。createDraft 仍须在模型调用前校验教学目标、资料权限及证据，接收服务端 workflow 和 AbortSignal；validateSnapshot 必须明确通过。执行失败保留 failed；结构不合格保留 needs_input；取消或进程中断后的迟到结果不能追加版本。登记任务及草稿仍不代表正式发布或归档。
+
+2026-09-14 创建器、局部修订器与模块校验适配器已在持久化开关后装配；开关仍关闭，尚未通过新增表与真实事务验收。缺少模块校验器的部署继续返回 `503 WORKFLOW_VALIDATION_UNAVAILABLE`，没有 runner 的自然语言修订不得宣称成功。cancel 按当前版本校验实际取消结果。现有生成/批改业务接口仍承担日常操作，尚未全部转入此工作流。创建与版本命令不直接发布答案、归档错题或导出正式 PDF；归档只能走独立发布路由及其门禁。
+
+模块快照校验（2026-09-14，开关后装配）：`createTeachingWorkflowValidator({resolveGradingSource})` 返回异步校验器。服务传入 actor、module、workflow、request、nextRevision，命令执行时还传 command 与 affectedQuestionIds。校验结果为 `{ok,issues,snapshot?}`；只有 ok=true 才采用返回的规范化 snapshot 并追加版本，兼容仅返回 ok=true 的既有测试校验器。生产执行适配器在此前增加实时权限、来源绑定和用途校验；不改变持久化开关或归档门禁。
+
+2026-09-24 补齐生成证据一致性：保存快照的 `generationContext.teaching`、`target`、`studentSignals` 与服务端重新解析后的规范化证据一同比对。错题答案、错误描述、学习信号增删等变更会阻止新修订、确认或恢复，命令返回 `409 WORKFLOW_EVIDENCE_CHANGED`。自然语言修订在模型调用前及结果提交前均核验；创建期间变化保留版本1和 needs_input，不保存迟到草稿。缺失历史 studentSignals 字段不等于服务端已验证的空列表。读取历史版本、重放原成功命令仍保留原确认；这不是撤销历史教师确认。客户端保留编辑和旧版本，说明来源变化，等待教师决定按新证据新建任务，不静默刷新快照或自动换键重试。此验证仍在关闭的持久化开关后，合成 HTTP/CLI 回归不代表真实数据库事务验收。
+
+- 生成草稿校验教学用途、题号/ID、答案、分值、解析、评分依据、考点、易错点及资料/日期引用；不得用模型返回的 explanation 绕过请求中明确的用途。测评内容每次创建、修订、确认和恢复均按新版本重建 gradingSourcePackage，清除旧答案键，题目 context 将选项、图形、共享材料及日期内容纳入指纹。讲解草稿单独检查概念、步骤、例题及易错点，不建立试卷答案包。
+- 批改来源只由服务端 resolveGradingSource 解析，不能用上传快照作为权威答案。除指纹外校验来源版本、题目完整性及总分；逐题分数必须符合可信满分和结果状态，覆盖题号必须一致，合计由服务端重算。null 作答代表缺失证据；明确识别出的空字符串可以表示未作答。uncertain 不能确认或形成最终分，缺来源时也不能保留猜测的标准答案或满分值。来源指纹变化后拒绝沿用旧版本确认，工作流内全题确认仍保持 archiveEligible=false。
+- 创建时先清除模型携带的题目确认字段，包括 items/questionResults 兼容输入；确认人由命令服务写入。内容和依赖变化撤销受影响题目的确认，其他已确认题目保持原状态。归档发布仍需独立验证可信教师确认、资料授权和证据版本。
+
+上述校验只证明结构、数值和版本一致性，不证明答案语义正确、图片识别质量或教师要求已全部满足。归档权限/来源锁定、可信确认解析、执行器证据绑定与聚合替代已实现，外部参考答案登记仍需补齐；旧导入/导出 context 兼容见 9 月 15 日记录。讲解 HTTP 视图和编辑/确认已于 9 月 17 日实现，工作台界面仍未接入；不能将服务层校验通过视为 Web 可用性验收。
+
+归档准备与确认复用（2026-09-14，尚未启用生产归档写入）：
+
+- `buildTeachingWorkflowArchive` 从已授权、逐题确认的服务端工作流快照准备 `teaching-workflow-archive-v1` 记录，要求注入可信答案来源解析器，再次校验评分。记录绑定归档 submission ID、工作流 ID/版本、学生、教师、来源指纹、确认时间和完整快照指纹；新版本保存 supersedesArchiveIds，旧记录不修改。返回的是待持久化记录，哈希不是授权，函数不写库、不发布。
+- 创建批改工作流时可装配 `resolveConfirmedArchive`，使用原请求的 submissionId、studentId 和当前教师身份另行查库。服务只从该可信返回值复用确认，模型/上传快照中的 workflowArchive 会移除。教师、学生、归档 ID、来源或顶层证据不匹配均不复用；相同证据下逐题比较内容，修改题目不继承确认。复用后再跑模块校验、重算分数，archiveEligible 仍为 false。解析器和草稿执行器已在持久化开关后装配；旧对话 JSON 导入仍保持逐题待复核，不能把上传 JSON 的哈希或确认人作为可信存档。
+- 持久化适配约定：每个归档版本使用独立 Submission；`content.workflowArchive` 存内部版本记录，`grading.result` 保留相同的规范化 questions/来源包，并且只有归档事务成功后才能标记 archiveEligible；错题 metadata.workflowArchiveId 与 sourceSubmissionId 指向该版本。现有 archiveSubmissionReview 尚未生成这种记录，不允许仅添加标记冒充完整发布。
+- `selectCurrentTeachingEvidence` 已接入周/月档案及阶段报告，在周期过滤前选择当前版本并排除被替代的批改和错题。新版零错题也能替代旧错题。不同学生、记录篡改、版本分叉、缺失祖先或不一致的错题来源不进入当前证据；未确认新版不能取代既有确认版。未带新版本记录的历史数据保持原语义，不猜测其替代关系。
+- 档案源读取在最近 80 条提交之外，额外按 studentId 和 JSON schema 标记读取该学生所有版本归档，避免旧版本因窗口截断重新被计入。此查询使用既有 Submission JSON 字段；代码已接入，实际 PostgreSQL 查询及规模性能仍待数据库阶段验收。这里只更新未来生成的档案证据，不改写历史已发布档案。
+
+归档事务实现（2026-09-14，API/CLI 与开关后的服务端装配已实现，生产尚未启用）：`createTeachingWorkflowArchiveService` 提供内部 `publish({actor,workflowId,expectedRevision})`，不接收客户端快照、分数、学生或来源覆盖。服务必须装配 `authorizeStudent` 和 `resolveArchiveEvidence`，缺失时返回 WORKFLOW_ARCHIVE_UNAVAILABLE；HTTP archive 路由与 CLI archive 命令共用该服务。
+
+- 仓储 `createTeachingWorkflowArchiveRepository` 在单个 Prisma 事务中用同值 UPDATE 锁定本教师工作流行，再读取头状态和不可变版本。新归档必须匹配 expectedRevision、没有在途操作并处于 ready_for_review/confirmed。锁与现有修订、取消共用工作流行；不增加内容版本、不改写旧快照。
+- 归档 ID 由工作流 ID 和内容版本确定。已成功版本先核对当前教师学生权限及保存记录的身份/完整性，再重放原归档；不重新解析来源、不重复写错题。较旧版本重放返回原 revision 和 currentRevision，不声称它仍是当前版本。不存在成功归档的旧版请求返回冲突。
+- 新归档同时创建独立 Submission、嵌套 GradingResult，以及从校验后的 wrong/partial 题目派生的错题。各错题有固定 ID，绑定同一个 workflowArchiveId/sourceSubmissionId。任意一步或事务提交失败均不返回 archived；仓储不自动重试。新版零错题仍写入版本归档和祖先关系，旧错题由聚合器排除，旧数据不删除。
+- `authorizeStudent({actor,studentId,workflow,tx})` 必须检查实时教师学生权限。`resolveArchiveEvidence({actor,workflow,snapshot,tx})` 必须通过事务客户端读取并锁定/绑定可信来源版本、原提交与 assignment 关系，完成外部图片/参考答案复核，再返回 `{ok:true,studentId,assignmentId,subject,sourcePackage}`。该回调不得调用模型或产生外部副作用；字段来自服务端查询，不能将上传 JSON 的 ok=true 当作证据。来源包仍须通过模块校验。
+- 版本归档使用保留 ID 前缀 teaching-archive-，旧导入答案、逐题编辑、答案来源修改、OCR 修改/重识别、mark-reviewed 和归档入口会返回 `409 WORKFLOW_ARCHIVE_IMMUTABLE`，提示在工作流修订后另建版本。后台识别和失败处理也不能覆盖版本归档。标记损坏但保留 ID 的记录仍受保护；普通历史提交保持原流程。
+
+`createTeachingWorkflowArchiveResolvers({prisma})` 已提供生产权限与来源查询实现：
+
+- 教师必须为学生负责人或仍有效的任课教师。原提交必须属于该学生并匹配请求 assignmentId；生成来源包从服务端 Assignment.metadata 读取并校验指纹及 sourceId，缺少登记的外部答案包不能用学生作答补造。
+- 同发布事务按 Assignment、Submission、GradingResult 顺序锁定证据后重读。Assignment/GradingResult 使用 FOR SHARE，Submission 使用 FOR UPDATE，避免尚无 GradingResult 时并发首次插入改变证据。真实 PostgreSQL 锁行为尚未验收。
+- `resolveGradingContext` 返回 `archiveEvidence`，包含原提交、学生、作业、来源指纹、原始证据哈希及外部材料类型/识别包；后续服务端草稿执行器必须把它绑定到快照，不能采用模型或上传 JSON 自带的授权字段。归档时重新比较，图片、OCR、批改来源或答案变化均拒绝旧绑定。
+- 外部材料要求非空有效页与题目、可用图片质量、教师确认或选择的参考答案及全题覆盖。可信工作流逐题确认可替代旧识别包中重复的逐题确认，但不能跳过图片质量和独立答案来源校验。photo-upload/photo-upload-batch 来源即使缺少 materialType 仍按外部材料处理。
+- 从有效不可变归档继续操作时保留原始证据绑定及外部识别包，避免包装成新提交后丢失图片门禁；缺少完整绑定的旧版本不自动获得发布资格。`resolveConfirmedArchive` 仅返回当前教师的可信归档，确认复用还需服务层逐题与证据比较。
+- 归档响应采用独立字段白名单并验证状态、版本和重放标记；证据不足/记录无效返回 422，Prisma P2034 映射为 409 WORKFLOW_VERSION_CONFLICT，不自动重试；未知异常仅返回通用错误。
+
+server.js 已在现有持久化开关后装配解析器、发布器、创建/修订执行器与校验器；仍须完成旧业务适配，再验证数据库迁移、实际行锁、并发重放、事务回滚和 JSON 来源查询。归档事务测试使用串行、写时复制的内存适配器，解析器测试使用查询替身，本地 HTTP/CLI 测试不证明 PostgreSQL 的实际隔离行为。没有开启持久化开关、真实发布或修改历史正式资产。
+
+工作流执行适配（2026-09-14）：
+
+- 生成请求由调用方根据已确认需求填入 subject、grade/targetGrade 或 studentId、kind、requirement；purpose 默认 comprehensive，focused 必须带 requestedItemTypes，可带 requestedItemCount，multi_day 的每个 dayPlan 元素使用 requestedItemCount/requestedItemTypes。题量不再被 HTTP 白名单丢弃；days 视图中的 questionCount 是展示字段，不代替请求契约。执行器不猜测缺少的教学条件，也不将客户端模型配置或上下文当作可信输入。
+- 生成目标解析器先检查教师学生权限、可接收新工作状态及学生年级，再复用 prepareAssessmentDraftInput 的教材审批链；本入口仅采纳确认过的批改/错题信号。调用 draftAssessmentService 时固定 persist:false，不直接写 Assignment、模型运行表或正式资产。模型不可用、动态兜底或审查不通过不能成为 ready_for_review 的内容版本。
+- 模型生成 schema 明确 rubric；工作流调用缺少评分依据时使用现有受限修复槽，不追加独立审查。适配器把评分元数据、dayId 和阅读材料转为稳定 questions/days/sharedMaterials，最终由模块校验重建来源包。
+- 批改从可信原提交的 OCR 题目或外部识别包提取作答，标准答案来自登记的来源包；源记录缺题目时要求补齐，不在本入口重跑图片 OCR 或猜造答案。gradeSubmissionService 固定 persist:false，服务器绑定 archiveEvidence；有效版本归档继续操作时直接读取原快照，再由服务层验证并复用确认，不再次调用模型。
+- 自然语言 revise 可以只提交 targetQuestionIds 与 instruction，不必同时提交一个无变化 patch。生成只发送选中题目及关联材料/日期，使用共享 runTeachingTask；批改只把选中题目及对应参考答案送入 gradeSubmissionService，明确客观题本地比对、主观题走共享模型，teacherContext 携带本次修改要求。手工修正仍提交完整显式 patch；修改任何版本均需 expectedRevision/operationKey。
+- 生成上下文和批改证据在修订前及最终校验时再次读取；来源变化、取消、错误题号或不完整输出不能提交新版本。请求/上下文缺失在创建占位保留 needs_input，不调用模型；执行故障保留 failed。运行中的证据复查不等于真实数据库提交时的隔离验证，正式归档仍由独立事务重新校验。
+- 仍未完成：图片工作台接入、外部答案来源登记补齐、两个 Web 工作台，以及真实 PostgreSQL/OCR/模型/教学质量验收。已确认版本到 Assignment/导出、讲解 HTTP 视图及编辑/确认已于 2026-09-17 在关闭的开关后实现，尚未启用；新增入口暂不能代替日常所有旧业务入口。
+
+旧来源导入与批改上下文衔接（2026-09-15）：
+
+- `normalizeImportedGradingSourcePackage` 保留每题 `context`，标准答案包在不更换来源身份时经 JSON 往返保持版本、材料和指纹。context 的内容变化参与完整性校验；导入仍是重新规范化内容，不能凭原文件指纹或确认字段取得服务器授权。
+- `gradingSourcePackageToAssignmentItems` 把来源题号存入 item.metadata.sourceQuestionNo，上下文存入 sourceContext；选项、图形、阅读材料、每日标识与题型映射到已有打印字段，不混入导入的复核扩展。Assignment.orderIndex 仍表示列表顺序，学生卷、解析卷和布局清单使用来源题号。布局清单同步 context；本轮验证 HTML/JSON 结构，不代表 PDF 页数或视觉验收通过。
+- `POST /api/grading/source-packages/dialogue` 登记为新的 Assignment，重新建立来源 ID 和版本 1；原文件身份、版本与指纹仍保留在导入来源记录中。响应 gradingSource 和 imported.fingerprint、审计记录均使用实际保存的答案包指纹。新登记不是原工作流版本的直接发布，也不继承文件里的教师确认。
+- 旧图片批改输入经 `submission-grade-input.js` 组装，向共享批改服务传递完整权威答案包和上下文；Assignment 来源优先于提交内的旧副本。局部重批重建选中题目来源包时保留其 context，不带入无关题目的材料。数字 0、布尔 false 标准答案在 Assignment 保存时不再被当作空值丢弃。
+- 此批次补齐既有入口的上下文兼容基础；版本直接发布为 Assignment、讲解视图的后续实现见下节。Web 工作台仍待后续实现，迁移、新持久化开关与真实 PostgreSQL 验收继续后置。
+
+已确认生成版本衔接（2026-09-17，持久化开关仍关闭）：
+
+- `createTeachingWorkflowAssignmentService` 使用存储的不可变版本，核对逐题教师确认、重建来源包一致性；首次发布还执行生产快照校验并重读教学上下文。上传 JSON 中的确认标记不构成授权。未确认返回 `422 WORKFLOW_CONFIRMATION_REQUIRED`，记录或来源不一致返回 `422 WORKFLOW_ASSIGNMENT_INVALID` / `WORKFLOW_SNAPSHOT_INVALID`，服务未装配返回 `503 WORKFLOW_ASSIGNMENT_UNAVAILABLE`。
+- 仓储在同一 Prisma 事务中锁定工作流行，要求首次发布版本为当前头、无在途操作且状态可发布；不满足返回 `409 WORKFLOW_VERSION_CONFLICT`。Assignment ID 由工作流和版本确定，同版本并发、重启或主动重放不重复创建；旧版已发布记录可在当前权限核验后重放，未发布旧版不能越过当前头。Prisma P2034 映射为 409，不自动重试。真实 PostgreSQL 行锁及回滚仍待验收。
+- 发布时重新绑定来源包 sourceId 为 Assignment ID，保留版本和题号；内部 workflowPublication 保存原始/发布来源指纹，题目投影保留 context 和 answerFormat。新版本生成独立作业，旧题目和旧导出文件不覆盖。首次发布检查学生可接收新任务及年级；重放仍检查当前教师学生权限，学生停用不抹去已发布历史。学生专属作业不能因同年级而出现在同学列表。
+- 发布仅表示内容已由教师确认，初始 finalExportAllowed=false 且不伪造 layoutValidation。`POST /api/assessments/:assignmentId/draft-export` 先核对存储的工作流绑定与内容，预览保留已有内容确认；`print-export` 仍要求排版通过，且再次检查实际学生卷排版。解析 PDF 生成失败返回 `503 ASSESSMENT_ANALYSIS_PDF_UNAVAILABLE`，不能标记正式导出完成。
+- 这些导出检查只读取既有发布版本，不得创建或重新发布作业。旧 draft-review 的 accept/reject 和旧 dialogue-answer-package 的答案来源导入对发布版返回 `409 WORKFLOW_ASSIGNMENT_IMMUTABLE`，应在工作流中修订并确认新版本；批改结果导入不因此被禁用。未绑定新工作流的历史作业继续原流程。
+- 本批验证使用实际仓储/服务配合内存事务适配器、本地 HTTP/CLI 和抽取的实际导出路由配合渲染替身。现有运行实例未重启；其 link-guard 结果不证明新适配器已运行，不替代新表事务、真实模型或 PDF 视觉验收。
+
+讲解视图与命令（2026-09-17，开关后实现，Web 未接入）：
+
+- purpose=explanation 返回 `content.explanation={concept,steps,workedExamples:[{prompt,answer,analysisSteps}],commonMistakes,reviewedByTeacher?}`；仅教师会话可读。正文与例题使用字段白名单，确认身份、模型/调试字段不出现在响应。讲解规范化后 questions/sharedMaterials/days 为空，不保留总分、旧答案包或 parsed 副本。
+- 使用既有 commands 路由与 CLI command，显式指定 `targetExplanation:true`，不能混用 targetQuestionIds，测评/批改任务不能提交讲解动作。自然语言修订例：`{"action":"revise","operationKey":"explanation-edit-1","expectedRevision":2,"targetExplanation":true,"instruction":"用小棒说明进位，保留原有例题"}`。
+- 手工修订提交 `patch:{type:"replace_explanation",value:{concept,steps,workedExamples,commonMistakes}}`，value 为完整讲解内容；仍须 targetExplanation=true、版本与操作键。缺概念、步骤、例题解析或易错点不提交新版本。确认例：`{"action":"confirm","operationKey":"explanation-confirm-1","expectedRevision":3,"targetExplanation":true}`，仅在教师明确确认整份讲解后使用。
+- 创建与修订清除模型/客户端自带确认，即使伪造当前教师 ID 也不继承。确认身份仅由服务端会话写入；每次修订撤销整份讲解确认。restore 复用既有 restoreRevision 契约，追加新版本，并在实时权限及教学证据校验通过后保留原服务端确认；不改写历史。顶层 ready_for_review 是工作流状态，内容是否确认读取 explanation.reviewedByTeacher。
+- 自然语言修订只走共享 generation 管线，发送讲解正文、教师要求和服务器上下文，最多一次受限修复；手工修改/确认/恢复不调用模型。失败、来源变化或取消保留原内容版本，不自动重试；旧 expectedRevision 和同 key 改内容返回 409。非法目标返回 WORKFLOW_TARGET_SCOPE_INVALID / WORKFLOW_COMMAND_INVALID，非法讲解 patch 返回 WORKFLOW_EXPLANATION_PATCH_INVALID；内容不完整返回 WORKFLOW_SNAPSHOT_INVALID。
+- 讲解确认不调用 assignment/archive，不建立测评答案包或正式 PDF；讲解发布/打印仍未实现。HTTP/CLI 与合成模型测试不证明真实模型教学质量或 PostgreSQL 隔离。
+
+CLI 使用已有教师登录返回的 sessionToken，本地 JSON 为 `{ "sessionToken": "..." }`。会话文件放在用户私有目录，设置 `TEACHING_SESSION_FILE` 指向该文件，不纳入 Git。设置 `TEACHING_API_BASE_URL` 为 API origin，例如 `http://127.0.0.1:8787`；不能包含用户名、密码、路径或查询参数。CLI 不自动登录、不读取其他应用凭据、不打印会话、不跟随重定向，也不自动重试写操作。
+
+```powershell
+node scripts/teaching-workflow.mjs create --input request.json
+node scripts/teaching-workflow.mjs get --id WORKFLOW_ID
+node scripts/teaching-workflow.mjs get --id WORKFLOW_ID --revision 1
+node scripts/teaching-workflow.mjs command --id WORKFLOW_ID --input command.json
+node scripts/teaching-workflow.mjs archive --id WORKFLOW_ID --input archive.json
+node scripts/teaching-workflow.mjs assignment --id WORKFLOW_ID --input assignment.json
+```
+
+仅在教师已明确确认所选题目时使用确认命令，例如 `{ "action":"confirm", "operationKey":"teacher-confirm-unique-id", "expectedRevision":2, "targetQuestionIds":["q1"] }`。同次操作保留 operationKey，新的操作使用新 key。对话新增的资料需先登记并审批，后续由服务端接入任务上下文，不得只写在聊天文本中作为已入库证据。
+
+教师明确要求归档后，先 GET 确认可归档的当前版本，再以 `archive.json` 的 `{ "expectedRevision": 3 }` 提交独立 archive 命令。工作流 confirm 不自动触发 archive。归档幂等键由工作流/版本派生，不使用 operationKey；主动重放同次归档应保留原 expectedRevision。409 后先查看当前版本和未提交修改，不能自动改用新版本重发。CLI 只输出已校验的归档摘要，不打印来源证据、会话或内部错误。
+
+发布已确认生成内容时，先 GET 当前版本，再以 `assignment.json` 的 `{ "expectedRevision": 3 }` 调用 assignment；返回 ID 用于既有 draft-export / print-export，不能把 assignment_ready 说成 PDF 已完成。已发布同版本重放保留原 expectedRevision；修改内容需修订、重新确认并发布新版本，不用旧 draft-review 重写确认。该命令沿用同一教师会话与安全摘要输出，不自动重试。
+
+版本命令重放必须同时保留原 `expectedRevision`、动作和内容。服务端持久化 SHA-256 命令指纹；同 key 不同命令或缺少可信指纹的旧记录返回 409，不会重新调用模型。已完成修订/确认/恢复可以重放原版本；原版本已不是当前头时返回 `historical`，继续修改前须重新 GET 当前版本。运行中的重复请求返回 409。失败操作不会自动重试，处理失败原因后使用新 key；当前不提供完整失败操作历史账本，也不将 cancel 当作新增内容版本。
+
+`revise` 包含非空 `instruction` 时调用对应执行器；批改识别修正也调用共享批改服务，仅处理目标题，客观题本地比较、未解决题按既有策略调用模型。纯评分/解析或生成内容的完整 patch、确认和恢复不调用模型。题目、材料和日期 patch 的 value 必须保留目标 `id` 或 `dayId`；讲解 patch 使用完整讲解结构，不虚构题号。题目模型修订不得改变题号、所属日期和共享材料引用。输入或执行器缺失会在启动操作前拒绝，不把已有草稿改成失败状态。
+
+修订服务必须装配仓储的操作查询、begin/end 和版本提交能力。新修订使用空检查点；既有队列恢复仍保留已完成单元。cancel 成功后，同一服务实例把 AbortSignal 传给执行器；跨进程取消及忽略 signal 的执行器由持久化状态和 operationKey 拒绝迟到提交。信号传递不等于已验证真实供应商终止计费；生产 runner 接通后仍需验收。上述契约目前通过内存 Prisma 适配器上的实际仓储/服务及本地 HTTP/CLI 验证，不能替代 PostgreSQL 事务或模型质量验收。
+
+接口和 CLI 使用本地临时 HTTP server、合成教师会话及内存 repository 验证。这证明接口契约与权限路径，不证明 PostgreSQL 事务、真实模型质量或现有运行实例已加载新代码。
+
+生成 Web 衔接（2026-09-17，本节更新此前“两个工作台未接入”的阶段状态）：教师端“生成打印 → 持续编辑工作台”已接入上述列表、创建、读取、命令与 Assignment 发布契约；旧“原有生成与打印”入口保留。组件仅组装教学请求与动作，不选择模型、不拼接核心 prompt。前端缓存仅包含按教师区分的最后任务 ID，不缓存题目或确认状态。
+
+- 可查看题目/解析/共享材料/每日目标或独立讲解，提交单题自然语言修改和完整手工 patch，明确确认所选题/全部题/整份讲解。服务端撤销受影响内容的确认；手工分值保持不变，图形仍需在 PDF 预览核对。
+- expectedRevision 冲突保留本地文本；刷新不自动覆盖编辑，也不自动用新版本提交。历史只读，恢复追加版本。取消仍受服务端限制：保留内容可读，不能恢复或 resume 已取消任务，继续须主动新建。
+- 内容确认、PDF 预览与正式两卷导出分开；排版失败不能正式导出，讲解不显示正式导出能力。后端未加载列表路由或返回 WORKFLOW_UNAVAILABLE 时，显示暂未启用并提供旧入口。
+- `check:web:teaching-generation` 验证实际浏览器、HTTP 工作流和 CLI 客户端；工作流使用合成模型输出与内存 Prisma 适配器。PDF 响应使用测试替身，仅证明 UI 门禁，不能证明实际排版。真实 Web 登录页已渲染验证，教师页面切换采用拦截 API 的合成登录，不提交真实凭据或写入正式数据。
+
+本轮未重启既有 API，未执行新表迁移，未启用 TEACHING_WORKFLOW_PERSISTENCE_ENABLED。Web 启动成功不等于新持久化链路可用于日常业务；批改工作台接入进度见下节，真实数据库/模型质量验收仍待完成。浏览器包通过 core 的 browser 入口复用安全契约，source package 哈希仍在 Node 入口计算，不为前端添加密码学替代实现。
+
+批改 Web 衔接（2026-09-17，Task 8，开关保持关闭）：
+
+- 教师端“批改复核 → 持续批改与版本”接入相同 list/create/get/commands/archive API；保留原上传、来源登记、批次筛选和逐题复核入口。服务未启用的 404/503 显示可返回旧入口的提示，不伪装成功。
+- 批改 WorkflowView 增加 `content.pages`，仅包含 pageNumber/imageUrl/fileName/imageRefs/cropRef/qualityStatus；题目返回置信度、图片/裁剪引用、bbox 和服务端派生的 recognitionCorrectedByTeacher。原始识别修正凭据不返回浏览器。仅在图片、页码、裁剪空间和单位坐标范围匹配时绘制题目区域。
+- `content.gradingSummary={score,confirmedScore,totalScore,unresolvedCount,confirmedCount}` 由服务端逐题汇总。未可靠识别作答保持 null，页面显示待核对；不会用空字符串或零分补齐。
+- 识别修正命令为 `{action:"revise",operationKey,expectedRevision,targetQuestionIds:[id],patch:{type:"correct_recognition",questionId:id,value:{studentAnswer}}}`。studentAnswer 必须为字符串，空字符串表示教师核对确为空白。服务端固定题干、原置信度、图片和裁剪坐标，建立内部修正凭据，仅重批目标，再重新校验证据绑定。HTTP 不接受客户端伪造置信度或凭据；replace_question 改变学生作答也强制重批。
+- 新建批改草稿和逐题重判保留内部 observedWork、页码、图片/裁剪引用及可信题型；模型只接收目标题的过程与来源。评分修改不删除或接受客户端覆盖原过程证据。未知置信度保持 null；教师修正凭据可为本次判分提供有效可信度1，但不能改写保存的OCR置信度，也不自动完成评分确认。此修正复用同一API供Web与对话使用，持久化开关状态不变。
+- 手工评分仅改变当前题结果与解析；自然语言重判仅携带当前题 ID 和要求。受影响题取消确认，其他题保持未变化的可信确认。确认只作用于明确检查的当前题；归档另发 expectedRevision，由事务门禁判断。可信服务端归档的确认可复用，无需重复模型调用。
+- 未保存编辑阻止切换任务或题目；409 后保留文本并要求刷新比较，窄屏区域切换保留编辑。历史只读，恢复追加版本，不修改已归档记录。浏览器只缓存按教师隔离的任务 ID，不把本地文本或勾选状态当成服务器确认。
+- `npm.cmd run check:web:teaching-grading` 使用现有 Playwright/Edge，实际教师页面验证 multipart 上传与 404/503 回退，临时工作台经真实 HTTP/CLI 服务验证单题修正、重判、评分、确认和归档。图片/OCR/模型均为合成样本，事务为内存适配器；不证明真实 OCR、模型质量或 PostgreSQL 事务通过。
 
 ## 2026-07-16 学生共享英语词典
 

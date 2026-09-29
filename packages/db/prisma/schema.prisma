@@ -429,6 +429,44 @@ model Assignment {
   submissions Submission[]
 }
 
+model TeachingWorkflow {
+  id              String   @id
+  ownerTeacherId  String
+  module          String
+  subjectRef      String?
+  requestKey      String
+  currentRevision Int      @default(1)
+  status          String
+  request         Json
+  checkpoint      Json?
+  activeOperationKey String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  revisions       TeachingWorkflowRevision[]
+
+  @@unique([ownerTeacherId, requestKey])
+  @@index([ownerTeacherId, status])
+}
+
+model TeachingWorkflowRevision {
+  id                 String          @id @default(cuid())
+  workflowId         String
+  revision           Int
+  baseRevision       Int
+  operationKey       String
+  commandFingerprint String?
+  operation          String
+  actorTeacherId     String
+  snapshot           Json
+  affectedQuestionIds Json
+  createdAt          DateTime        @default(now())
+  workflow            TeachingWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@unique([workflowId, revision])
+  @@unique([workflowId, operationKey])
+  @@index([actorTeacherId])
+}
+
 model AssignmentItem {
   id           String     @id @default(cuid())
   assignmentId String
