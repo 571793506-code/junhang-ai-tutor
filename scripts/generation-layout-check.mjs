@@ -115,10 +115,12 @@ export function evaluateGenerationLayoutPdf(pdf = {}) {
   const questionText = stripTemplateGuidanceText(text);
   const pages = Number(pdf.pages || 0);
   const kind = inferKind(name, text);
-  const subject = inferSubject(name, text);
+  let subject = inferSubject(name, text);
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const plainCalculationSheet = subject === "数学" && /数学.*(?:专项|计算)练习$/.test(lines[0] || "") && lines.length > 1 &&
-    lines.slice(1).every((line) => /^\d+[.、]\s*[0-9\s.+＋\-−－×÷*/()（）\[\]＝=]+$/.test(line));
+  const calculationTitle = /(?:数学.*(?:专项|计算)练习|计算.*练习)(?:[（(][^）)]*[）)])?$/.test(lines[0] || "");
+  const plainCalculationSheet = (!subject || subject === "数学") && calculationTitle && lines.length > 1 &&
+    lines.slice(1).every((line) => /^\d+[.、]\s*[0-9\s.+＋\-−－×÷*/()（）\[\]［］＝=]+$/.test(line));
+  if (plainCalculationSheet) subject = "数学";
   const purpose = plainCalculationSheet || /(?:^|\n)\s*专项练习\s*·\s*A4\s*·\s*第/.test(text) ? "focused"
     : /(?:^|\n)\s*每日练习\s*·\s*A4\s*·\s*第/.test(text) ? "multi_day" : "comprehensive";
   const targetPages = purpose === "comprehensive" ? expectedStudentPages(kind) : null;

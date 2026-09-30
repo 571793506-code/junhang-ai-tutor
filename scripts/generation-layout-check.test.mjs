@@ -16,6 +16,18 @@ test("plain math calculation worksheets need no decorative header but still reje
   assert.equal(evaluateGenerationLayoutPdf({ ...base, text: text.replace("专项练习", "单元试卷") }).ok, false);
 });
 
+test("calculation titles without the subject label and full-width brackets retain focused layout checks", () => {
+  const text = "四年级计算专项练习（验收稿）\n1. 48＋18×4\n2. （156－84）÷6\n3. 240÷（18＋12）＋7×6\n4. 360÷［（27－15）×3］＋48÷6－5";
+  const base = { name: "workflow-print.pdf", text, pages: 1,
+    pageMetrics: [{ text, bottomBlankMm: 33.5, drawingCount: 12 }] };
+  const checked = evaluateGenerationLayoutPdf(base);
+  assert.equal(checked.ok, true);
+  assert.equal(checked.detail.purpose, "focused");
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, pages: 2, pageMetrics: [...base.pageMetrics, { text: "", bottomBlankMm: 297 }] }).ok, false);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, text: text.replace("计算专项练习（验收稿）", "单元试卷") }).ok, false);
+  assert.equal(evaluateGenerationLayoutPdf({ ...base, text: text.replace("48＋18×4", "阅读下面的短文") }).ok, false);
+});
+
 test("purpose-specific pages can be compact but cannot hide a blank page or overflow", () => {
   const base = { name: "数学练习-draft-review-test.pdf", pages: 1, text: "专项练习 · A4 · 第1/1页\n1. 用竖式计算24+18", pageMetrics: [{ bottomBlankMm: 90, text: "用竖式计算", drawingCount: 0 }] };
   assert.equal(evaluateGenerationLayoutPdf(base).ok, true);

@@ -117,6 +117,38 @@ test("formal workflow export cannot report completion when the answer PDF render
   assert.doesNotMatch(JSON.stringify(body), /PRIVATE/);
 });
 
+test("formal analysis export keeps adaptive pages and preserves comprehensive duplex padding", async () => {
+  for (const purpose of ["focused", "multi_day", "comprehensive"]) {
+    let body; let savedAnalysis; let paddingCalls = 0;
+    const assignment = { id: "a1", title: "练习", metadata: { purpose, draftReviewStatus: "accepted", layoutValidation: { ok: true } } };
+    const route = routeFromServer("/api/assessments/:assignmentId/print-export", {
+      prisma: {
+        assignment: { findUnique: async () => assignment, update: async () => assignment },
+        generatedAsset: { create: async ({ data }) => { savedAnalysis = data; return { id: "analysis", ...data }; } }
+      },
+      teachingWorkflowAssignmentService: {},
+      normalizeGeneratedHtml: (x) => x, answerAnalysisHtml: () => "<html>analysis</html>", storageGeneratedRoot: () => "/fake",
+      fs: { mkdirSync: () => {}, writeFileSync: () => {} }, path: { join: (...parts) => parts.join("/") },
+      exportAssessmentPaperAsset: async () => ({ layoutValidation: { ok: true }, asset: { id: "paper", url: "/paper.pdf", metadata: {} } }),
+      renderPdfFromHtml: async () => ({ ok: true }),
+      assessmentPrintPlan: (input) => ({ adaptive: ["focused", "multi_day"].includes(input.metadata.purpose) }),
+      countPdfPages: () => 1,
+      ensureEvenPdfPages: () => { paddingCalls++; return { pageCount: 2, addedBlankPage: true }; },
+      gradingSourcePackageForAssignment: () => ({}), gradingSourceReference: () => ({}),
+      publicGeneratedUrl: (name) => `/generated/${name}`, mergeGenerationPipeline: (_, patch) => patch,
+      auditEvent: async () => {}
+    });
+    const res = { status(s) { throw new Error(`Unexpected HTTP ${s}`); }, json(b) { body = b; return this; } };
+    await route({ session: { teacherId: "t1" }, params: { assignmentId: "a1" } }, res);
+    const comprehensive = purpose === "comprehensive";
+    assert.equal(body.ok, true);
+    assert.equal(paddingCalls, comprehensive ? 1 : 0);
+    assert.equal(savedAnalysis.metadata.pdfPageCount, comprehensive ? 2 : 1);
+    assert.equal(savedAnalysis.metadata.pdfAddedBlankPage, comprehensive);
+    assert.equal(body.generationPipeline.gates.finalExported, true);
+  }
+});
+
 test("a student-specific published assignment is not listed for classmates of the same grade", () => {
   const source = fs.readFileSync(new URL("./server.js", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf("  const visibleAssignments = assignments.filter(");

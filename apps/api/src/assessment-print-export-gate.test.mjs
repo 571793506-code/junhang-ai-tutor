@@ -244,7 +244,7 @@ test("English-to-Chinese fill items reserve a visible short answer line", () => 
     "safeJson",
     "printableItemType",
     "readableText",
-    `${source.slice(answerSpaceStart, answerSpaceEnd)}; return answerSpaceMm;`
+    `${source.slice(source.indexOf("function chineseWritingLineCount("), answerSpaceStart)}\n${source.slice(answerSpaceStart, answerSpaceEnd)}; return answerSpaceMm;`
   );
   const answerSpaceMm = createAnswerSpace(
     (value, fallback) => value || fallback,

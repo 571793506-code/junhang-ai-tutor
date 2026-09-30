@@ -1974,6 +1974,7 @@ function answerSpaceMm(item, subject = "", kind = "") {
   const writingLineCount = chineseWritingLineCount(item, subject);
   if (writingLineCount) return writingLineCount * 7.3 + 2;
   if (["focused", "multi_day"].includes(metadata.printPurpose) && subjectText.includes("数学") && type === "calculation") {
+    if (metadata.printCalculationSheet && metadata.printAnswerSpaceMm === 102) return 102;
     return Math.max(metadata.printCalculationSheet || /验算/.test(String(item.prompt || "")) ? 48 : 32, Math.min(configured || 0, 64));
   }
   if (type === "writing" && answerFormat === "english-four-line") return configured > 0 ? Math.max(18, Math.min(configured, 54)) : 32;
@@ -2223,7 +2224,13 @@ function assessmentPrintPlan(assignment) {
     const itemMetadata = safeJson(item.metadata, {});
     const day = days.get(itemMetadata.dayId || itemMetadata.sourceContext?.day?.dayId);
     const title = day ? `第${day.number}天：${day.goal || "每日练习"}` : sectionTitleForItem(item).replace(/^[一二三四五六七八九十]+、/, "");
-    return { ...item, metadata: { ...itemMetadata, printPurpose: purpose, printCalculationSheet: calculationSheet, sectionTitle: title } };
+    return { ...item, metadata: {
+      ...itemMetadata,
+      printPurpose: purpose,
+      printCalculationSheet: calculationSheet,
+      ...(calculationSheet && assignment.items.length === 4 ? { printAnswerSpaceMm: 102 } : {}),
+      sectionTitle: title
+    } };
   });
   const pages = splitSequentialPages(items, Number(profile.pages || 2), subject, kind, { adaptive, calculationSheet });
   return { purpose, adaptive, calculationSheet, items, pages, subject, kind };
@@ -2748,6 +2755,8 @@ body { margin: 0; color: #1f2a36; font-family: "SimSun", "Microsoft YaHei", "Pin
 h1 { margin: 4px 0 2px; font-size: 15pt; text-align: center; font-family: "SimHei", "Microsoft YaHei", sans-serif; }
 .subtitle, .foot { color: #5f6f80; font-size: 12px; }
 .item { break-inside: avoid; margin: 0 0 5px; padding: 4px 0 6px; border-bottom: 1px dashed #c6d1dd; }
+.item:has(+ .foot) { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+.foot:empty { display: none; }
 .prompt { font-weight: 700; line-height: 1.36; }
 .answer, .analysis, .point, .mistake { margin-top: 3px; }
 ${plan.calculationSheet ? ".answer { display: grid; grid-template-columns: 58px minmax(0, 1fr); align-items: start; } .answer-text { white-space: pre-line; }" : ""}
@@ -4377,7 +4386,11 @@ app.post("/api/assessments/:assignmentId/print-export", requireDatabase, require
   if (metadata.workflowPublication && analysisPdfResult.ok !== true) {
     return res.status(503).json({ ok: false, error: "ASSESSMENT_ANALYSIS_PDF_UNAVAILABLE", message: "解析 PDF 未生成，本次正式导出尚未完成，请保留当前内容后重试。" });
   }
-  const analysisEvenPdf = analysisPdfResult.ok ? ensureEvenPdfPages(analysisPdfPath) : { pageCount: null, addedBlankPage: false };
+  const analysisEvenPdf = analysisPdfResult.ok
+    ? assessmentPrintPlan(assignment).adaptive
+      ? { pageCount: countPdfPages(analysisPdfPath), addedBlankPage: false }
+      : ensureEvenPdfPages(analysisPdfPath)
+    : { pageCount: null, addedBlankPage: false };
   const analysisOutputFileName = analysisPdfResult.ok ? analysisPdfFileName : analysisHtmlFileName;
   const asset = paperExport.asset;
   const paperAssetMetadata = safeJson(asset.metadata, {});

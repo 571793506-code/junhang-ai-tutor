@@ -27,9 +27,12 @@ test("focused content uses real pages and enough vertical calculation space with
   const html = render.printableAssignmentHtml(input);
   assert.equal((html.match(/<section class="page">/g) || []).length, 1);
   assert.doesNotMatch(html, /第1\/1页/);
-  assert.match(html, /min-height:48mm/);
+  assert.equal((html.match(/min-height:102mm/g) || []).length, 4);
   assert.doesNotMatch(html, /本页留白|教师答案标记/);
-  assert.equal(render.buildQuestionLayoutManifest(input).pageCount, 1);
+  const manifest = render.buildQuestionLayoutManifest(input);
+  assert.equal(manifest.pageCount, 1);
+  assert.deepEqual(Array.from(manifest.questions, (question) => question.answerSpace.estimatedMm), [102, 102, 102, 102]);
+  assert.ok(manifest.questions[2].bbox.y > manifest.questions[0].bbox.y);
 });
 test("multi-day source goals reach both papers and pagination does not lose questions", () => {
   const input = assignment("multi_day");
