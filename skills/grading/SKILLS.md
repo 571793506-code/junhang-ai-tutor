@@ -17,17 +17,17 @@
 
 ## 前置依赖
 
-服务端必须确认学生仍可接收新工作、图片页序和质量、题目布局、答案来源及教师权限。生成材料需要有效的 `gradingSourcePackage` 和 `questionLayoutManifest`；外部材料需要参考答案证据或明确进入待复核状态。
+服务端必须确认学生仍可接收新工作、图片页序和质量、题目布局、答案来源及教师权限。生成材料需要有效的 `gradingSourcePackage` 和 `questionLayoutManifest`；外部材料需要参考答案证据或明确进入待复核状态。工作流持久化已在当前本机业务库完成迁移并启用；不要把旧验收记录中的“开关关闭/迁移未执行”当作当前状态，实际部署仍须按环境检查。真实批改正向验收仍要求完整原始识别、有效答案来源、教师确认和服务端归档证据。
 
 ## 输入契约
 
-持续工作流入口见 `docs/14-api-contract.md` 的 Shared workflow API and CLI。薄 CLI 为 `node scripts/teaching-workflow.mjs`；从已登记 studentId/submissionId 创建草稿，原始作答、答案包和证据绑定由服务端读取。先读取当前版本，再携带题目 ID、expectedRevision 和稳定 operationKey 提交修订或教师确认；自然语言修订携带 instruction，手工修正使用显式 patch。创建/重判/校验适配器及 Web 工作台已实现并通过合成契约测试，隔离PostgreSQL工作流表事务、HTTP/对话客户端持久化及合成数据的真实发布/归档跨表事务已验收；生产开关仍关闭，业务schema迁移及真实教学质量仍待验收（见工作台验收记录2026-09-26）。可信服务端归档可复用未变化的确认；工作流 confirm 不触发独立 archive 命令，不得用导入 JSON 的确认人或时间代替服务端教师凭据。
+持续工作流入口见 `docs/14-api-contract.md` 的 Shared workflow API and CLI。薄 CLI 为 `node scripts/teaching-workflow.mjs`；从已登记 studentId/submissionId 创建草稿，原始作答、答案包和证据绑定由服务端读取。先读取当前版本，再携带题目 ID、expectedRevision 和稳定 operationKey 提交修订或教师确认；自然语言修订携带 instruction，手工修正使用显式 patch。创建/重判/校验适配器及 Web 工作台已实现并通过合成契约测试；当前本机业务 schema 已完成工作流迁移并启用持久化，隔离 PostgreSQL 工作流表事务、HTTP/对话客户端持久化及合成数据的发布/归档跨表事务已验收。可信服务端归档可复用未变化的确认；工作流 confirm 不触发独立 archive 命令，不得用导入 JSON 的确认人或时间代替服务端教师凭据。真实正向批改验收仍需当前链路产生的原始识别、有效来源包、教师确认及服务端 archive 记录，历史批改结果不能单独补造这些输入。
 
 批改上下文分开保存 `printedPrompt`、`studentAnswer`、`ocrQuestions`、答案来源、图片质量和教师修正。Web 不得提交 `finalScore`、`archiveEligible`、provider、model 或 raw；服务端确定题号对齐和允许发送给模型的未解决题目。
 
 ## 持续批改工作台与对话共用动作
 
-教师 Web 的“批改复核 → 持续批改与版本”和 CLI 使用同一工作流 API；组件不拼接核心 prompt、不选择模型。当前开关关闭时显示“暂未启用”，日常上传、识别、来源登记与旧批次筛选继续使用原入口。
+教师 Web 的“批改复核 → 持续批改与版本”和 CLI 使用同一工作流 API；组件不拼接核心 prompt、不选择模型。当前本机持久化已启用；若运行环境未完成迁移或未启用开关，才显示“暂未启用”，日常上传、识别、来源登记与旧批次筛选继续使用原入口。
 
 - 先读取当前版本及题目 ID，对照服务端原图、作答与可信参考答案。bbox 只有在页码、图片引用、裁剪空间一致且坐标有效时才能叠加；不能用不同裁剪区域的坐标标记整页。
 - 修正识别提交 `action:"revise"`、`targetQuestionIds:[id]`、`patch:{type:"correct_recognition",questionId:id,value:{studentAnswer:"核对后的作答"}}`。必须保留 expectedRevision 和 operationKey。null 是未可靠识别；只有教师核对确为空白才提交空字符串，不能把模糊字迹猜成空白。
