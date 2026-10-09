@@ -116,8 +116,11 @@ export async function runTeachingUnit(
   let reason = "primary";
   for (let index = 0; index <= policy.maxAdditionalAttempts; index++) {
     if (signal?.aborted) return stop("TEACHING_CANCELLED");
-    const timeoutMs = Math.floor(budget.deadlineAt - now());
-    if (timeoutMs <= 0 || budget.remainingTokens < 1) return stop("TEACHING_BUDGET_EXHAUSTED");
+    const remainingMs = Math.floor(budget.deadlineAt - now());
+    if (remainingMs <= 0 || budget.remainingTokens < 1) return stop("TEACHING_BUDGET_EXHAUSTED");
+    const canRetry = index === 0 && budget.additionalAttemptsUsed < policy.maxAdditionalAttempts;
+    const timeoutMs = canRetry && policy.primaryTimeoutMs
+      ? Math.min(remainingMs, policy.primaryTimeoutMs) : remainingMs;
     if (index > 0) {
       if (budget.additionalAttemptsUsed >= policy.maxAdditionalAttempts) return stop("TEACHING_ATTEMPTS_EXHAUSTED");
       budget.additionalAttemptsUsed++;
@@ -166,10 +169,12 @@ export async function runTeachingUnit(
       if (error?.code === "TEACHING_DEADLINE") {
         attempt.failureCode = "TEACHING_DEADLINE";
         attempt.triggerClass = "availability";
-        return stop("TEACHING_BUDGET_EXHAUSTED");
+        if (!policy.primaryTimeoutMs || now() >= budget.deadlineAt) return stop("TEACHING_BUDGET_EXHAUSTED");
+        classification = { triggerClass: "availability" };
+      } else {
+        classification = classifyTaskFailure(error, { evidenceSufficient });
+        Object.assign(attempt, failureDiagnostics(error));
       }
-      classification = classifyTaskFailure(error, { evidenceSufficient });
-      Object.assign(attempt, failureDiagnostics(error));
       issues = [classification.triggerClass === "quality" ? "invalid_output" : classification.triggerClass];
     } finally {
       attempt.elapsedMs = Math.max(0, now() - startedAt);

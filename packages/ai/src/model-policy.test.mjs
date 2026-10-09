@@ -3,6 +3,15 @@ import test from "node:test";
 
 import { classifyTaskFailure, resolveTaskModelPolicy, resolveTeachingTaskPolicy } from "./model-policy.js";
 
+test("grading and reference cap the first call while preserving the operation budget", () => {
+  for (const task of ["grading", "reference"]) {
+    const policy = resolveTeachingTaskPolicy(task);
+    assert.equal(policy.primaryTimeoutMs, 120000);
+    assert.equal(policy.budget.timeoutMs, 180000);
+  }
+  assert.equal(resolveTeachingTaskPolicy("generation").primaryTimeoutMs, undefined);
+});
+
 test("teaching policies isolate Astra, Flash and Sol responsibilities from QA", () => {
   for (const task of ["generation", "grading", "reference"]) {
     const policy = resolveTeachingTaskPolicy(task, { GPT56_MODEL: "legacy-model" });

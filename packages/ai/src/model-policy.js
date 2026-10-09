@@ -6,8 +6,8 @@ const EVIDENCE_CODE = /evidence|reference|ocr|student[_-]?answer|prompt[_-]?miss
 
 const TEACHING_TASKS = Object.freeze({
   generation: { module: "generation", role: "primary", timeoutMs: 240000, maxTokens: 24000 },
-  grading: { module: "grading", role: "primary", timeoutMs: 180000, maxTokens: 12000 },
-  reference: { module: "grading", role: "primary", timeoutMs: 180000, maxTokens: 12000 },
+  grading: { module: "grading", role: "primary", timeoutMs: 180000, primaryTimeoutMs: 120000, maxTokens: 12000 },
+  reference: { module: "grading", role: "primary", timeoutMs: 180000, primaryTimeoutMs: 120000, maxTokens: 12000 },
   "extract-requirement": { module: "generation", role: "assist", timeoutMs: 60000, maxTokens: 4000 },
   "extract-material": { module: "generation", role: "assist", timeoutMs: 60000, maxTokens: 8000 },
   // Two page images share this pool; 24k gives each Flash page enough room
@@ -30,6 +30,7 @@ export function resolveTeachingTaskPolicy(task, config = {}) {
     replacement: defaults.role === "primary" && primary.model !== routes.replacement.model ? routes.replacement : null,
     maxAdditionalAttempts: 1,
     maxConcurrency: 2,
+    ...(defaults.primaryTimeoutMs ? { primaryTimeoutMs: defaults.primaryTimeoutMs } : {}),
     budget: { timeoutMs: defaults.timeoutMs, maxTokens: defaults.maxTokens }
   };
 }

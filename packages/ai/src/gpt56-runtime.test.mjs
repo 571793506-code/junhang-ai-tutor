@@ -672,7 +672,11 @@ for (const workflow of ["reference", "grading"]) {
     assert.equal(result.modelRun.metadata.solAttempted, true);
     assert.equal(result.modelRun.metadata.attempts.length, 2);
     assert.equal(result.modelRun.metadata.attempts[1].role, "availability-replacement");
-    assert.ok(result.modelRun.metadata.attempts[1].timeoutMs <= result.modelRun.metadata.attempts[0].timeoutMs);
+    const [primary, replacement] = result.modelRun.metadata.attempts;
+    assert.equal(primary.timeoutMs, 120000);
+    assert.ok(Number.isFinite(primary.elapsedMs) && primary.elapsedMs >= 0);
+    assert.ok(replacement.timeoutMs > 0);
+    assert.ok(primary.elapsedMs + replacement.timeoutMs <= 180000);
     assert.equal(result.modelRun.metadata.attempts[1].reasoningEffort, "high");
   });
 

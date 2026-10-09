@@ -4,6 +4,7 @@ import { loadTeachingRulePack } from "./teaching-rules.js";
 import { runTeachingUnit, projectTeachingResult } from "./teaching-model-runner.js";
 
 const rulePack = await loadTeachingRulePack("generation");
+const gradingRules = await loadTeachingRulePack("grading");
 const good = () => ({ text: JSON.stringify({ title: "draft" }), usage: { completion_tokens: 10 } });
 const failure = (status, code) => Object.assign(new Error(code || `HTTP ${status}`), { status, code });
 function setup(responses, overrides = {}) {
@@ -155,6 +156,72 @@ test("a stalled transport is aborted at the deadline without a replacement", asy
   assert.equal(transportSignal.aborted, true);
   assert.equal(result.internal.attempts[0].failureCode, "TEACHING_DEADLINE");
   assert.equal(result.internal.attempts[0].triggerClass, "availability");
+});
+
+test("grading and reference primary timeouts leave time for one availability replacement", async () => {
+  for (const task of ["grading", "reference"]) {
+    let time = 0;
+    const calls = [];
+    const budget = { deadlineAt: 180000, remainingTokens: 12000, additionalAttemptsUsed: 0 };
+    const result = await runTeachingUnit({ task, input: {}, rulePack: gradingRules, budget }, {
+      now: () => time,
+      repairIssues: () => [],
+      call: async (route, _messages, options) => {
+        calls.push({ route, options });
+        if (calls.length === 1) {
+          time += options.timeoutMs;
+          throw failure(null, "TEACHING_DEADLINE");
+        }
+        time += 100;
+        return good();
+      }
+    });
+    assert.equal(result.status, "success");
+    assert.deepEqual(calls.map(x => x.route.model), ["gpt-6-astra", "gpt-5.6-sol"]);
+    assert.deepEqual(calls.map(x => x.options.timeoutMs), [120000, 60000]);
+    assert.equal(result.internal.attempts[0].failureCode, "TEACHING_DEADLINE");
+    assert.equal(result.internal.attempts[0].triggerClass, "availability");
+    assert.equal(budget.additionalAttemptsUsed, 1);
+  }
+});
+
+test("grading timeout respects exhaustion, cancellation and the single extra slot", async () => {
+  for (const mode of ["exhausted", "cancelled", "replacement-failed", "slot-used"]) {
+    let time = 0;
+    let calls = 0;
+    const controller = new AbortController();
+    const budget = { deadlineAt: 180000, remainingTokens: 12000, additionalAttemptsUsed: mode === "slot-used" ? 1 : 0 };
+    const result = await runTeachingUnit({ task: "grading", input: {}, rulePack: gradingRules, budget, signal: controller.signal }, {
+      now: () => time,
+      repairIssues: () => [],
+      call: async (_route, _messages, options) => {
+        calls++;
+        time += mode === "exhausted" ? 180000 : options.timeoutMs;
+        if (mode === "cancelled") controller.abort();
+        throw failure(null, "TEACHING_DEADLINE");
+      }
+    });
+    assert.equal(calls, mode === "replacement-failed" ? 2 : 1);
+    assert.equal(result.status, mode === "cancelled" ? "cancelled" : "review_required");
+    assert.equal(result.candidate, null);
+    assert.ok(time <= 180000);
+  }
+});
+
+test("grading quality repair stays on primary and short budgets never extend the deadline", async () => {
+  for (const [responses, deadlineAt, expectedModels, expectedTimeouts] of [
+    [[{ text: "{}" }, good()], 180000, ["gpt-6-astra", "gpt-6-astra"], [120000, 179900]],
+    [[failure(null, "TEACHING_DEADLINE")], 50, ["gpt-6-astra"], [50]],
+    [[failure(401)], 180000, ["gpt-6-astra"], [120000]],
+    [[failure(503, "OCR_EVIDENCE_MISSING")], 180000, ["gpt-6-astra"], [120000]]
+  ]) {
+    const task = setup(responses);
+    task.budget.deadlineAt = deadlineAt;
+    const result = await task.run({ task: "grading", rulePack: gradingRules });
+    assert.deepEqual(task.calls.map(x => x.route.model), expectedModels);
+    assert.deepEqual(task.calls.map(x => x.options.timeoutMs), expectedTimeouts);
+    assert.equal(result.status, expectedModels.length === 2 ? "success" : "review_required");
+  }
 });
 
 test("diagnostics distinguish invalid JSON from domain fields without retaining raw output", async () => {
