@@ -72,6 +72,7 @@ import {
 } from "./approved-content-context.js";
 import { assessmentPageBalanceFillRatio, buildAssessmentLayoutValidation } from "./assessment-layout-validation.js";
 import { createAssessmentGenerationJobs } from "./assessment-generation-jobs.js";
+import { createApiServerStartup } from "./api-server-startup.js";
 import { createTeachingWorkflowRouter } from "./teaching-workflow-routes.js";
 import { createTeachingWorkflowArchiveResolvers } from "./teaching-workflow-archive-resolvers.js";
 import { createTeachingWorkflowExecution } from "./teaching-workflow-execution.js";
@@ -131,11 +132,9 @@ const workflowPersistenceEnabled = process.env.TEACHING_WORKFLOW_PERSISTENCE_ENA
 const teachingWorkflowRepository = workflowPersistenceEnabled && typeof prisma.teachingWorkflow?.findUnique === "function" && typeof prisma.teachingWorkflowRevision?.findUnique === "function"
   ? createTeachingWorkflowRepository(prisma)
   : null;
-if (teachingWorkflowRepository) {
-  void teachingWorkflowRepository.markInterrupted().catch((error) => {
-    console.warn("Teaching workflow restart recovery was not applied:", error?.message || error);
-  });
-}
+const startApiServer = createApiServerStartup({ app,
+  recover: teachingWorkflowRepository ? () => teachingWorkflowRepository.markInterrupted() : null
+});
 const assessmentGenerationJobs = createAssessmentGenerationJobs({ concurrency: 5, workflowRepository: teachingWorkflowRepository });
 const teachingWorkflowArchiveResolvers = teachingWorkflowRepository
   ? createTeachingWorkflowArchiveResolvers({ prisma })
@@ -1168,6 +1167,9 @@ function taskDisplayDetails(task, metadata = {}) {
 
 function readableKind(value, fallback = "练习") {
   const text = readableText(value, fallback);
+  const assessmentKinds = { quiz: "小测", practice: "练习", exam: "试卷" };
+  const assessmentKind = assessmentKinds[text.trim().toLowerCase()];
+  if (typeof assessmentKind === "string") return assessmentKind;
   if (text.includes("试卷")) return "试卷";
   if (text.includes("小测")) return "小测";
   if (text.includes("听写")) return "听写";
@@ -6897,7 +6899,11 @@ if (process.argv.includes("--check")) {
   );
   await prisma.$disconnect();
 } else {
-  app.listen(port, host, () => {
-    console.log(`Junhang API listening at http://${host}:${port}`);
-  });
+  try {
+    await startApiServer({ port, host });
+  } catch (error) {
+    console.error("Junhang API startup failed", { pid: process.pid, code: error?.code || "STARTUP_FAILED" });
+    await prisma.$disconnect();
+    process.exitCode = 1;
+  }
 }
