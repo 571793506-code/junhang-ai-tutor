@@ -177,8 +177,8 @@ export function GradingWorkbench({ teacherId, active, sources, onLegacy, onArchi
           {onlyDoubts && !shownQuestions.length && <p>没有待核对的疑点题。取消筛选可继续逐题确认。</p>}
           {question && <article className="gw-question-detail"><h3>第 {question.questionNo} 题</h3><h4>题干</h4><p>{question.printedPrompt || question.prompt || "缺少题干"}</p><h4>学生作答</h4><p>{question.studentAnswer == null ? "尚未可靠识别，不能按空白计零分" : question.studentAnswer === "" ? "已识别为空白作答" : text(question.studentAnswer)}</p>
             <small>{question.recognitionCorrectedByTeacher ? "识别文字已由教师校正" : "请对照原图核对识别文字"}{question.confidence != null ? ` · 原识别置信度 ${Math.round(question.confidence * 100)}%` : ""}</small>
-            <h4>可信参考答案与评分依据</h4><p>{text(question.correctAnswer) || "尚无可靠答案来源"}</p><p>{text(question.rubric) || "评分依据请在原来源中核对"}</p>
-            <h4>批改草稿：{statuses[question.status]} · {question.score ?? "待核对"} / {question.maxScore ?? "—"}</h4><p>{question.explanation}</p><p>考点：{question.knowledgePoint || "待补齐"}</p>{question.errorStep && <p>错因：{question.errorStep}</p>}{question.suggestedPractice && <p>后续练习：{question.suggestedPractice}</p>}
+            <h4>本题得分：{statuses[question.status]} · {question.score ?? "待核对"} / {question.maxScore ?? "—"}</h4>
+            <a className="gw-analysis-link" href="#grading-current-analysis">查看本题评分与解析 ↓</a>
           </article>}
         </div>
         <aside className="gw-edit"><h3>当前题修改与确认</h3>
@@ -202,6 +202,14 @@ export function GradingWorkbench({ teacherId, active, sources, onLegacy, onArchi
           {archived?.workflowId === view.id && <p role="status">版本 {archived.revision} 已归档。后续修改需要重新确认并另行归档。</p>}
         </aside>
       </div>
+      {question && <section className="gw-analysis" id="grading-current-analysis" aria-label="本题评分与解析">
+        <header className="gw-analysis-heading"><h3>第 {question.questionNo} 题 · 评分与解析</h3><span>{question.reviewedByTeacher ? "教师已确认" : "待教师复核"} · {question.score ?? "待核对"} / {question.maxScore ?? "—"}</span></header>
+        <div className="gw-analysis-section"><h4>可信参考答案与评分依据</h4><p>{text(question.correctAnswer) || "尚无可靠答案来源"}</p><p>{text(question.rubric) || "评分依据请在原来源中核对"}</p></div>
+        <div className="gw-analysis-section"><h4>评分依据与解析</h4><p>{question.explanation || "暂无解析，请核对作答与评分依据。"}</p></div>
+        <div className="gw-analysis-section"><h4>考点</h4><p>{question.knowledgePoint || "待补齐"}</p></div>
+        {question.errorStep && <div className="gw-analysis-section"><h4>错因定位</h4><p>{question.errorStep}</p></div>}
+        {question.suggestedPractice && <div className="gw-analysis-section"><h4>后续练习</h4><p>{question.suggestedPractice}</p></div>}
+      </section>}
     </>}
   </section>;
 }

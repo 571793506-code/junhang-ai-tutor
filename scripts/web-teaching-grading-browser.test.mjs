@@ -132,7 +132,7 @@ test("grading browser corrects one answer, preserves confirmation, rejects stale
   await page.getByRole("button", { name: "手工修正本题评分", exact: true }).click();
   await page.getByLabel("本题判定", { exact: true }).selectOption("uncertain");
   await page.getByRole("button", { name: "保存本题评分草稿", exact: true }).click();
-  await page.getByRole("heading", { name: "批改草稿：待核对 · 待核对 / 5", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "本题得分：待核对 · 待核对 / 5", exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "手工修正本题评分", exact: true }).isDisabled(), false);
   assert.equal(await page.getByRole("button", { name: "确认当前题目", exact: true }).isDisabled(), true);
   await page.getByRole("button", { name: "手工修正本题评分", exact: true }).click();
