@@ -502,7 +502,9 @@ export type TeachingQuestion = {
   analysisSteps: string[]; knowledgePoint: string; commonMistake: string; reviewedByTeacher?: boolean;
   options?: string[]; sharedMaterialId?: string; dayId?: string; [key: string]: unknown;
 };
-export type TeachingWorkflowSummary = { id: string; module: "generation" | "grading"; revision: number; status: string; request: Record<string, unknown> };
+export type TeachingWorkflowSummary = { id: string; module: "generation" | "grading"; revision: number; status: string; request: Record<string, unknown>;
+  reviewStatus?: "teacher_confirmed" | "review_required";
+  archive?: { id: string; workflowId: string; revision: number; status: "archived" } | null };
 export type TeachingWorkflowView = TeachingWorkflowSummary & {
   content: { title?: string; purpose?: string; questions: TeachingQuestion[]; explanation?: TeachingExplanation;
     sharedMaterials: Array<{ id: string; title?: string; text: string }>; days: Array<{ dayId: string; goal: string; questionCount: number }> };

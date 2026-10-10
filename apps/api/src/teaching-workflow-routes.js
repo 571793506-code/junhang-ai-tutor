@@ -61,7 +61,13 @@ function workflowView(result) {
   }
   const issues = result.snapshot?.creationPending === true
     ? [{ code: "WORKFLOW_CREATION_INCOMPLETE", message: result.status === "needs_input" ? "任务条件、来源证据或草稿结构尚不完整，请补齐后重新发起。" : "任务已登记，尚无可复核内容。请查看任务状态。" }] : [];
-  return { id: result.workflowId, module: result.module, revision: result.revision, status: result.status, request: requestInput(result.request || {}), content, issues };
+  return { ...workflowSummary(result), content, issues };
+}
+function workflowSummary(result) {
+  return { id: result.workflowId, module: result.module, revision: result.revision, status: result.status, request: requestInput(result.request || {}),
+    ...(result.module === "grading" ? { reviewStatus: result.reviewStatus === "teacher_confirmed" ? "teacher_confirmed" : "review_required",
+      archive: result.archive?.workflowId === result.workflowId && result.archive.revision === result.revision && result.archive.status === "archived"
+        ? pick(result.archive, ["id", "workflowId", "revision", "status"]) : null } : {}) };
 }
 function commandInput(body) {
   if (!object(body)) invalid();
@@ -102,7 +108,7 @@ export function createTeachingWorkflowRouter({ service, archiveService, assignme
       if (archive ? typeof archiveService?.publish !== "function" : !service) return res.status(503).json({ ok: false, error: archive ? "WORKFLOW_ARCHIVE_UNAVAILABLE" : "WORKFLOW_UNAVAILABLE", message: "教学工作流尚未启用。" });
       const result = await run(req, { teacherId: req.session.teacherId });
       const view = archive ? { archive: archiveView(result, req) } : Array.isArray(result)
-        ? { workflows: result.map((item) => ({ id: item.workflowId, module: item.module, revision: item.revision, status: item.status, request: requestInput(item.request) })) }
+        ? { workflows: result.map(workflowSummary) }
         : { workflow: workflowView(result) };
       return res.status(typeof status === "function" ? status(result) : status).json({ ok: true, ...view });
     } catch (error) {

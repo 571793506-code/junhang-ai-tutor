@@ -13,6 +13,7 @@ export async function workflowHttpFixture(t, options = {}) {
   const heads = new Map();
   const preparedInputs = [];
   const db = fakeWorkflowPrisma();
+  db.submission = { findUnique: async ({ where }) => options.resolveArchive?.(where.id) || null };
   const create = db.teachingWorkflow.create;
   let nextId = 0;
   db.teachingWorkflow.create = async ({ data }) => {

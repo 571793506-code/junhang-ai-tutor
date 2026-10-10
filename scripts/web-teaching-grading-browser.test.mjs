@@ -145,10 +145,18 @@ test("grading browser corrects one answer, preserves confirmation, rejects stale
   await page.getByRole("button", { name: "确认当前题目", exact: true }).click();
   await page.getByText("确认总分：10", { exact: true }).waitFor();
   const confirmed = await c.get(before.id);
+  assert.equal(confirmed.reviewStatus, "teacher_confirmed");
+  assert.equal(confirmed.archive, null);
+  await page.getByRole("heading", { name: `加法作业 · 版本 ${confirmed.revision} · 教师已确认`, exact: true }).waitFor();
   await page.getByRole("button", { name: "归档当前确认版本", exact: true }).click();
   await page.getByText("当前确认版本已归档。", { exact: true }).waitFor();
   assert.equal(f.archiveDb.snapshot().submissions.length, 1);
   assert.equal(await page.getByRole("button", { name: "归档当前确认版本", exact: true }).isDisabled(), true);
+  await page.reload();
+  await page.getByRole("heading", { name: `加法作业 · 版本 ${confirmed.revision} · 已归档`, exact: true }).waitFor();
+  await page.getByText(`版本 ${confirmed.revision} 已归档。后续修改需要重新确认并另行归档。`, { exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "归档当前确认版本", exact: true }).isDisabled(), true);
+  assert.equal(f.archiveDb.snapshot().submissions.length, 1);
   await mkdir(artifactDir, { recursive: true }); await page.screenshot({ path: path.join(artifactDir, "grading-desktop.png") });
   await page.getByLabel("批改历史版本", { exact: true }).fill("2");
   await page.getByRole("button", { name: "查看批改历史版本", exact: true }).click();
@@ -158,6 +166,8 @@ test("grading browser corrects one answer, preserves confirmation, rejects stale
   await page.getByText("尚未可靠识别，不能按空白计零分", { exact: true }).waitFor();
   assert.equal((await c.get(before.id)).revision, confirmed.revision + 1);
   assert.equal(f.archiveDb.snapshot().submissions.length, 1);
+  assert.equal((await c.get(before.id)).archive, null);
+  assert.equal(await page.getByText(`版本 ${confirmed.revision} 已归档。后续修改需要重新确认并另行归档。`, { exact: true }).count(), 0);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "修改与归档", exact: true }).click();
   await page.getByRole("button", { name: "修正识别并仅重批本题", exact: true }).click();

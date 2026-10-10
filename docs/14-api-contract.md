@@ -584,6 +584,7 @@ node scripts/teaching-workflow.mjs assignment --id WORKFLOW_ID --input assignmen
 - 教师端“批改复核 → 持续批改与版本”接入相同 list/create/get/commands/archive API；保留原上传、来源登记、批次筛选和逐题复核入口。服务未启用的 404/503 显示可返回旧入口的提示，不伪装成功。
 - 批改 WorkflowView 增加 `content.pages`，仅包含 pageNumber/imageUrl/fileName/imageRefs/cropRef/qualityStatus；题目返回置信度、图片/裁剪引用、bbox 和服务端派生的 recognitionCorrectedByTeacher。原始识别修正凭据不返回浏览器。仅在图片、页码、裁剪空间和单位坐标范围匹配时绘制题目区域。
 - `content.gradingSummary={score,confirmedScore,totalScore,unresolvedCount,confirmedCount}` 由服务端逐题汇总。未可靠识别作答保持 null，页面显示待核对；不会用空字符串或零分补齐。
+- 批改工作流GET、历史读取、列表及命令响应增加 `reviewStatus="teacher_confirmed"|"review_required"` 与 `archive={id,workflowId,revision,status:"archived"}|null`。确认摘要由所读快照派生；归档摘要只来自该版本实际持久化记录，经共享完整性及教师、学生、工作流、版本校验。历史状态仍为 `historical` 且只读；新版本不继承旧归档摘要。底层处理状态不改，读取不触发确认、发布或归档，也不返回内部归档快照及证据。
 - 识别修正命令为 `{action:"revise",operationKey,expectedRevision,targetQuestionIds:[id],patch:{type:"correct_recognition",questionId:id,value:{studentAnswer}}}`。studentAnswer 必须为字符串，空字符串表示教师核对确为空白。服务端固定题干、原置信度、图片和裁剪坐标，建立内部修正凭据，仅重批目标，再重新校验证据绑定。HTTP 不接受客户端伪造置信度或凭据；replace_question 改变学生作答也强制重批。
 - 新建批改草稿和逐题重判保留内部 observedWork、页码、图片/裁剪引用及可信题型；模型只接收目标题的过程与来源。评分修改不删除或接受客户端覆盖原过程证据。未知置信度保持 null；教师修正凭据可为本次判分提供有效可信度1，但不能改写保存的OCR置信度，也不自动完成评分确认。此修正复用同一API供Web与对话使用，持久化开关状态不变。
 - 手工评分仅改变当前题结果与解析；自然语言重判仅携带当前题 ID 和要求。受影响题取消确认，其他题保持未变化的可信确认。确认只作用于明确检查的当前题；归档另发 expectedRevision，由事务门禁判断。可信服务端归档的确认可复用，无需重复模型调用。

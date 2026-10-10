@@ -1,6 +1,19 @@
 import { applyWorkflowPatch, teachingExplanationContent } from "@junhang/core";
 import { createHash } from "node:crypto";
-import { reuseArchivedQuestionConfirmations } from "./teaching-workflow-archive.js";
+import { reuseArchivedQuestionConfirmations, isTeachingWorkflowArchiveSubmission } from "./teaching-workflow-archive.js";
+
+function gradingReviewSummary(head, saved = head, revision = head.currentRevision) {
+  if (head.module !== "grading") return {};
+  const snapshot = saved.snapshot || {};
+  const questions = snapshot.questions || [];
+  const confirmed = questions.length > 0 && questions.every((q) => q.reviewedByTeacher === true && q.status !== "uncertain") && Number.isFinite(snapshot.finalScore);
+  const submission = saved.archiveSubmission;
+  const record = submission?.content?.workflowArchive;
+  const archived = record?.workflowId === head.id && record.revision === revision && record.teacherId === head.ownerTeacherId &&
+    isTeachingWorkflowArchiveSubmission(submission, head.request?.studentId);
+  return { reviewStatus: confirmed ? "teacher_confirmed" : "review_required",
+    archive: archived ? { id: record.id, workflowId: head.id, revision, status: "archived" } : null };
+}
 
 const ACTIONS = new Set(["revise", "confirm", "restore", "cancel"]);
 const CONFIRMATION_FIELDS = ["reviewedByTeacher", "confirmedBy", "confirmedAt", "teacherConfirmation", "reviewedAt"];
@@ -123,7 +136,7 @@ export function createTeachingWorkflowService({ repository, runner = null, valid
       const workflows = await repository.list(actor.teacherId, module);
       return workflows.map((workflow) => {
         assertActor(actor, workflow);
-        return { workflowId: workflow.id, module: workflow.module, revision: workflow.currentRevision, status: workflow.status, request: clone(workflow.request) };
+        return { workflowId: workflow.id, module: workflow.module, revision: workflow.currentRevision, status: workflow.status, request: clone(workflow.request), ...gradingReviewSummary(workflow) };
       });
     },
     async create({ actor, input }) {
@@ -200,7 +213,8 @@ export function createTeachingWorkflowService({ repository, runner = null, valid
         status: revision != null && revision !== head.currentRevision ? "historical" : head.status,
         workflowId: head.id, module: head.module, request: clone(head.request),
         revision: historical?.revision ?? head.currentRevision,
-        snapshot: clone(historical?.snapshot ?? head.snapshot)
+        snapshot: clone(historical?.snapshot ?? head.snapshot),
+        ...gradingReviewSummary(head, historical ?? head, historical?.revision ?? head.currentRevision)
       };
     },
     async execute({ actor, workflowId, command }) {
@@ -341,7 +355,7 @@ export function createTeachingWorkflowService({ repository, runner = null, valid
         if (controller.signal.aborted) fail("WORKFLOW_CANCELLED", 409);
         const result = await repository.commitRevision({ ...operationInput, operation: command.action,
           snapshot, affectedQuestionIds, commandFingerprint: fingerprint });
-        return { status: "ready_for_review", workflowId: workflow.id, module: workflow.module, request: clone(workflow.request), revision: result.revision, snapshot: clone(result.snapshot) };
+        return this.get({ actor, workflowId: workflow.id, revision: result.revision });
       } catch (error) {
         try { await repository.endOperation({ ...operationInput, status: "failed" }); } catch (endError) {
           if (endError.code !== "WORKFLOW_CHECKPOINT_STALE") throw endError;

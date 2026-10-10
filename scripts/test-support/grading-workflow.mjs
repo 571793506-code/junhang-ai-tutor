@@ -42,6 +42,7 @@ export async function gradingWorkflowFixture(t) {
     return publisher.publish(input);
   } };
   http = await workflowHttpFixture(t, { ...execution, archiveService,
+    resolveArchive: (id) => archiveDb.snapshot().submissions.find((row) => row.id === id) || null,
     resolveConfirmedArchive: async () => context.submission.content.workflowArchive || null });
   return { ...http, source, context, calls, archiveDb };
 }

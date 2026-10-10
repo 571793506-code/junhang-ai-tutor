@@ -3,7 +3,7 @@ import { prisma as defaultPrisma } from "./client.js";
 
 const text = (value) => typeof value === "string" && Boolean(value.trim());
 function fail(code, status = 409) { throw Object.assign(new Error(code), { code, status }); }
-function archiveId(workflowId, revision) {
+export function teachingWorkflowArchiveId(workflowId, revision) {
   return `teaching-archive-${createHash("sha256").update(JSON.stringify([workflowId, revision])).digest("hex")}`;
 }
 
@@ -22,7 +22,7 @@ export function createTeachingWorkflowArchiveRepository(prisma = defaultPrisma) 
         const workflow = await tx.teachingWorkflow.findFirst({ where: { id: workflowId, ownerTeacherId } });
         if (!workflow || workflow.module !== "grading" || !text(workflow.request?.studentId)) fail("WORKFLOW_ARCHIVE_INVALID", 422);
         if (await authorize({ workflow, tx }) !== true) fail("WORKFLOW_FORBIDDEN", 403);
-        const id = archiveId(workflowId, expectedRevision);
+        const id = teachingWorkflowArchiveId(workflowId, expectedRevision);
         const existing = await tx.submission.findUnique({ where: { id }, include: { grading: true } });
         if (existing) {
           const record = existing.content?.workflowArchive;

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { prisma as defaultPrisma } from "./client.js";
+import { teachingWorkflowArchiveId } from "./teaching-workflow-archive-repository.js";
 
 function fail(code, status = 409) { throw Object.assign(new Error(code), { code, status }); }
 function text(value) { return typeof value === "string" && value.trim().length > 0; }
@@ -23,6 +24,8 @@ function command(input) {
 
 // Internal repository: actor IDs must come from authenticated services, never request JSON.
 export function createTeachingWorkflowRepository(prisma = defaultPrisma) {
+  const archiveSubmission = (head, value) => head.module === "grading" && prisma.submission
+    ? prisma.submission.findUnique({ where: { id: teachingWorkflowArchiveId(head.id, value) }, include: { grading: true } }) : null;
   const owned = async (db, workflowId, ownerTeacherId) => {
     if (!text(workflowId) || !text(ownerTeacherId)) fail("WORKFLOW_INPUT_INVALID", 422);
     return db.teachingWorkflow.findFirst({ where: { id: workflowId, ownerTeacherId } });
@@ -104,16 +107,20 @@ export function createTeachingWorkflowRepository(prisma = defaultPrisma) {
     },
     async get(workflowId, ownerTeacherId) {
       const head = await owned(prisma, workflowId, ownerTeacherId);
-      return head ? { ...head, snapshot: (await revision(prisma, head.id, head.currentRevision)).snapshot } : null;
+      return head ? { ...head, snapshot: (await revision(prisma, head.id, head.currentRevision)).snapshot,
+        archiveSubmission: await archiveSubmission(head, head.currentRevision) } : null;
     },
     async list(ownerTeacherId, module) {
       if (!text(ownerTeacherId)) fail("WORKFLOW_INPUT_INVALID", 422);
       const heads = await prisma.teachingWorkflow.findMany({ where: { ownerTeacherId, ...(module ? { module } : {}) }, orderBy: { createdAt: "desc" }, take: 100 });
-      return Promise.all(heads.map(async (head) => ({ ...head, snapshot: (await revision(prisma, head.id, head.currentRevision)).snapshot })));
+      return Promise.all(heads.map(async (head) => ({ ...head, snapshot: (await revision(prisma, head.id, head.currentRevision)).snapshot,
+        archiveSubmission: await archiveSubmission(head, head.currentRevision) })));
     },
     async getRevision(workflowId, value, ownerTeacherId) {
-      if (!await owned(prisma, workflowId, ownerTeacherId)) return null;
-      return revision(prisma, workflowId, value);
+      const head = await owned(prisma, workflowId, ownerTeacherId);
+      if (!head) return null;
+      const saved = await revision(prisma, workflowId, value);
+      return saved ? { ...saved, archiveSubmission: await archiveSubmission(head, value) } : null;
     },
     async getOperation(workflowId, operationKey, ownerTeacherId) {
       if (!text(operationKey) || !text(ownerTeacherId)) fail("WORKFLOW_INPUT_INVALID", 422);
