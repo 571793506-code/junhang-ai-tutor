@@ -64,6 +64,10 @@ function generationSnapshot(result, input) {
     generationContext: result.generationContext, ruleVersions: result.modelRun?.metadata?.rules || [] };
 }
 
+function gradingItemType(context, ref) {
+  return ref.context?.itemType || context.archiveEvidence.assignmentQuestionTypes?.find((q) => q.questionNo === ref.questionNo)?.itemType;
+}
+
 function gradeInput(context, request) {
   const content = context.submission.content || {};
   const packet = context.archiveEvidence.externalGradingRecognition;
@@ -76,14 +80,14 @@ function gradeInput(context, request) {
     return { questionNo: ref.questionNo, printedPrompt: q?.printedPrompt || q?.printedText || ref.prompt,
       studentAnswer: q?.studentAnswer ?? q?.studentAnswerText ?? null,
       confidence: q && Object.hasOwn(q, "confidence") ? q.confidence ?? null : q?.recognitionConfidence ?? null,
-      itemType: ref.context?.itemType,
+      itemType: gradingItemType(context, ref),
       ...pick(q, ["bbox", "page", "sourceImageRef", "cropRef", "observedWork"]) };
   });
   return { title: request.title || "批改草稿", subject: context.subject, grade: context.sourcePackage.grade || request.grade,
     gradingSourcePackage: context.sourcePackage, totalScore: context.sourcePackage.totalScore, ocrQuestions,
     imageQuality: content.imageQuality || content.ocr?.imageQuality,
     referenceAnswers: context.sourcePackage.questions.map((q) => ({ questionNo: q.questionNo, prompt: q.prompt, correctAnswer: q.correctAnswer,
-      score: q.maxScore, knowledgePoint: q.knowledgePoint, analysisSteps: q.analysisSteps, itemType: q.context?.itemType, confidence: 1 })),
+      score: q.maxScore, knowledgePoint: q.knowledgePoint, analysisSteps: q.analysisSteps, itemType: gradingItemType(context, q), confidence: 1 })),
     teacherContext: request.requirement || "" };
 }
 
@@ -162,7 +166,7 @@ export function createTeachingWorkflowExecution({ config = {}, resolveGeneration
           const q = pick(byNo.get(ref.questionNo), QUESTION_KEYS);
           return { ...q, id: `q${index + 1}`, questionNo: ref.questionNo, printedPrompt: observed.printedPrompt,
             studentAnswer: observed.studentAnswer, correctAnswer: ref.correctAnswer, maxScore: ref.maxScore,
-            itemType: ref.context?.itemType,
+            itemType: gradingItemType(context, ref),
             knowledgePoint: q.knowledgePoint || ref.knowledgePoint, rubric: ref.rubric, analysisSteps: ref.analysisSteps,
             ...pick(observed, ["bbox", "confidence", "page", "sourceImageRef", "cropRef", "observedWork"]) };
         }), ruleVersions: result.modelRun?.metadata?.rules || [] };
@@ -184,10 +188,10 @@ export function createTeachingWorkflowExecution({ config = {}, resolveGeneration
           gradingSourcePackage: source, teacherContext: instruction,
           // Effective confidence applies only to teacher-corrected input; keep the measured OCR confidence in the saved question.
           ocrQuestions: questions.map((q) => ({ ...pick(q, ["questionNo", "printedPrompt", "studentAnswer", "bbox", "observedWork", "page", "sourceImageRef", "cropRef"]),
-            itemType: refs.find((ref) => ref.questionNo === q.questionNo)?.context?.itemType,
+            itemType: gradingItemType(resolved, refs.find((ref) => ref.questionNo === q.questionNo)),
             confidence: recognitionCorrected(q, actor) ? 1 : q.confidence ?? null })),
           referenceAnswers: refs.map((q) => ({ questionNo: q.questionNo, prompt: q.prompt, correctAnswer: q.correctAnswer, score: q.maxScore,
-            knowledgePoint: q.knowledgePoint, analysisSteps: q.analysisSteps, itemType: q.context?.itemType, confidence: 1 }))
+            knowledgePoint: q.knowledgePoint, analysisSteps: q.analysisSteps, itemType: gradingItemType(resolved, q), confidence: 1 }))
         }, { persist: false, signal, teachingExecution });
         checkSignal(signal);
         if (result.available !== true || !Array.isArray(result.structured?.questionResults)) fail("WORKFLOW_EXECUTION_FAILED");

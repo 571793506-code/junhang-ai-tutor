@@ -25,6 +25,8 @@
 
 批改上下文分开保存 `printedPrompt`、`studentAnswer`、`ocrQuestions`、答案来源、图片质量和教师修正。Web 不得提交 `finalScore`、`archiveEligible`、provider、model 或 raw；服务端确定题号对齐和允许发送给模型的未解决题目。
 
+历史来源包缺少 `context.itemType` 时，执行器只能使用服务端从已登记 AssignmentItem 验证得到的题型：题号唯一对齐，题干、答案和满分均与来源包一致。类型绑定到 `archiveEvidence.assignmentQuestionTypes` 及证据指纹，题型变化使旧绑定失效；已归档版本保留原绑定。来源包自身的类型优先，不根据 OCR、题号区间或客户端字段猜题型。选择题可保守本地比较；多空填空不能因此强行本地判定，计算和应用题仍检查过程。
+
 ## 持续批改工作台与对话共用动作
 
 教师 Web 的“批改复核 → 持续批改与版本”和 CLI 使用同一工作流 API；组件不拼接核心 prompt、不选择模型。当前本机持久化已启用；若运行环境未完成迁移或未启用开关，才显示“暂未启用”，日常上传、识别、来源登记与旧批次筛选继续使用原入口。

@@ -514,6 +514,7 @@ server.js 已在现有持久化开关后装配解析器、发布器、创建/修
 - 生成目标解析器先检查教师学生权限、可接收新工作状态及学生年级，再复用 prepareAssessmentDraftInput 的教材审批链；本入口仅采纳确认过的批改/错题信号。调用 draftAssessmentService 时固定 persist:false，不直接写 Assignment、模型运行表或正式资产。模型不可用、动态兜底或审查不通过不能成为 ready_for_review 的内容版本。
 - 模型生成 schema 明确 rubric；工作流调用缺少评分依据时使用现有受限修复槽，不追加独立审查。适配器把评分元数据、dayId 和阅读材料转为稳定 questions/days/sharedMaterials，最终由模块校验重建来源包。
 - 批改从可信原提交的 OCR 题目或外部识别包提取作答，标准答案来自登记的来源包；源记录缺题目时要求补齐，不在本入口重跑图片 OCR 或猜造答案。gradeSubmissionService 固定 persist:false，服务器绑定 archiveEvidence；有效版本归档继续操作时直接读取原快照，再由服务层验证并复用确认，不再次调用模型。
+- 历史来源包未保存 context.itemType 时，服务端读取并共享锁定 AssignmentItem；仅在题号唯一且规范题干、正确答案、满分均与来源包一致时，绑定补充类型到 archiveEvidence.assignmentQuestionTypes 及证据指纹。来源包类型优先，缺失或冲突保持未知，不采用客户端/OCR类型或按题号猜测。创建、单题重判及快照使用同一绑定；注册题型变化使旧证据失效，已归档版本沿用原证据。此兼容不修改原来源包指纹，也不授予教师确认或归档权限。
 - 自然语言 revise 可以只提交 targetQuestionIds 与 instruction，不必同时提交一个无变化 patch。生成只发送选中题目及关联材料/日期，使用共享 runTeachingTask；批改只把选中题目及对应参考答案送入 gradeSubmissionService，明确客观题本地比对、主观题走共享模型，teacherContext 携带本次修改要求。手工修正仍提交完整显式 patch；修改任何版本均需 expectedRevision/operationKey。
 - 生成上下文和批改证据在修订前及最终校验时再次读取；来源变化、取消、错误题号或不完整输出不能提交新版本。请求/上下文缺失在创建占位保留 needs_input，不调用模型；执行故障保留 failed。运行中的证据复查不等于真实数据库提交时的隔离验证，正式归档仍由独立事务重新校验。
 - 仍未完成：图片工作台接入、外部答案来源登记补齐、两个 Web 工作台，以及真实 PostgreSQL/OCR/模型/教学质量验收。已确认版本到 Assignment/导出、讲解 HTTP 视图及编辑/确认已于 2026-09-17 在关闭的开关后实现，尚未启用；新增入口暂不能代替日常所有旧业务入口。

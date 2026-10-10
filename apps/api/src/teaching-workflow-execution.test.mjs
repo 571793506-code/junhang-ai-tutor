@@ -266,6 +266,38 @@ test("grading rejudges only the selected question with local comparison and stop
   assert.equal(f.calls.length, 0);
 });
 
+test("legacy server-bound types keep objective work local and process work remote on create and regrade", async () => {
+  const sourcePackage = buildGradingSourcePackage({ id: "legacy-paper", items: [
+    { prompt: "选择正确结果。", answer: "A", score: 2 },
+    { prompt: "计算24+18。", answer: "42", score: 5, rubric: "方法2分、计算2分、结果1分。" }
+  ] }).package;
+  const archiveEvidence = { fingerprint: "legacy-evidence", sourceFingerprint: sourcePackage.fingerprint,
+    assignmentQuestionTypes: [{ questionNo: "1", itemType: "choice" }, { questionNo: "2", itemType: "calculation" }] };
+  const sent = [];
+  const f = fixture({ resolveGradingContext: async () => ({ ok: true, subject: "数学", sourcePackage, archiveEvidence,
+    submission: { content: { ocr: { questions: [
+      { questionNo: "1", studentAnswer: "A", observedWork: "圈选A", confidence: 0.97 },
+      { questionNo: "2", studentAnswer: "42", observedWork: "24+10+8=42", confidence: 0.96 }
+    ] } } } }), teachingExecution: { call: async (_route, messages) => {
+      sent.push(JSON.parse(messages[1].content));
+      return { text: JSON.stringify({ questionResults: [{ questionNo: "2", status: "correct", score: 5, maxScore: 5,
+        confidence: 0.96, explanation: "逐步计算正确。" }] }) };
+    } } });
+  const r = { studentId: "s1", submissionId: "legacy-submission", itemType: "choice" };
+  const prepared = await f.execution.createDraft({ actor, input: { module: "grading", request: r }, workflow: { id: "w1" } });
+  assert.deepEqual(sent[0].ocrQuestions.map(q => q.questionNo), ["2"]);
+  assert.deepEqual(prepared.snapshot.questions.map(q => q.itemType), ["choice", "calculation"]);
+  assert.equal(prepared.snapshot.questions[0].score, 2);
+  assert.equal(prepared.snapshot.questions[0].reviewedByTeacher, undefined);
+  assert.equal(prepared.snapshot.gradingSourcePackage.fingerprint, sourcePackage.fingerprint);
+  const args = { actor, workflow: { id: "w1", module: "grading" }, request: r, evidence: { archiveEvidence }, context: {}, instruction: "重新核对" };
+  await f.execution.runner({ ...args, questions: [prepared.snapshot.questions[0]] });
+  assert.equal(sent.length, 1);
+  await f.execution.runner({ ...args, questions: [prepared.snapshot.questions[1]] });
+  assert.equal(sent.length, 2);
+  assert.deepEqual(sent[1].ocrQuestions.map(q => q.questionNo), ["2"]);
+});
+
 test("process evidence survives workflow creation and selected regrading without model rewrites", async (t) => {
   const observedWork = "32×24=30×20+2×4=768";
   const rubric = "列式得2分；计算得2分；结果得1分。";

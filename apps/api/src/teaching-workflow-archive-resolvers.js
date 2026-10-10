@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { validateGradingSourcePackage } from "@junhang/core";
+import { buildGradingSourcePackage, validateGradingSourcePackage } from "@junhang/core";
 import { isTeachingWorkflowArchiveSubmission } from "@junhang/services";
 import { requireAllQuestionsReviewedForArchive } from "./grading-review-gates.js";
 import { EXTERNAL_GRADING_RECOGNITION_SCHEMA_VERSION } from "./external-grading-recognition.js";
@@ -13,6 +13,19 @@ function stable(value) {
   if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
   if (object(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(",")}}`;
   return JSON.stringify(value);
+}
+
+function legacyAssignmentQuestionTypes(assignment, sourcePackage) {
+  const items = assignment.items || [];
+  const canonical = buildGradingSourcePackage({ ...assignment, items }).package?.questions || [];
+  return sourcePackage.questions.flatMap((ref) => {
+    if (text(ref.context?.itemType)) return [];
+    const matches = canonical.map((q, index) => ({ q, item: items[index] })).filter(({ q }) => q.questionNo === ref.questionNo);
+    if (matches.length !== 1) return [];
+    const { q, item } = matches[0];
+    if (!text(item.itemType) || q.prompt !== ref.prompt || !isDeepStrictEqual(q.correctAnswer, ref.correctAnswer) || q.maxScore !== ref.maxScore) return [];
+    return [{ questionNo: ref.questionNo, itemType: item.itemType }];
+  });
 }
 
 // These adapters only read server data. Snapshot bindings must be attached by a
@@ -38,7 +51,8 @@ export function createTeachingWorkflowArchiveResolvers({ prisma }) {
     await tx.$queryRaw`SELECT id FROM "GradingResult" WHERE "submissionId" = ${first.id} FOR SHARE`;
     const submission = await tx.submission.findFirst({ where: { id: first.id, studentId: request.studentId }, include: { grading: true } });
     if (!submission || submission.assignmentId !== first.assignmentId) return blocked();
-    const assignment = await tx.assignment.findUnique({ where: { id: first.assignmentId }, include: { subject: true } });
+    await tx.$queryRaw`SELECT id FROM "AssignmentItem" WHERE "assignmentId" = ${first.assignmentId} ORDER BY id FOR SHARE`;
+    const assignment = await tx.assignment.findUnique({ where: { id: first.assignmentId }, include: { subject: true, items: { orderBy: { orderIndex: "asc" } } } });
     if (!assignment || (assignment.metadata?.targetStudentId && assignment.metadata.targetStudentId !== request.studentId) || assignment.metadata?.draftReviewStatus === "rejected") return blocked();
     const archived = isImmutableTeachingArchive(submission);
     if (archived && !isTeachingWorkflowArchiveSubmission(submission, request.studentId)) return blocked();
@@ -46,12 +60,15 @@ export function createTeachingWorkflowArchiveResolvers({ prisma }) {
     if (!object(sourcePackage) || !validateGradingSourcePackage(sourcePackage).ok || (!archived && sourcePackage.sourceId !== assignment.id)) return blocked();
     const subject = assignment.subject?.name || assignment.metadata?.subject || sourcePackage.subject;
     if (!text(subject)) return blocked();
+    const assignmentQuestionTypes = archived ? [] : legacyAssignmentQuestionTypes(assignment, sourcePackage);
+    const typeEvidence = assignmentQuestionTypes.length ? { assignmentQuestionTypes } : {};
     const archiveEvidence = archived ? submission.content.workflowArchive.snapshot.archiveEvidence : { schemaVersion: "teaching-workflow-grading-evidence-v1", submissionId: submission.id, studentId: request.studentId,
       assignmentId: assignment.id, sourceFingerprint: sourcePackage.fingerprint,
       materialType: submission.content?.materialType === "external_workbook" || submission.content?.externalGradingRecognition != null ||
         ["photo-upload", "photo-upload-batch"].includes(assignment.metadata?.source) ? "external_workbook" : submission.content?.materialType ?? null,
       externalGradingRecognition: submission.content?.externalGradingRecognition ?? null,
-      fingerprint: `sha256:${createHash("sha256").update(stable({ content: submission.content || {}, grading: submission.grading?.result || {}, sourcePackage })).digest("hex")}` };
+      ...typeEvidence,
+      fingerprint: `sha256:${createHash("sha256").update(stable({ content: submission.content || {}, grading: submission.grading?.result || {}, sourcePackage, ...typeEvidence })).digest("hex")}` };
     // An immutable archive retains the original binding; hashing its wrapper
     // would invalidate unchanged teacher confirmations and lose external gates.
     if (!object(archiveEvidence) || archiveEvidence.schemaVersion !== "teaching-workflow-grading-evidence-v1" ||
