@@ -2,6 +2,15 @@
 
 更新日期：2026-10-10。对应日常工作台计划 Task 9。当前结论：第1至4项已按教师确认完成；第5项“当前学生/教材/教师留出任务”暂缓，待教师与学生继续磨合。第6项已完成业务库备份、工作流迁移、Prisma Client 更新及持久化启用；教师已确认本份生成内容，真实 Web 已完成发布、预览与正式学生卷/解析卷导出，两份均为1页A4。本轮16题真实批改已按教师最终决定确认，版本5、37.5/60分；独立归档、8条错题、真实数据库幂等及档案证据准入验收通过。Web教师确认和归档回显已修正，真实任务刷新后显示版本5已归档，分数及确认数保持一致。按已约定范围，第九阶段教学与数据库闭环验收完成，可进入下一阶段；第5项继续暂缓。下文较早的失败、未确认、未归档及旧界面问题均为历史记录，以最新记录为准。
 
+### 2026-10-10 日常质量闭环首批：采集、回归与问题追踪
+
+- 教师已选定下一阶段为日常质量闭环。旧模块计划的质量工具已存在，本轮复用并修补现有工具；本机启用、真实双卷导出及16题确认/归档状态同步到generation/grading入口和Playbook，防止后续Codex误判为尚未迁移或重复归档。第5项留出任务继续暂缓。
+- 已修复质量报告缺陷：无独立执行记录、输入/结果哈希不匹配、scope不符或执行失败的样本不再贡献准确率等任何指标。counts.evaluatedCases明确有效样本数；混合批次只计算有效子集且整批仍失败，全部无效则所有指标null。合成gold示例移除静态actual；CLI实际验证退出1、有效样本0、全部指标null，属于正确拒绝而非教学质量通过。
+- 真实数据库只读采集并保存脱敏快照 `tmp/quality/daily-quality-20261010/gold-cases.json`：扫描42份、教师确认候选11份240题、阻断31份；原评分、确认和归档不变。快照契约、无actual/evaluationRun及最新16题教师评分序列校验通过，第14题5分、总分37.5保留。SHA-256与阻断原因汇总为同目录snapshot-inspection.json，采集日志 `tmp/quality/daily-quality-collection-20261010.log`；原因计数可重叠，不能累加当作样本数。
+- 对最新16题独立调用共享gradeSubmissionService，persist:false、沿用现行模型选择、显式总预算60000ms，无deep audit。实际约60030ms退出1，唯一主调用Astra为TEACHING_DEADLINE，未追加Sol，usage及费用未知。16题返回uncertain/null，available=false；质量CLI拒绝该失败样本，有效样本0、所有指标null、productionAccuracyClaim=false。输入、规则hash、执行记录及报告为同目录latest16-evaluation.json、其.run.json和latest16-quality.log。未重新OCR或写业务库，不推翻已确认37.5分。
+- 回放输入显示sourceContextCount、questionTypeCount、layoutTypeCount均0，16题过程/置信度/坐标证据存在。此为待定位的输入覆盖缺口，尚未证明是超时根因，也未确认是原归档缺失还是采集/重建丢失。下一项先对照原归档与回放投影，修正有证据的丢失后再按现行预算分批评测；其余10份暂未回放。本次显式60秒低于策略默认总180秒/主调用120秒，不据此宣称默认日常链路失败或调整模型策略。
+- 质量契约、采集、独立回放、批改和生成质量回归41/41通过、0跳过，日志 `tmp/quality/daily-quality-regression-20261010.log`；check:skills、check:generation:blueprint、check:api及git diff --check通过。源码编码检查1032文件仍仅有既有官方Prisma解包runtime/binary.js:126的1项告警，未改vendor或放宽守卫，不宣称全量编码通过。已有encoding-history-report.md与output/保留，不纳入本次提交。
+
 ### 2026-10-10 教师确认及独立归档状态回显修正
 
 - 原标题和任务列表只读取工作流处理状态，归档提示仅保存在组件内存。现由服务端读取当前所读版本，派生 `reviewStatus` 并查询实际独立归档；归档摘要须通过生产共享完整性校验，且教师、工作流、学生及版本精确匹配。HTTP只返回白名单摘要，不返回完整归档证据；GET/list不执行确认或归档。

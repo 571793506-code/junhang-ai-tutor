@@ -20,7 +20,7 @@
 
 ## 输入契约
 
-持续工作流入口见 `docs/14-api-contract.md` 的 Shared workflow API and CLI。薄 CLI 为 `node scripts/teaching-workflow.mjs`，只使用指定的教师本地会话调用同一 API。创建、局部修订和模块校验适配器已在关闭的持久化开关后装配；生成 Web 工作台已接入同一契约并完成合成数据浏览器验证，隔离PostgreSQL工作流表事务、HTTP/对话客户端持久化及合成数据的真实发布/归档跨表事务已验收；业务schema迁移、真实教学使用与生产启用仍待完成（见工作台验收记录2026-09-26）。503 不能视为生成成功，needs_input 代表条件或内容未齐，也不能绕过接口直接写库。根据已确认对话填入结构化学科、年级或学生、用途、kind 和 requirement；专项与每日题量使用 requestedItemCount。自然语言局部修订提交 targetQuestionIds 与 instruction，手工修改使用显式 patch；两者均保留 expectedRevision 和 operationKey。Web 仅缓存按教师隔离的最后任务 ID，内容以服务端版本为准；冲突保留本地未保存编辑，不能自动换成最新 revision 覆盖。取消后的任务只读，继续须明确新建；未启用时保留“原有生成与打印”入口。
+持续工作流入口见 `docs/14-api-contract.md` 的 Shared workflow API and CLI。薄 CLI 为 `node scripts/teaching-workflow.mjs`，只使用指定的教师本地会话调用同一 API。当前本机部署已于2026-09-29完成业务迁移、Prisma Client更新及持久化启用；两个Web工作台已接入共享契约，教师确认的测评于2026-09-30完成真实Web发布、预览及正式双卷导出。实际验收范围见 `docs/teaching-workflow-acceptance.md`，其他环境须核查当前服务状态，resume仍不可用。503 不能视为生成成功，needs_input 代表条件或内容未齐，也不能绕过接口直接写库。根据已确认对话填入结构化学科、年级或学生、用途、kind 和 requirement；专项与每日题量使用 requestedItemCount。自然语言局部修订提交 targetQuestionIds 与 instruction，手工修改使用显式 patch；两者均保留 expectedRevision 和 operationKey。Web 仅缓存按教师隔离的最后任务 ID，内容以服务端版本为准；冲突保留本地未保存编辑，不能自动换成最新 revision 覆盖。取消后的任务只读，继续须明确新建；未启用时保留“原有生成与打印”入口。
 
 Web 只提交学科、年级、`kind`、`purpose`、`requestedItemTypes`、`dayPlan`、目标范围、难度、题量、教师要求、知识点和教材标识。服务端组装 `generationContext`、`studentSignals`、`contentContext` 和生成预算；客户端不得提交 prompt、provider、model、raw 或内部预算。
 
@@ -30,11 +30,11 @@ Web 只提交学科、年级、`kind`、`purpose`、`requestedItemTypes`、`dayP
 
 服务层返回结构化草稿、`generationPipeline`、审查结果、`gradingSourcePackage` 引用和 `teacher_review` 状态。学生卷与解析卷从答案包派生，未经过 parse、normalize、validate、repair 和教师复核的内容不得发布、归档或导出。
 
-已确认测评版本可通过独立 `assignment` API/CLI 衔接既有作业与导出：先 GET 确认版本，再提交仅含 expectedRevision 的请求。该能力已实现但仍在关闭的持久化开关后，不能视为已上线。服务端验证保存的逐题教师确认、当前权限与来源一致性；同版本重放返回原 Assignment，新版本另建作业，不能覆盖旧题目或旧 PDF。来源包将 sourceId 绑定新 Assignment，保留工作流版本，并记录原来源和发布来源指纹。题号、选项、图形、共享材料、每日标识和 answerFormat 随权威来源保存。
+已确认测评版本可通过独立 `assignment` API/CLI 衔接既有作业与导出：先 GET 确认版本，再提交仅含 expectedRevision 的请求。该能力已在上述本机部署启用并完成真实测评发布验收，不据此假定其他环境可用。服务端验证保存的逐题教师确认、当前权限与来源一致性；同版本重放返回原 Assignment，新版本另建作业，不能覆盖旧题目或旧 PDF。来源包将 sourceId 绑定新 Assignment，保留工作流版本，并记录原来源和发布来源指纹。题号、选项、图形、共享材料、每日标识和 answerFormat 随权威来源保存。
 
-assignment 返回作业 ID，不调用模型或导出 PDF。对该 ID 调用既有 draft-export 后，服务端已有内容确认不会被预览清除；排版未通过仍不能 print-export，解析 PDF 失败不能标记正式导出完成。发布版不接受旧 draft-review 或答案来源导入改写；需要修改时回到工作流修订并重新确认。不得从上传 JSON 的确认人或哈希继承权限，也不得为绕过 503 直接写库或开启未验收开关。讲解尚无该发布路径；HTTP 和 Web 编辑/确认已接入，后端持久化仍未启用。完整契约、错误和重放规则见 docs/14-api-contract.md。
+assignment 返回作业 ID，不调用模型或导出 PDF。对该 ID 调用既有 draft-export 后，服务端已有内容确认不会被预览清除；排版未通过仍不能 print-export，解析 PDF 失败不能标记正式导出完成。发布版不接受旧 draft-review 或答案来源导入改写；需要修改时回到工作流修订并重新确认。不得从上传 JSON 的确认人或哈希继承权限，也不得为绕过 503 直接写库或开启未验收开关。讲解尚无该发布路径；HTTP和Web编辑/确认已接入本机持久化服务，但不代表讲解正式打印验收通过。完整契约、错误和重放规则见 docs/14-api-contract.md。
 
-讲解使用独立的 content.explanation，包含 concept、steps、workedExamples（prompt、answer、analysisSteps）和 commonMistakes；不把例题当成测评分数或批改答案包。通过同一 command API/CLI 提交 targetExplanation=true；自然语言 revise 带 instruction，手工 revise 使用 replace_explanation 的完整 value，不能混入 targetQuestionIds。confirm 表示教师明确确认整份讲解，确认身份只由会话写入。创建及修订剥离模型/客户端确认，修订后撤销整份讲解确认；历史恢复追加版本并重查当前权限/教学证据，历史版本不覆盖。保留 expectedRevision 与 operationKey 处理冲突和重放。自然语言修订复用共享 generation 规则、上下文和一次受限修复，手工修改、确认、恢复不调用模型；取消或失败不得提交迟到内容。确认讲解不意味着已发布、已导出或已经 Web 可用。
+讲解使用独立的 content.explanation，包含 concept、steps、workedExamples（prompt、answer、analysisSteps）和 commonMistakes；不把例题当成测评分数或批改答案包。通过同一 command API/CLI 提交 targetExplanation=true；自然语言 revise 带 instruction，手工 revise 使用 replace_explanation 的完整 value，不能混入 targetQuestionIds。confirm 表示教师明确确认整份讲解，确认身份只由会话写入。创建及修订剥离模型/客户端确认，修订后撤销整份讲解确认；历史恢复追加版本并重查当前权限/教学证据，历史版本不覆盖。保留 expectedRevision 与 operationKey 处理冲突和重放。自然语言修订复用共享 generation 规则、上下文和一次受限修复，手工修改、确认、恢复不调用模型；取消或失败不得提交迟到内容。确认讲解不意味着已发布、已正式导出或各科讲解质量已获教师验收。
 
 ## 执行顺序
 
@@ -76,7 +76,7 @@ assignment 返回作业 ID，不调用模型或导出 PDF。对该 ID 调用既�
 
 ## 类型规则
 
-小测、练习、试卷与专项/多日/讲解的教学细则统一维护在 `skills/generation/references/runtime-rules.md`。服务端已接入 purpose 分流；Web 用途选择与讲解复核界面仍属于后续工作台任务，不能把服务层单测当作 UI 或真实内容质量验收。
+小测、练习、试卷与专项/多日/讲解的教学细则统一维护在 `skills/generation/references/runtime-rules.md`。服务端已接入purpose分流，Web用途选择与讲解编辑/复核界面已接入同一契约；合成浏览器检查、真实测评样本及未覆盖用途须按工作台验收记录分别判断，不能把服务层单测当作UI或真实内容质量验收。
 
 ## 当前项目可参考位置
 

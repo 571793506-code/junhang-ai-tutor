@@ -65,13 +65,14 @@ cmd /c npm.cmd run collect:grading:gold
 cmd /c npm.cmd run collect:grading:gold -- --write tmp\quality\grading-gold-cases.json
 ```
 
-采集文件只保留题干、学生作答、教师确认后的状态/答案和评分字段；学生身份、联系方式、图片文件名、原始模型输出、供应商和内部标识不会写入。它是后续评估的 gold 基线，不包含待评估模型的 `actual` 结果；将 `actual` 合入评估副本后，再运行：
+采集文件保留脱敏的教学输入、识别/评分证据及教师确认后的状态、答案和评分字段；学生身份、联系方式、图片文件名、原始模型输出、供应商和业务内部标识不会写入。它是expected金标基线，不包含待评估模型的actual。先独立服务回放（persist:false，不重新归档），再评估回放文件；不得复制expected或手工填写actual冒充执行结果：
 
 ```bash
-cmd /c npm.cmd run check:grading:quality -- tmp\quality\grading-gold-cases.json
+cmd /c npm.cmd run replay:grading:gold -- --gold tmp\quality\grading-gold-cases.json --output tmp\quality\grading-evaluation.json
+cmd /c npm.cmd run check:grading:quality -- tmp\quality\grading-evaluation.json
 ```
 
-采集数量和质量指标仍不等于生产准确率，正式结论必须由教师确认样本范围后单独标记。
+回放产生evaluationRun绑定输入与结果哈希；缺失或无效执行证据的样本不计入任何指标。counts.cases为输入样本数，counts.evaluatedCases为有效评估样本数；全部无效时指标为null，混合批次仅报告有效子集且整批仍失败。采集数量和质量指标不等于生产准确率，正式结论必须由教师确认样本范围并复核报告后单独标记。
 
 ## 3. API
 
@@ -248,7 +249,7 @@ cmd /c npm.cmd run check:encoding
 - `check:generation:blueprint`：生成模板、兜底内容、题型蓝图、分值和基础审查规则的轻量验证。
 - `check:generation:quality:quiz`：中预算真实模型小测质量样本，覆盖数学、语文、英语各 1 个小测；要求 `modelAvailable=true` 且 `usedDynamicFallback=false`，只评估结构化草稿内容质量，不导出 PDF。
 - `check:generation:quality:formal`：正式预算真实模型质量样本，覆盖小升初数学试卷、英语个性化练习和语文阅读表达练习；要求真实模型生成和服务层审查通过，不导出 PDF。
-- `check:grading:quality -- <gold-cases.json>`：先校验教师确认金标契约，再计算逐题准确率、状态一致率、分数误差、低置信召回率、高置信错误率和教师修改率。`fixtures/quality/grading-gold-cases.example.json` 只含合成内容，输出会明确 `productionAccuracyClaim=false`。
+- `check:grading:quality -- <evaluation.json>`：先校验教师确认金标契约及独立执行证据，仅对合格回放样本计算逐题准确率、状态一致率、分数误差、低置信召回率、高置信错误率和教师修改率。`fixtures/quality/grading-gold-cases.example.json` 不含actual；直接检查应退出1、有效样本数0、指标null、productionAccuracyClaim=false，不能当成质量通过。
 - 金标契约要求 `caseId`、`sourceType`、`input`、`expected`、教师确认身份和时间；缺少教师确认、重复 case、非法状态、uncertain 缺原因或题目缺答案时，命令以 `GOLD_CASES_INVALID` 失败。
 - `check:content-upload-ui`：教师端上传面板、文件输入、导入按钮、`.edupdf` 前端过滤、生成上下文摘要和 Web API multipart 上传封装。
 - `check:content-context`：资料上下文链路守卫，包含资料转 Markdown、教师上传、`.edupdf` 拒绝、路径拒绝、教师登录、内容索引重建、索引同步到 `KnowledgeSource/KnowledgeChunk`、仅批准 E2E fixture、来源/chunk 命中断言、编码守卫、组卷草稿、上下文注入、草稿导出和复核/排版门禁。低预算草稿若通过 `layoutValidation`，链路继续验证教师确认和正式资产导出；若未通过，则验证 `ASSESSMENT_LAYOUT_INVALID` 正确阻断确认与正式导出。该命令允许低预算触发动态兜底，只证明链路能收口，不评估题目原创性、贴合教师要求、个性化程度、解析质量或 PDF 视觉质量。

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
 import { evaluateGradingCases } from "./grading-quality-check.mjs";
+import { hashQualityEvidence } from "./quality-gold-contract.mjs";
 
 function goldCase(overrides = {}) {
-  return {
+  const sample = {
     caseId: "case-1",
     sourceType: "generated_assessment",
     input: { subject: "数学", kind: "练习" },
@@ -30,6 +32,18 @@ function goldCase(overrides = {}) {
     },
     ...overrides
   };
+  if (!Object.hasOwn(overrides, "evaluationRun")) {
+    sample.actual.available ??= true;
+    sample.actual.usedDynamicFallback ??= false;
+    sample.evaluationRun = {
+      schemaVersion: "grading-evaluation-run-v1", caseId: sample.caseId,
+      runId: "synthetic-test-run", runner: "gradeSubmissionService", persist: false,
+      inputHash: hashQualityEvidence(sample.input), actualHash: hashQualityEvidence(sample.actual),
+      startedAt: "2026-09-07T00:00:00.000Z", completedAt: "2026-09-07T00:00:01.000Z",
+      scope: "grading-text", status: "completed", executionMode: "mock"
+    };
+  }
+  return sample;
 }
 
 test("grading evaluator reports question, score, confidence, and teacher-edit metrics", () => {
@@ -62,6 +76,7 @@ test("grading evaluator reports question, score, confidence, and teacher-edit me
   ]);
 
   assert.equal(report.schemaVersion, "grading-quality-v1");
+  assert.equal(report.ok, true);
   assert.equal(report.counts.cases, 2);
   assert.equal(report.counts.questions, 4);
   assert.equal(report.metrics.questionAccuracy, 0.75);
@@ -74,7 +89,7 @@ test("grading evaluator reports question, score, confidence, and teacher-edit me
 
 test("grading evaluator keeps null risk metrics when no low-confidence errors exist", () => {
   const report = evaluateGradingCases([
-    {
+    goldCase({
       caseId: "clean",
       sourceType: "generated_assessment",
       input: { subject: "数学", kind: "练习" },
@@ -93,7 +108,7 @@ test("grading evaluator keeps null risk metrics when no low-confidence errors ex
         confirmedAt: "2026-09-07T00:00:00.000Z",
         modifiedQuestionNos: []
       }
-    }
+    })
   ]);
 
   assert.equal(report.metrics.lowConfidenceRecall, null);
@@ -114,7 +129,7 @@ test("grading evaluator exposes the teacher-confirmed evidence boundary", () => 
 test("missing and unavailable actuals cannot earn accuracy or production claims", () => {
   for (const actual of [undefined, { available: false }, { available: true, questionResults: [] },
     { available: true, usedDynamicFallback: true, questionResults: goldCase().actual.questionResults }]) {
-    const report = evaluateGradingCases([goldCase({ actual })], { teacherReviewedReport: true, productionAccuracyClaim: true });
+    const report = evaluateGradingCases([goldCase({ actual, evaluationRun: undefined })], { teacherReviewedReport: true, productionAccuracyClaim: true });
     assert.equal(report.ok, false);
     assert.equal(report.productionAccuracyClaim, false);
     assert.equal(report.metrics.questionAccuracy, null);
@@ -134,10 +149,38 @@ test("null scores and unrecorded teacher edits stay unknown; absent predictions 
 });
 
 test("teacher labels alone cannot establish an independently executed report", () => {
-  const report = evaluateGradingCases([goldCase()], { teacherReviewedReport: true, productionAccuracyClaim: true });
+  const report = evaluateGradingCases([goldCase({ evaluationRun: undefined })], { teacherReviewedReport: true, productionAccuracyClaim: true });
   assert.equal(report.productionAccuracyClaim, false);
   assert.equal(report.ok, false);
   assert.ok(report.executionIssues.some((i) => i.code === "EXECUTION_EVIDENCE_MISSING"));
+  assert.equal(report.counts.questions, 0);
+  assert.ok(Object.values(report.metrics).every((value) => value === null));
+});
+
+test("a mixed report evaluates only independently bound successful cases", () => {
+  const valid = goldCase();
+  const missing = goldCase({ caseId: "missing-run", evaluationRun: undefined });
+  const tampered = goldCase({ caseId: "tampered-run" });
+  tampered.actual.score = 8;
+  const wrongScope = goldCase({ caseId: "image-scope" });
+  wrongScope.evaluationRun.scope = "grading-image";
+  const report = evaluateGradingCases([valid, missing, tampered, wrongScope]);
+  assert.equal(report.ok, false);
+  assert.equal(report.counts.cases, 4);
+  assert.equal(report.counts.evaluatedCases, 1);
+  assert.equal(report.counts.questions, 2);
+  assert.equal(report.metrics.scoreMeanAbsoluteError, 1);
+  assert.equal(report.productionAccuracyClaim, false);
+});
+
+test("the synthetic gold example has no predictions and cannot report accuracy", () => {
+  const cases = JSON.parse(fs.readFileSync(new URL("../fixtures/quality/grading-gold-cases.example.json", import.meta.url), "utf8"));
+  assert.ok(cases.every((sample) => !Object.hasOwn(sample, "actual")));
+  const report = evaluateGradingCases(cases);
+  assert.equal(report.ok, false);
+  assert.equal(report.counts.evaluatedCases, 0);
+  assert.ok(Object.values(report.metrics).every((value) => value === null));
+  assert.equal(report.productionAccuracyClaim, false);
 });
 
 test("malformed actual question collections are rejected without granting metrics", () => {

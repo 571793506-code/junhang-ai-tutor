@@ -37,17 +37,6 @@
         }
       ]
     },
-    "actual": {
-      "score": 5,
-      "quality": { "lowConfidence": false },
-      "questionResults": [
-        {
-          "questionNo": "1",
-          "status": "correct",
-          "confidence": 0.98
-        }
-      ]
-    },
     "teacherReview": {
       "confirmedBy": "synthetic-teacher",
       "confirmedAt": "2026-09-07T00:00:00.000Z",

@@ -67,8 +67,8 @@
 - 配置 `OCR_VISION_PROVIDER=deepseek-flash` 才选用 Flash 候选识别器；`recognizeImages` 输出沿用既有 OCR 契约，页码取服务端图片顺序，保留 bbox、sourceImageRef 和 cropRef。它只提取证据，不给分或确认归档。
 - 失败先分类，configuration 故障不追加调用；OCR、题干、学生作答或参考证据不足属于 evidence 故障，直接进入教师复核。额外调用次数和预算由代码策略统一约束，不能在服务层与模型层各叠加一套重试。
 - `usedModelEscalation`、模型名、档位、触发原因和预算只属于内部运行元数据，不得展示给学生、家长、课堂平板或公共屏。Sol availability 和合成质量样本只证明链路可用，不能证明生产批改正确率；正确率必须使用教师确认的 gold 数据评估。
-- 采集真实批改质量样本时先运行 `cmd /c npm.cmd run collect:grading:gold` 做只读 dry-run；只有确认候选范围后，才用 `--write tmp/quality/grading-gold-cases.json` 写出脱敏样本。把待评估模型的 `actual` 结果合入评估副本后，再运行 `cmd /c npm.cmd run check:grading:quality -- tmp/quality/grading-gold-cases.json`。对话中已由教师确认并归档的生成批改，按 `gradingSourcePackage`、逐题确认和归档状态纳入；外部图片批改还必须有 OCR、答案来源和图片质量证据。
-- 真实回放使用 `cmd /c npm.cmd run replay:grading:gold -- --gold <gold.json> --output <evaluation.json>`；评估入口只使用服务层结构化结果并强制 `persist:false`，需要受控模型探针时显式增加 `--model <model>`，需要缩短诊断预算时增加 `--timeout-ms <milliseconds>`。回放文件可直接交给 `cmd /c npm.cmd run check:grading:quality -- <evaluation.json>`，不得把模型原始输出写入金标或正式资产。
+- 采集真实批改质量样本时先运行 `cmd /c npm.cmd run collect:grading:gold` 做只读dry-run；确认候选范围后用 `--write tmp/quality/grading-gold-cases.json` 写出脱敏样本。教师已确认归档提供expected金标，不提供待测actual；对话中已确认的生成批改按 `gradingSourcePackage`、逐题确认和归档状态纳入，外部图片批改还必须有OCR、答案来源和图片质量证据。采集数量不等于模型准确率。
+- 真实回放使用 `cmd /c npm.cmd run replay:grading:gold -- --gold <gold.json> --output <evaluation.json>`；评估入口只使用服务层结构化结果并强制 `persist:false`，需要受控模型探针时显式增加 `--model <model>`，需要缩短诊断预算时增加 `--timeout-ms <milliseconds>`。actual与evaluationRun由独立服务回放产生并绑定输入/结果哈希，禁止复制expected或手工填写actual充当执行结果。回放文件直接交给 `cmd /c npm.cmd run check:grading:quality -- <evaluation.json>`；缺失或无效执行证据的样本不参与指标，全部无效时指标为null，混合批次用counts.evaluatedCases注明有效范围且整批仍失败。不得把模型原始输出写入金标或正式资产。
 
 ## 两条处理路径
 
@@ -128,5 +128,5 @@
 - 修改 Web 批改原型时运行 `cmd /c npm.cmd run typecheck --workspace apps/web`。
 - 涉及小程序既有快照时运行 `cmd /c npm.cmd run check:miniprogram-js`，但当前阶段不新增小程序功能。
 - 修改中文提示词、批改文案或归档规则时运行 `cmd /c npm.cmd run check:encoding`。
-- 金标文件必须由教师确认：每个 case 需要 `caseId`、`sourceType`、`input`、`expected` 和 `teacherReview`；`teacherReview` 必须包含 `confirmedBy`、ISO 格式 `confirmedAt` 和 `modifiedQuestionNos`，每道题必须有教师确认答案，或在 `status=uncertain` 时提供原因。先由 `quality-gold-contract.mjs` 校验，再运行 `cmd /c npm.cmd run check:grading:quality -- <gold-cases.json>`。
-- `fixtures/quality/grading-gold-cases.example.json` 是合成契约样本，只能证明 schema 和指标链路；报告中的 `productionAccuracyClaim` 默认必须为 `false`。没有真实教师确认 gold 文件和明确的生产评估标记前，不得宣称批改正确率已达生产标准。
+- 金标文件必须由教师确认：每个case需要 `caseId`、`sourceType`、`input`、`expected` 和 `teacherReview`；teacherReview必须包含confirmedBy、ISO格式confirmedAt和modifiedQuestionNos，每题须有教师确认答案，或在status=uncertain时提供原因。先由 `quality-gold-contract.mjs` 校验，独立回放后再运行 `cmd /c npm.cmd run check:grading:quality -- <evaluation.json>`。
+- `fixtures/quality/grading-gold-cases.example.json` 是无actual的合成金标契约样本；直接执行质量检查必须退出1、evaluatedCases为0且指标为null，须先独立回放才有待评估结果。合成回放仍不得作为生产准确率证据。没有真实教师确认gold、合格独立执行证据和教师复核报告前，不得宣称批改正确率已达生产标准。

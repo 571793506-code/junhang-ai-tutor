@@ -30,6 +30,7 @@ export function evaluateGradingCases(cases = [], options = {}) {
   const executionIssues = [];
   const addIssue = (sample, code) => executionIssues.push({ caseId: sample.caseId, code });
   let questionCount = 0;
+  let evaluatedCases = 0;
   let binaryCorrect = 0;
   let statusAgreements = 0;
   let scoreAbsoluteError = 0;
@@ -44,6 +45,7 @@ export function evaluateGradingCases(cases = [], options = {}) {
   const failureReasons = {};
 
   for (const sample of normalizedCases) {
+    const issueCountBeforeCase = executionIssues.length;
     const expected = sample.expected || {};
     const actual = sample.actual || {};
     const actualByNo = questionsByNo(actual);
@@ -67,6 +69,12 @@ export function evaluateGradingCases(cases = [], options = {}) {
       addIssue(sample, "ACTUAL_RESULTS_INCOMPLETE");
       continue;
     }
+
+    // Metrics describe independently bound successful executions, not imported
+    // predictions with missing/invalid provenance. Valid cases in a failed batch
+    // may still contribute, with explicit coverage in counts.evaluatedCases.
+    if (executionIssues.length !== issueCountBeforeCase) continue;
+    evaluatedCases += 1;
 
     for (const [index, gold] of expectedQuestions.entries()) {
       const questionNo = String(gold.questionNo || index + 1);
@@ -119,6 +127,7 @@ export function evaluateGradingCases(cases = [], options = {}) {
     teacherConfirmedCaseCount,
     counts: {
       cases: normalizedCases.length,
+      evaluatedCases,
       questions: questionCount,
       scoreCases: scoreCaseCount,
       lowConfidenceGoldCases: lowConfidenceExpected,
