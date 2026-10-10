@@ -61,7 +61,8 @@
 .gw-question-picker { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .gw-question-picker button, .gw-mobile-tabs button { border: 1px solid #bdd4d6; border-radius: 8px; background: white; color: #155b58; padding: 9px 12px; }
 .gw-question-picker button[aria-pressed="true"], .gw-mobile-tabs button[aria-pressed="true"] { color: white; background: #137f7c; }
-.gw-question-detail { border: 1px solid #d8e4e6; border-radius: 12px; padding: 18px; background: white; overflow-wrap: anywhere; line-height: 1.7; }
+.gw-question-detail { margin-top: 20px; border: 1px solid #d8e4e6; border-radius: 12px; padding: 24px; background: white; overflow-wrap: anywhere; line-height: 1.8; scroll-margin-top: 20px; }
+.gw-question-detail h3 { margin: 0 0 16px; font-size: 18px; }
 .gw-question-detail p { white-space: pre-wrap; }
 .gw-question-detail h4 { color: #32545d; margin-bottom: 6px; }
 .gw-analysis-link { display: inline-block; color: #086c69; margin-top: 8px; text-underline-offset: 4px; }
@@ -83,7 +84,7 @@
   .gw-grid[data-region="image"] > :not(.gw-original), .gw-grid[data-region="question"] > :not(.gw-questions), .gw-grid[data-region="edit"] > :not(.gw-edit) { display: none; }
   .gw-mobile-tabs { display: flex; gap: 6px; margin: 16px 0; }
   .gw-mobile-tabs button { flex: 1; padding: 12px 6px; }
-  .gw-analysis { padding: 18px; }
+  .gw-question-detail, .gw-analysis { padding: 18px; }
   .gw-toolbar, .gw-task-bar { align-items: stretch; }
   .gw-toolbar > *, .gw-task-bar > * { width: 100%; }
 }

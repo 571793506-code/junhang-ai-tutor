@@ -175,11 +175,7 @@ export function GradingWorkbench({ teacherId, active, sources, onLegacy, onArchi
         <div className="gw-questions"><label className="tw-check"><input type="checkbox" checked={onlyDoubts} disabled={dirty || !!busy} onChange={(e) => setOnlyDoubts(e.target.checked)} />只看疑点题</label>
           <div className="gw-question-picker">{shownQuestions.map((q) => <button key={q.id} disabled={dirty || !!busy} aria-pressed={questionId === q.id} onClick={() => { setQuestionId(q.id); setChecked(false); }}>第 {q.questionNo} 题 · {statuses[q.status]}{q.reviewedByTeacher ? " · 已确认" : ""}</button>)}</div>
           {onlyDoubts && !shownQuestions.length && <p>没有待核对的疑点题。取消筛选可继续逐题确认。</p>}
-          {question && <article className="gw-question-detail"><h3>第 {question.questionNo} 题</h3><h4>题干</h4><p>{question.printedPrompt || question.prompt || "缺少题干"}</p><h4>学生作答</h4><p>{question.studentAnswer == null ? "尚未可靠识别，不能按空白计零分" : question.studentAnswer === "" ? "已识别为空白作答" : text(question.studentAnswer)}</p>
-            <small>{question.recognitionCorrectedByTeacher ? "识别文字已由教师校正" : "请对照原图核对识别文字"}{question.confidence != null ? ` · 原识别置信度 ${Math.round(question.confidence * 100)}%` : ""}</small>
-            <h4>本题得分：{statuses[question.status]} · {question.score ?? "待核对"} / {question.maxScore ?? "—"}</h4>
-            <a className="gw-analysis-link" href="#grading-current-analysis">查看本题评分与解析 ↓</a>
-          </article>}
+          {question && <a className="gw-analysis-link" href="#grading-current-question">查看本题题干与作答 ↓</a>}
         </div>
         <aside className="gw-edit"><h3>当前题修改与确认</h3>
           <button className="secondary-button" disabled={!writable || dirty || !question} onClick={() => beginEdit("recognition")}>修正识别并仅重批本题</button>
@@ -202,6 +198,11 @@ export function GradingWorkbench({ teacherId, active, sources, onLegacy, onArchi
           {archived?.workflowId === view.id && <p role="status">版本 {archived.revision} 已归档。后续修改需要重新确认并另行归档。</p>}
         </aside>
       </div>
+      {question && <article className="gw-question-detail" id="grading-current-question" aria-label="本题题干与学生作答"><h3>第 {question.questionNo} 题 · 题干与学生作答</h3><h4>题干</h4><p>{question.printedPrompt || question.prompt || "缺少题干"}</p><h4>学生作答</h4><p>{question.studentAnswer == null ? "尚未可靠识别，不能按空白计零分" : question.studentAnswer === "" ? "已识别为空白作答" : text(question.studentAnswer)}</p>
+        <small>{question.recognitionCorrectedByTeacher ? "识别文字已由教师校正" : "请对照原图核对识别文字"}{question.confidence != null ? ` · 原识别置信度 ${Math.round(question.confidence * 100)}%` : ""}</small>
+        <h4>本题得分：{statuses[question.status]} · {question.score ?? "待核对"} / {question.maxScore ?? "—"}</h4>
+        <a className="gw-analysis-link" href="#grading-current-analysis">查看本题评分与解析 ↓</a>
+      </article>}
       {question && <section className="gw-analysis" id="grading-current-analysis" aria-label="本题评分与解析">
         <header className="gw-analysis-heading"><h3>第 {question.questionNo} 题 · 评分与解析</h3><span>{question.reviewedByTeacher ? "教师已确认" : "待教师复核"} · {question.score ?? "待核对"} / {question.maxScore ?? "—"}</span></header>
         <div className="gw-analysis-section"><h4>可信参考答案与评分依据</h4><p>{text(question.correctAnswer) || "尚无可靠答案来源"}</p><p>{text(question.rubric) || "评分依据请在原来源中核对"}</p></div>
