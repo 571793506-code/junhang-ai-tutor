@@ -2,6 +2,16 @@
 
 更新日期：2026-10-10。对应日常工作台计划 Task 9。当前结论：第1至4项已按教师确认完成；第5项“当前学生/教材/教师留出任务”暂缓，待教师与学生继续磨合。第6项已完成业务库备份、工作流迁移、Prisma Client 更新及持久化启用；教师已确认本份生成内容，真实 Web 已完成发布、预览与正式学生卷/解析卷导出，两份均为1页A4。本轮16题真实批改已按教师最终决定确认，版本5、37.5/60分；独立归档、8条错题、真实数据库幂等及档案证据准入验收通过。Web教师确认和归档回显已修正，真实任务刷新后显示版本5已归档，分数及确认数保持一致。按已约定范围，第九阶段教学与数据库闭环验收完成，可进入下一阶段；第5项继续暂缓。下文较早的失败、未确认、未归档及旧界面问题均为历史记录，以最新记录为准。
 
+### 2026-10-12 日常质量闭环：现行预算独立评分回放
+
+- 沿用补齐可信题型的脱敏快照，只回放最新16题 `grading-966504f42b8df647`：`npm.cmd run replay:grading:gold -- --gold tmp/quality/gold-cases-20261012.json --output tmp/quality/default-budget-latest16-20261012.json --limit 1 --max-consecutive-failures 1`。未覆盖模型、超时或deep audit，服务默认总预算180000ms、主调用120000ms、token pool 12000；本次两次尝试各预留6000 tokens。persist:false，不重新OCR、确认或归档。
+- 脚本已结束并完整保存报告，不是进程悬挂。runId `864268ff-cedb-47b8-89fa-ebf95fddee3c`，执行耗时180050ms（外层180057ms）：Astra主调用120016ms，Sol可用性替补59768ms，均为TEACHING_DEADLINE；无成功结果，available=false、failureReason=timeout，usage/费用未知。批次completed=true仅表示脚本收口，不表示评分成功。其余10份不追加调用。
+- 题型、来源上下文、布局题型及作答/过程覆盖均16，missing为空；此覆盖不等于原共享材料或打印几何完整。补齐题型后在正常预算仍超时，故题型遗漏不是已经解决超时的证据。已定位到两个模型调用的deadline退出，不能由此区分供应商排队、响应耗时或连接故障，也不据此直接改路由、增加预算或拆题。
+- `check:grading:quality`实际退出1，执行问题为EXECUTION_NOT_SUCCESSFUL及ACTUAL_RESULTS_INCOMPLETE；1份尝试、0份有效评估，所有质量指标null、productionAccuracyClaim=false。本次单份回放失败占1/1，仅描述该批可用性，不推广为生产失败率。16题分数差异与状态一致性保持未知，不能将uncertain兜底当作模型评分或将教师expected复制到actual。
+- 本地核验脚本 `tmp/quality/inspect-default-budget-20261012.mjs` 已验证输入/结果hash、失败状态、两次尝试、expected与teacherReview未变；教师总分37.5、第14题5分保留。质量及逐题未知对照报告为 `tmp/quality/default-budget-latest16-20261012.quality.json`、`.inspection.json`；原始输出、`.json.run.json`、`.json.progress.jsonl`和`.log`保留。教师评分及既有业务归档不被独立回放失败替代。
+- 问题追踪：正常预算的长批改可用性尚未解除。下一项先检查服务到供应商调用的连接/响应证据和当前配置，再用有依据的受控验证决定最小修正；其余样本批评估及生成同类要求回归仍待完成，第5项留出任务继续暂缓。本轮未调整生产模型策略或业务代码。
+- 收尾：质量契约、采集、回放、生成/批改评测及归档解析器53/53回归通过，日志 `tmp/quality/default-budget-regression-20261012.log`；check:api、check:skills及git diff --check通过。源码编码扫描1041文件，仅保留既有临时Prisma解包runtime/binary.js:126告警，退出1、0自动修复；日志 `tmp/quality/default-budget-encoding-20261012.log`。本轮仅显式提交计划与验收文档，既有encoding-history-report.md、output/及tmp/运行证据保留，不清理。
+
 ### 2026-10-12 日常质量闭环：归档、采集与回放输入核对
 
 - 只读对照11份已确认样本、数据库Submission/AssignmentItem及最新工作流第5版。旧采集投影与数据库一致，教师金标未变；来源包本身均缺少结构化题型，但登记作业保留题型，最新16题不可变归档还保留assignmentQuestionTypes。问题是采集未读取/投影可信补充题型，而不是原归档题型丢失。对照证据为 `tmp/quality/input-audit-20261012.json`；共享材料、answerFormat及原打印布局未见现存结构化证据，不能由题型恢复等同认定其完整。
