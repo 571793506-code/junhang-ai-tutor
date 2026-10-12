@@ -2,6 +2,17 @@
 
 更新日期：2026-10-10。对应日常工作台计划 Task 9。当前结论：第1至4项已按教师确认完成；第5项“当前学生/教材/教师留出任务”暂缓，待教师与学生继续磨合。第6项已完成业务库备份、工作流迁移、Prisma Client 更新及持久化启用；教师已确认本份生成内容，真实 Web 已完成发布、预览与正式学生卷/解析卷导出，两份均为1页A4。本轮16题真实批改已按教师最终决定确认，版本5、37.5/60分；独立归档、8条错题、真实数据库幂等及档案证据准入验收通过。Web教师确认和归档回显已修正，真实任务刷新后显示版本5已归档，分数及确认数保持一致。按已约定范围，第九阶段教学与数据库闭环验收完成，可进入下一阶段；第5项继续暂缓。下文较早的失败、未确认、未归档及旧界面问题均为历史记录，以最新记录为准。
 
+### 2026-10-12 日常质量闭环：响应阶段排查与生成基线回归
+
+- 教师明确清理后置到所有阶段完成，本轮只读核对工作区范围，未执行清理/移动运行文件。合成探针 `tmp/quality/transport-stage-probe-20261012.json`：DNS126ms、TLS829ms成功，当前Astra5805ms、Sol4557ms均HTTP200且预期JSON有效；两次调用各30秒/2048 tokens上限、无学生数据、无自动重试。仅证明当前小请求通道可用，不证明长批改已恢复。
+- 基于上述新连接证据，仅对原16题做一次带阶段记录的现行预算回放：`tmp/quality/traced-replay-latest16-20261012.{json,run.json,transport.json,log}`，progress在`.progress.jsonl`。请求32501字节，system/user文本2374/18318字符、每次6000 completion tokens、高推理、主120秒及替补剩余约60秒；两次均在收到响应头前deadline退出，总180050ms、状态未知、无响应体。该阶段排除PDF/JSON解析导致本次等待，但不能区分上游计算、排队或连接处理原因；不擅自降低推理、扩预算、拆题或改模型职责。质量CLI退出1、有效样本0、全部指标null；教师金标与原归档不变，后续批次暂未运行。
+- 为补齐下一次调用证据，共用runtime及teaching-model-runner现把request_started/response_headers/response_body_complete写入内部attempt.transportDiagnostics，白名单仅阶段、合法HTTP状态、非负安全整数耗时/字节数。无URL、密钥、原文或学生内容；外部回调异常不影响请求，结束后迟到事件不能改attempt，模型候选/输入剔除诊断字段，角色投影不返回诊断。调用次数、预算及路由未变。5项本地HTTP/注入测试先复现缺失，再通过；覆盖无响应头、响应体停滞、白名单和观察器失败。带跟踪的真实回放发生在代码修正前，用临时观测器采集，不能声称生产API已重启或新字段已在运行实例验收。
+- 生成基线从既有复核稿提取为 `fixtures/quality/generation-confirmed-calculation.json`：教师确认对应版本3，原内容快照为版本2，确认来源见9月30日记录。新增共用服务离线回归验证4题、20分、答案120/12/50/13、逐题原rubric及解析不变；本份仅结果1/1/1/1分，与更早另一练习2/2/1/1分分开。模型返回为mock，persist:false，既不新增教师金标预测、发布或模型质量证明，也不把4题固化为产品默认。原始JSON/教师业务版本均不改。
+- 定向模型/诊断/金标/采集/回放/评测/归档解析/专项训练/已确认生成基线114/114通过、0跳过，日志 `tmp/quality/remaining-work-regression-20261012.log`；API、Skills及生成蓝图通过。另行扩展生成审查回归42项中40通过、2失败，日志 `tmp/quality/daily-generation-regression-20261012.log`：旧综合卷mock未给逐题score，preserveScores路径填入题型默认分后汇总116，测试预期100；失败在assessment-draft-review.test.mjs:946、1021。不删除旧测试、不放宽断言、不为凑100改已给定rubric，登记为待处理的历史综合卷缺分兼容问题，不能宣称所有生成回归通过。
+- 随后完成缺分兼容修正：只对旧接口且所有题均无score/points/rubric的综合内容使用已有蓝图分配分值，并明确usedDynamicFallback=true、保留教师复核；当前teaching-pipeline-v1输出、部分已有分值及任一已有评分依据均不重新缩放。专项原分值和rubric不变。旧附加题测试保留100分断言，并加强兜底标记；Weather“完整模型”测试夹具补充其原先缺失的明确分值，保留“不兜底”断言。生成审查/专项/已确认基线及评测44项通过（追加评分保留测试前），日志 `tmp/quality/daily-generation-green-final-20261012.log`；此前失败日志保留，不将无分值兜底算成模型质量成功。
+- 源码编码检查1046文件仍仅既有Prisma临时包runtime/binary.js:126告警，退出1、0自动修复，日志 `tmp/quality/remaining-work-encoding-final-20261012.log`；后续新增评分兼容和文档内容按同一守卫再检查。本轮核心产出是内部可观测性、已复核生成基线与旧综合卷缺分兼容修正；长批改可用性、其余10份独立评估及真实新生成内容评价仍待完成。第5项留出继续暂缓。
+- 最终合并回归143/143通过，含新增旧综合卷明确rubric/部分已有分值不被重写的回归，日志 `tmp/quality/remaining-work-final-regression-20261012.log`；最终API、Skills、蓝图通过。服务smoke退出0（日志 `tmp/quality/remaining-work-services-20261012.log`），真实问答及任务草稿可用；英语综合小测104420ms返回20题/54分且usedDynamicFallback=true，只能算服务返回及待复核草稿，不能算生成质量通过或教师新内容验收。该脚本persist:false，未发布、确认或写业务记录。最终编码1046文件仍仅上述既有vendor告警（`remaining-work-final-encoding-20261012.log`），随后类型声明和记录用同一编码守卫定向核查。未重新启动运行API，新增内部字段的生产实例启用尚未验收。
+
 ### 2026-10-12 日常质量闭环：现行预算独立评分回放
 
 - 沿用补齐可信题型的脱敏快照，只回放最新16题 `grading-966504f42b8df647`：`npm.cmd run replay:grading:gold -- --gold tmp/quality/gold-cases-20261012.json --output tmp/quality/default-budget-latest16-20261012.json --limit 1 --max-consecutive-failures 1`。未覆盖模型、超时或deep audit，服务默认总预算180000ms、主调用120000ms、token pool 12000；本次两次尝试各预留6000 tokens。persist:false，不重新OCR、确认或归档。

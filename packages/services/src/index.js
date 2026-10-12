@@ -3901,13 +3901,22 @@ function normalizeAssessmentDraft(result = {}, input = {}) {
     };
   }
   const usedModelEscalation = result.modelRun?.metadata?.usedModelEscalation === true;
-  const providerUsedDynamicFallback = !result.available || !items.length || result.modelRun?.metadata?.partialGeneration === true;
-  const review = reviewAndRepairAssessmentItems(items.length ? items : buildFallbackAssessmentItems(input), input, { preserveScores: result.available && items.length > 0 });
+  // Only legacy, wholly unscored output without a rubric may use the existing
+  // blueprint allocation. Explicit scores/rubrics and bounded pipeline output
+  // must stay intact for validation, never be rescaled to make a total pass.
+  const unscoredLegacyFallback = result.available && items.length > 0
+    && result.modelRun?.metadata?.teachingPipelineVersion !== "teaching-pipeline-v1"
+    && rawItems.every((item) => item && typeof item === "object"
+      && item.score == null && item.points == null && item.metadata?.score == null
+      && !item.rubric && !item.analysis && !item.explanation && !item.metadata?.rubric);
+  const providerUsedDynamicFallback = !result.available || !items.length || result.modelRun?.metadata?.partialGeneration === true || unscoredLegacyFallback;
+  const review = reviewAndRepairAssessmentItems(items.length ? items : buildFallbackAssessmentItems(input), input, { preserveScores: result.available && items.length > 0 && !unscoredLegacyFallback });
   const usedDynamicFallback = providerUsedDynamicFallback || review.usedRepairFallback;
   const safeItems = review.items;
   const printNotes = [
     ...(Array.isArray(parsed.printNotes) ? parsed.printNotes : Array.isArray(parsed.notes) ? parsed.notes : []),
     ...review.notes,
+    ...(unscoredLegacyFallback ? ["旧接口内容未提供逐题分值或评分细则，已按蓝图分配兜底分值；这不是完整模型质量结果，须教师复核评分依据。"] : []),
     ...(providerUsedDynamicFallback ? ["模型超时、部分分区不可用或返回内容未形成完整标准题目结构，系统已按动态兜底题池和 A4 排版规则修复草稿，教师需复核后使用。"] : []),
     ...(review.usedRepairFallback && !providerUsedDynamicFallback ? ["模型内容存在缺题或阅读材料不足，服务层已补题或替换内容，教师需复核后使用。"] : [])
   ];

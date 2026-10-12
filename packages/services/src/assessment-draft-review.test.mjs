@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { allocateAssessmentScores } from "@junhang/core";
 import { buildAssessmentBlueprintCheck, draftAssessmentService } from "./index.js";
 
 const sampleDraftText = JSON.stringify({
@@ -128,6 +129,11 @@ function weatherQuizDraftText({ includeOnlyOneItem = false } = {}) {
       }))
     }
   ];
+  // This helper represents a complete model result, including explicit scores.
+  // Missing-score compatibility is exercised separately by the bonus fixtures.
+  const weatherItems = sections.flatMap(section => section.items);
+  const weatherScores = allocateAssessmentScores(weatherItems.map(item => item.itemType), { subject: "英语", kind: "小测" });
+  weatherItems.forEach((item, index) => { item.score = weatherScores[index]; });
   if (includeOnlyOneItem) {
     sections.splice(1);
     sections[0].items = sections[0].items.slice(0, 1);
@@ -945,6 +951,7 @@ test("draftAssessmentService keeps exam total score at 100 when bonus is request
 
   assert.equal(result.totalScore, 100);
   assert.equal(result.generationPipeline.repair.totalScore, 100);
+  assert.equal(result.usedDynamicFallback, true);
 });
 
 test("draftAssessmentService repairs missing requested math bonus item without changing exam total", async () => {
@@ -1020,6 +1027,7 @@ test("draftAssessmentService repairs missing requested math bonus item without c
 
   assert.equal(result.totalScore, 100);
   assert.equal(result.generationPipeline.repair.totalScore, 100);
+  assert.equal(result.usedDynamicFallback, true);
   assert.equal(
     result.draftItems.some((item) => /附加题|挑战|拓展/.test(`${item.metadata?.sectionTitle || ""} ${item.prompt || ""}`)),
     true
