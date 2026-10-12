@@ -49,6 +49,8 @@
 
 ## 模型与复核
 
+模型超时先核对内部attempt.transportDiagnostics：request_started代表尚未观察到响应头，response_headers代表响应体尚未完成，response_body_complete代表传输已完成。只记录白名单阶段、HTTP状态、耗时和字节数，不保存URL、密钥、原始模型输出或学生文本；此观察不能直接确定供应商根因。无响应状态仍未知，不把deadline解释为HTTP 503。合成小请求成功仅证明当前基本通道，不能证明整卷可用；教师已确认评分及归档不受独立回放失败影响。
+
 调用前读取 `packages/ai/src/model-policy.js` 的任务策略，本文件不复制模型参数或数值预算。9 月 11 日设计确定 Astra 主观批改与参考答案、Flash 可选识别/提取、Sol 仅限独立有限任务或可用性替补，接入进度以实施计划为准。OCR 默认 MiniMax 保持至真实图片对照通过。任何 `teacher_confirmation` 未完成的结果都保持草稿或 `review_required`。
 
 ## 核心原则

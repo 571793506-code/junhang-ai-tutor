@@ -1,13 +1,13 @@
 import { classifyTaskFailure, resolveTeachingTaskPolicy } from "./model-policy.js";
 import { inspectEncodingPayload } from "@junhang/core";
-import { sanitizeUpstreamFailureDiagnostics } from "./upstream-failure-diagnostics.js";
+import { sanitizeUpstreamFailureDiagnostics, sanitizeTransportDiagnostics } from "./upstream-failure-diagnostics.js";
 
 const INTERNAL_KEYS = new Set([
   "__proto__", "constructor", "prototype", "prompt", "systemPrompt", "messages",
   "provider", "providerId", "model", "modelRun", "raw", "debug", "attempts", "rulePack",
   "rulePath", "root", "budget", "generationBudget", "reasoningEffort", "apiKey", "outputContract",
   "assessmentTotalTimeoutMs", "assessmentMaxTokens", "generationTimeoutMs", "generationMaxTokens",
-  "confirmedBy", "confirmedAt", "archiveEligible", "finalScore", "upstreamDiagnostics"
+  "confirmedBy", "confirmedAt", "archiveEligible", "finalScore", "upstreamDiagnostics", "transportDiagnostics", "onTransportProgress"
 ]);
 
 const DIAGNOSTIC_ISSUES = new Set([
@@ -68,7 +68,7 @@ export function projectTeachingResult(result, role) {
   return { status: result.status === "success" ? "draft" : result.status, candidate: result.candidate, needsTeacherReview: true };
 }
 
-async function boundedCall(call, route, messages, { timeoutMs, signal, maxTokens }) {
+async function boundedCall(call, route, messages, { timeoutMs, signal, maxTokens, onTransportProgress }) {
   const controller = new AbortController();
   const abort = () => controller.abort(signal.reason);
   signal?.addEventListener("abort", abort, { once: true });
@@ -79,7 +79,7 @@ async function boundedCall(call, route, messages, { timeoutMs, signal, maxTokens
     return await Promise.race([
       Promise.resolve().then(() => {
         controller.signal.throwIfAborted();
-        return call(route, messages, { timeoutMs, signal: controller.signal, maxTokens });
+        return call(route, messages, { timeoutMs, signal: controller.signal, maxTokens, onTransportProgress });
       }),
       new Promise((_, reject) => {
         onAbort = () => reject(controller.signal.reason);
@@ -137,8 +137,14 @@ export async function runTeachingUnit(
     const startedAt = now();
     attempt.startedAt = new Date(startedAt).toISOString();
     let classification;
+    let observing = true;
     try {
-      const response = await boundedCall(call, route, messages, { timeoutMs, signal, maxTokens });
+      const response = await boundedCall(call, route, messages, { timeoutMs, signal, maxTokens,
+        onTransportProgress: (event) => {
+          const diagnostic = sanitizeTransportDiagnostics(event);
+          if (observing && diagnostic) attempt.transportDiagnostics = diagnostic;
+        }
+      });
       const usage = response?.usage;
       const outputTokens = usage?.completion_tokens ?? usage?.output_tokens;
       if (Number.isFinite(outputTokens) && outputTokens >= 0) {
@@ -177,6 +183,7 @@ export async function runTeachingUnit(
       }
       issues = [classification.triggerClass === "quality" ? "invalid_output" : classification.triggerClass];
     } finally {
+      observing = false;
       attempt.elapsedMs = Math.max(0, now() - startedAt);
     }
     attempt.triggerClass = classification.triggerClass;

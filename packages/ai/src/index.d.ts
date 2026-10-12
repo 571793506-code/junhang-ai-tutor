@@ -44,9 +44,16 @@ export interface TeachingResult {
   issueCodes: string[];
   internal: { attempts: Array<Record<string, unknown>>; rules: Omit<TeachingRulePack, "text"> | null };
 }
+export interface TeachingTransportProgress {
+  phase: "request_started" | "response_headers" | "response_body_complete";
+  status: number | null;
+  elapsedMs: number;
+  requestBytes: number;
+  responseBytes?: number;
+}
 export type TeachingCall = (
   route: TeachingRoute, messages: Array<{ role: string; content: string }>,
-  options: { timeoutMs: number; maxTokens: number; signal?: AbortSignal }
+  options: { timeoutMs: number; maxTokens: number; signal?: AbortSignal; onTransportProgress?: (event: TeachingTransportProgress) => void }
 ) => Promise<{ text: string; usage?: Record<string, number> | null }>;
 export interface TeachingExecution {
   outputContract?: string;
@@ -64,7 +71,7 @@ export declare function resolveTeachingTaskPolicy(task: TeachingTask, config?: R
   task: TeachingTask; module: TeachingModule; primary: TeachingRoute; replacement: TeachingRoute | null;
   maxAdditionalAttempts: number; maxConcurrency: number; budget: { timeoutMs: number; maxTokens: number };
 };
-export declare function callTeachingModel(config: RuntimeConfigLike, route: TeachingRoute, messages: Array<{ role: string; content: string }>, options?: { timeoutMs?: number; maxTokens?: number; signal?: AbortSignal }): ReturnType<TeachingCall>;
+export declare function callTeachingModel(config: RuntimeConfigLike, route: TeachingRoute, messages: Array<{ role: string; content: string }>, options?: { timeoutMs?: number; maxTokens?: number; signal?: AbortSignal; onTransportProgress?: (event: TeachingTransportProgress) => void }): ReturnType<TeachingCall>;
 export declare function runTeachingTask(config: RuntimeConfigLike, task: TeachingTask, input: Record<string, unknown>, execution: TeachingExecution): Promise<TeachingResult>;
 export declare function projectTeachingResult(result: TeachingResult, role: string): { status: string; candidate?: Record<string, unknown> | null; needsTeacherReview?: boolean };
 export declare function runTeachingUnit(args: {
@@ -256,6 +263,7 @@ export declare function callOpenAiCompatibleChat(args: {
   allowStructuredRetry?: boolean;
   completionTokenLimit?: boolean;
   omitTemperature?: boolean;
+  onTransportProgress?: (event: TeachingTransportProgress) => void;
 }): Promise<unknown>;
 export declare function callDeepSeekChat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>, options?: Record<string, unknown>): Promise<unknown>;
 export declare function callMiniMaxChat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>): Promise<unknown>;

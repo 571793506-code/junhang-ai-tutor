@@ -321,7 +321,8 @@ export async function callOpenAiCompatibleChat({
   signal,
   allowStructuredRetry = true,
   completionTokenLimit = false,
-  omitTemperature = false
+  omitTemperature = false,
+  onTransportProgress
 }) {
   if (!apiKey) throw new Error("Missing API key");
   const requestStartedAt = Date.now();
@@ -331,6 +332,13 @@ export async function callOpenAiCompatibleChat({
   if (responseFormat) payload.response_format = responseFormat;
   if (maxTokens) payload[completionTokenLimit ? "max_completion_tokens" : "max_tokens"] = maxTokens;
   if (reasoningEffort) payload.reasoning_effort = reasoningEffort;
+  const requestBody = JSON.stringify(payload);
+  const requestBytes = new TextEncoder().encode(requestBody).byteLength;
+  const observeTransport = (phase, status = null, responseBytes) => {
+    // Internal server-owned observer; diagnostics must not change call behavior.
+    try { onTransportProgress?.({ phase, status, elapsedMs: Date.now() - requestStartedAt, requestBytes,
+      ...(responseBytes !== undefined ? { responseBytes } : {}) }); } catch {}
+  };
   const controller = timeoutMs || signal ? new AbortController() : null;
   const abortForCaller = () => controller?.abort(signal?.reason);
   if (signal?.aborted) abortForCaller();
@@ -340,16 +348,19 @@ export async function callOpenAiCompatibleChat({
   let response;
   let text;
   try {
+    observeTransport("request_started");
     response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(payload),
+      body: requestBody,
       signal: controller?.signal
     });
+    observeTransport("response_headers", response.status);
     text = await response.text();
+    observeTransport("response_body_complete", response.status, new TextEncoder().encode(text).byteLength);
   } catch (error) {
     if (signal?.aborted) throw signal.reason || new Error("ASSESSMENT_GENERATION_CANCELLED");
     if (error?.name === "AbortError") throw new Error(`MODEL_TIMEOUT after ${timeoutMs}ms`);
@@ -438,7 +449,8 @@ export async function callTeachingModel(config, route, messages, options = {}) {
     reasoningEffort: openai ? route.reasoningEffort : undefined,
     allowStructuredRetry: false,
     completionTokenLimit: openai,
-    omitTemperature: openai
+    omitTemperature: openai,
+    onTransportProgress: options.onTransportProgress
   });
   return { text: extractChatText(body), usage: body.usage || null };
 }

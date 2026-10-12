@@ -43,3 +43,13 @@ export function sanitizeUpstreamFailureDiagnostics(value) {
     reasonHint: REASON_HINTS.has(value.reasonHint) ? value.reasonHint : "unknown",
     retryAfterSeconds: Number.isInteger(value.retryAfterSeconds) && value.retryAfterSeconds >= 0 && value.retryAfterSeconds <= 86400 ? value.retryAfterSeconds : null };
 }
+
+export function sanitizeTransportDiagnostics(value) {
+  if (!value || !["request_started", "response_headers", "response_body_complete"].includes(value.phase)) return null;
+  const result = { phase: value.phase };
+  if (value.status === null || Number.isInteger(value.status) && value.status >= 100 && value.status <= 599) result.status = value.status;
+  for (const key of ["elapsedMs", "requestBytes", "responseBytes"]) {
+    if (Number.isSafeInteger(value[key]) && value[key] >= 0) result[key] = value[key];
+  }
+  return result;
+}
