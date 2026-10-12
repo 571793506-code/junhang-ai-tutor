@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isTeachingWorkflowArchiveSubmission } from "@junhang/services";
+import { legacyAssignmentQuestionTypes } from "../apps/api/src/teaching-workflow-archive-resolvers.js";
 
 import { validateGradingGoldCases } from "./quality-gold-contract.mjs";
 
@@ -75,7 +77,7 @@ function sourcePackageFor(row) {
   const content = record(row.content);
   const metadata = record(row.assignment?.metadata);
   const result = record(row.grading?.result);
-  const packageValue = metadata.gradingSourcePackage || content.sourcePackage || result.sourcePackage;
+  const packageValue = content.workflowArchive?.snapshot?.gradingSourcePackage || metadata.gradingSourcePackage || content.sourcePackage || result.sourcePackage;
   return record(packageValue);
 }
 
@@ -125,6 +127,12 @@ function buildInput(row, packageValue, packageQuestions, gradingQuestions, priva
   const packageByNo = new Map(packageQuestions.map((item, index) => [questionNo(item, index), item]));
   const recognitionQuestions = list(content.ocrQuestions).length ? content.ocrQuestions : list(content.ocr?.questions);
   const recognitionByNo = new Map(recognitionQuestions.map((item, index) => [questionNo(item, index), item]));
+  // Immutable archives retain their original type binding, even if live items
+  // change. Other records use exactly the resolver's source-alignment rules.
+  const typeEvidence = content.workflowArchive
+    ? list(content.workflowArchive.snapshot?.archiveEvidence?.assignmentQuestionTypes)
+    : legacyAssignmentQuestionTypes(row.assignment || {}, { ...packageValue, questions: packageQuestions });
+  const typesByNo = new Map(typeEvidence.map((item) => [item.questionNo, item.itemType]));
   const sanitizedQuestions = packageQuestions.map((item, index) => ({
     questionNo: questionNo(item, index),
     prompt: sanitizeText(item.prompt, privateNames),
@@ -134,13 +142,17 @@ function buildInput(row, packageValue, packageQuestions, gradingQuestions, priva
     knowledgePoint: sanitizeText(item.knowledgePoint, privateNames),
     rubric: sanitizeValue(item.rubric, privateNames),
     ...(item.context !== undefined ? { context: sanitizeValue(item.context, privateNames) } : {}),
-    ...(item.itemType !== undefined ? { itemType: sanitizeText(item.itemType, privateNames) } : {}),
+    ...(item.itemType !== undefined || (!text(item.type) && typesByNo.has(questionNo(item, index)))
+      ? { itemType: sanitizeText(item.itemType ?? typesByNo.get(questionNo(item, index)), privateNames) } : {}),
     ...(item.type !== undefined ? { type: sanitizeText(item.type, privateNames) } : {}),
     ...(item.figure !== undefined ? { figure: sanitizeValue(item.figure, privateNames) } : {})
   }));
+  const sanitizedByNo = new Map(sanitizedQuestions.map((item) => [item.questionNo, item]));
   const ocrQuestions = gradingQuestions.map((item, index) => {
     const no = questionNo(item, index);
     const packageQuestion = packageByNo.get(no) || {};
+    const sourceQuestion = sanitizedByNo.get(no) || {};
+    const itemType = sourceQuestion.context?.itemType || sourceQuestion.itemType || sourceQuestion.type;
     // The confirmed answer may contain a teacher correction; process and geometry
     // come from recognition evidence, never the grader's studentProcess/analysis.
     const recognition = { ...item, ...record(recognitionByNo.get(no)) };
@@ -149,6 +161,7 @@ function buildInput(row, packageValue, packageQuestions, gradingQuestions, priva
       printedPrompt: sanitizeText(packageQuestion.prompt || item.prompt, privateNames),
       studentAnswer: sanitizeValue(item.studentAnswer, privateNames),
       confidence: recognition.confidence == null ? null : finiteNumber(recognition.confidence),
+      ...(itemType ? { itemType } : {}),
       ...(recognition.observedWork !== undefined ? { observedWork: sanitizeValue(recognition.observedWork, privateNames) } : {}),
       ...(recognition.bbox !== undefined ? { bbox: sanitizeValue(recognition.bbox, privateNames) } : {}),
       ...(recognition.page !== undefined ? { page: finiteNumber(recognition.page) } : {}),
@@ -248,6 +261,9 @@ export function buildGradingGoldCase(row = {}) {
   const reviewStatus = text(result.reviewStatus).toLowerCase();
 
   if (!row.id) reasons.push("SUBMISSION_ID_MISSING");
+  if (content.workflowArchive && !isTeachingWorkflowArchiveSubmission(row, row.studentId || content.workflowArchive.studentId)) {
+    reasons.push("WORKFLOW_ARCHIVE_EVIDENCE_INVALID");
+  }
   if (isDemoRecord(row)) reasons.push("SYNTHETIC_OR_DEMO_SOURCE");
   if (!grading.result || typeof grading.result !== "object") reasons.push("GRADING_RESULT_MISSING");
   if (!gradingQuestions.length) reasons.push("NO_QUESTION_RESULTS");
@@ -349,14 +365,17 @@ async function loadRows(prisma) {
     orderBy: { submittedAt: "desc" },
     select: {
       id: true,
+      studentId: true,
+      status: true,
       submittedAt: true,
       content: true,
       student: { select: { displayName: true } },
       grading: { select: { score: true, needsReview: true, result: true } },
       assignment: {
         select: {
+          id: true,
           metadata: true,
-          items: { select: { prompt: true, answer: true, rubric: true, metadata: true } }
+          items: { orderBy: { orderIndex: "asc" }, select: { orderIndex: true, itemType: true, prompt: true, answer: true, rubric: true, metadata: true } }
         }
       }
     }

@@ -15,7 +15,7 @@ function stable(value) {
   return JSON.stringify(value);
 }
 
-function legacyAssignmentQuestionTypes(assignment, sourcePackage) {
+export function legacyAssignmentQuestionTypes(assignment, sourcePackage) {
   const items = assignment.items || [];
   const canonical = buildGradingSourcePackage({ ...assignment, items }).package?.questions || [];
   return sourcePackage.questions.flatMap((ref) => {

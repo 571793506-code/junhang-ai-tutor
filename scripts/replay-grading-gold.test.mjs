@@ -140,7 +140,9 @@ test("standalone type and figure survive rebuilding and null confidence is not e
 
 test("shared runner deadline reaches replay and evaluator as timeout without raw transport detail", async () => {
   const report = await replayGradingGoldCases([sample()], {}, { grade: async (_config, input) =>
-    runSubmissionPipeline({}, "grading", input, { timeoutMs: 100, disableSolEscalation: true,
+    // Keep preparation latency outside the deadline case under test. The runner's
+    // real 100 ms abort timer still has to cancel the hanging call.
+    runSubmissionPipeline({}, "grading", input, { timeoutMs: 100, now: () => 0, disableSolEscalation: true,
       call: async () => new Promise(() => {}) }, runTeachingTask)
   });
   const run = report.cases[0].evaluationRun;
