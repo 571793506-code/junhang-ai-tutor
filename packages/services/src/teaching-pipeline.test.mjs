@@ -100,7 +100,7 @@ test("existing assessment service sends shared rules and preserves focused conte
     return { text: JSON.stringify({ title: "专项计算", sections: [{ title: "计算", items: [item()] }] }), usage: { completion_tokens: 50 } };
   }));
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].route.model, "gpt-6-astra");
+  assert.equal(calls[0].route.model, "gpt-6.1-sol");
   assert.match(calls[0].messages[0].content, /generation-v1/);
   assert.match(calls[0].messages[1].content, /只练习进位加法/);
   assert.match(calls[0].messages[1].content, /已批准加法资料/);
@@ -131,7 +131,7 @@ test("runtime uses at most two concurrent units and one shared additional attemp
   assert.equal(result.available, true);
   assert.ok(peak <= 2);
   assert.equal(calls.size, 3);
-  for (const models of calls.values()) assert.deepEqual(models, ["gpt-6-astra", "gpt-6-astra"]);
+  for (const models of calls.values()) assert.deepEqual(models, ["gpt-6.1-sol", "gpt-6.1-sol"]);
   assert.deepEqual(JSON.parse(result.draftText).sections.map((section) => section.dayId), ["d1", "d2", "d3"]);
 });
 

@@ -29,7 +29,7 @@ test("teaching adapter sends independent model parameters and never retries HTTP
     assert.equal(result.text, '{"title":"draft"}');
     assert.equal(result.usage.completion_tokens, 8);
     assert.equal(Object.hasOwn(result, "raw"), false);
-    assert.equal(payloads[0].model, "gpt-6-astra");
+    assert.equal(payloads[0].model, "gpt-6.1-sol");
     assert.equal(payloads[0].reasoning_effort, "high");
     assert.equal(payloads[0].max_completion_tokens, 100);
     assert.equal(Object.hasOwn(payloads[0], "temperature"), false);

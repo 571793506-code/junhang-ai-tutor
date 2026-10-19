@@ -17,7 +17,7 @@ async function withGateway(respond, run) {
     res.end(JSON.stringify(reply.status ? { error: { message: reply.message || "upstream error" } } : { choices: [{ message: { content: reply.text ?? JSON.stringify(valid()) } }], usage: { completion_tokens: 20 } }));
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  try { return await run({ GPT56_API_KEY: "synthetic", GPT56_BASE_URL: `http://127.0.0.1:${server.address().port}` }, payloads); }
+  try { return await run({ GPT56_API_KEY: "synthetic", GPT56_BASE_URL: `http://127.0.0.1:${server.address().port}`, TEACHING_PRIMARY_MODEL: "gpt-6-astra" }, payloads); }
   finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
 }
 

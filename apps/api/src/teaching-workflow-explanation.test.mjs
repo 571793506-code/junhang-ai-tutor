@@ -70,7 +70,7 @@ test("natural language explanation revision uses the shared bounded pipeline and
   const revised = await f.client.execute(initial.id, { action: "revise", operationKey: "revise", expectedRevision: 3, targetExplanation: true, instruction: "用小棒说明进位" });
   assert.equal(revised.content.explanation.concept, "用小棒理解进位加法");
   assert.equal(revised.content.explanation.reviewedByTeacher, undefined);
-  assert.equal(f.calls.length, 2); assert.equal(f.calls[1].route.model, "gpt-6-astra");
+  assert.equal(f.calls.length, 2); assert.equal(f.calls[1].route.model, "gpt-6.1-sol");
   assert.deepEqual(f.calls[1].sent.explanation, explanation());
   assert.match(f.calls[1].messages[0].content, /generation-v1/);
   assert.doesNotMatch(JSON.stringify(f.calls[1].sent), /PRIVATE|teacherConfirmation|reviewedByTeacher/);

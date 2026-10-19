@@ -23,7 +23,7 @@ function fixture(overrides = {}) {
 test("workflow creation calls the shared model pipeline and preserves rubric, rules and server context", async () => {
   const f = fixture();
   const prepared = await f.create({ ...request, model: "FORGED", generationContext: { raw: "FORGED" } });
-  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].route.model, "gpt-6-astra");
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].route.model, "gpt-6.1-sol");
   assert.match(f.calls[0].messages[0].content, /generation-v1/); assert.doesNotMatch(JSON.stringify(f.calls), /FORGED/);
   assert.equal(prepared.snapshot.questions[0].rubric, item().rubric);
   assert.equal(prepared.snapshot.questions[0].id, "q1");
@@ -327,7 +327,8 @@ test("process evidence survives workflow creation and selected regrading without
     assert.equal(sent.ocrQuestions[0].page, 2);
     assert.equal(sent.ocrQuestions[0].sourceImageRef, "page-2.png");
     assert.equal(sent.ocrQuestions[0].cropRef, "q1-crop");
-    assert.equal(sent.gradingSourcePackage.questions[0].rubric, rubric);
+    assert.equal(sent.gradingSourcePackage, undefined);
+    assert.equal(sent.referenceAnswers[0].rubric, rubric);
     assert.deepEqual(sent.referenceAnswers[0].analysisSteps, ["逐项展开后相加。"]);
   }
   assert.equal(result.questions[0].observedWork, observedWork);
@@ -435,10 +436,11 @@ test("subjective regrading sends only the selected evidence and teacher instruct
   const sent = JSON.parse(calls[0].messages[1].content);
   assert.deepEqual(sent.ocrQuestions.map((q) => q.questionNo), ["2"]);
   assert.deepEqual(sent.referenceAnswers.map((q) => q.questionNo), ["2"]);
-  assert.deepEqual(sent.gradingSourcePackage.questions.map((q) => q.context), [sourcePackage.questions[1].context]);
+  assert.equal(sent.gradingSourcePackage, undefined);
+  assert.deepEqual(sent.referenceAnswers.map((q) => q.context), [sourcePackage.questions[1].context]);
   assert.doesNotMatch(JSON.stringify(sent), /第1题的分组材料/);
   assert.equal(sent.teacherContext, "检查是否属于合理异解");
-  assert.match(calls[0].messages[0].content, /grading-v1/); assert.doesNotMatch(JSON.stringify(calls), /ORIGINAL-SECRET/);
+  assert.match(calls[0].messages[0].content, /grading-v2/); assert.doesNotMatch(JSON.stringify(calls), /ORIGINAL-SECRET/);
 });
 
 test("changed generation context and cancellation block late draft or revision results", async () => {

@@ -44,7 +44,7 @@ assignment 返回作业 ID，不调用模型或导出 PDF。对该 ID 调用既�
 
 首次补弱、巩固练习和复测按runtime-rules中的“补弱、巩固与复测”处理。把教师明确阶段原样保留在requirement或每日goal中，继续使用既有purpose与requestedItemCount，不新增前端私有prompt或把参考样例题量设成默认。验收要分别查看阶段结构、错题证据关联、题量和评分口径；实际发送的generationContext与原要求均应保留。来源记录只能支持历史错误，不自动证明当前掌握。明确的过程分与仅结果满分冲突由共享assessmentScoreIssues拦截，语义不明确的细则仍需教师复核。
 
-调用前读取 `packages/ai/src/model-policy.js` 的任务策略；本文件不另行硬编码模型参数或数值预算。9 月 11 日设计确定 Astra 主生成、Flash 按需提取、Sol 仅执行有限任务或可用性替补，接入进度以实施计划为准，不能把设计当作现有运行结果。evidence/configuration 故障直接 `teacher_review`；模型结果均需结构校验和教师复核。
+调用前读取 `packages/ai/src/model-policy.js` 的任务策略；本文件不另行硬编码模型参数或数值预算。2026-10-19教师指定生成主模型为GPT-6.1 Sol，Flash按需提取。同型号替补被禁用；可用性故障不重复调用同一型号，结构或内容校验失败仍最多由主模型修复一次，共享原有操作预算。evidence/configuration故障直接 `teacher_review`；模型结果均需结构校验和教师复核。不要沿用9月11日的Astra主模型设计判断当前路由。
 
 ## 核心原则
 
@@ -62,7 +62,7 @@ assignment 返回作业 ID，不调用模型或导出 PDF。对该 ID 调用既�
 - 部分分区失败或动态兜底必须写入 `usedDynamicFallback=true`，本地审查状态强制为 `needs_teacher_review`。预算不足不能宣称生成成功。
 - `check:content-context` 低预算 E2E 只作为 `link-guard` 链路守卫，证明资料上下文、预算退出、动态兜底、教师复核和导出链路能收口；不得用它判断题目原创性、教师要求贴合度、个性化程度、解析质量或 PDF 视觉质量。
 - `check:generation:quality:quiz` 和 `check:generation:quality:formal` 才用于真实模型生成内容质量样本；质量样本必须 `modelAvailable=true`、`usedDynamicFallback=false`，否则不能通过。
-- Sol 只作为 Astra 可用性故障的单次替补；质量错误由 Astra 受限修复，不再追加服务层深度审查。
+- 生成由当前主模型执行；只有显式配置不同型号替补时，才允许可用性故障单次接替，与一次质量修复共享追加名额，不再追加服务层深度审查。
 - 生成质量样本必须同时带有预期的 `generationProfile`；缺少 profile、动态兜底或模型不可用时，质量检查失败。生成质量检查只评估结构化内容，不替代 `check:generation:layout` 的 PDF 版式检查，也不替代 `check:content-context` 的资料链路守卫。
 - 批改准确率使用 `cmd /c npm.cmd run check:grading:quality -- <gold-cases.json>` 评估；`fixtures/quality/grading-gold-cases.example.json` 只用于验证契约和指标路径，不能作为生产准确率证据。
 

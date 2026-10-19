@@ -122,7 +122,7 @@ test("buildAiStartupSnapshot assigns Junhang text capabilities to GPT-5.6", () =
   assert.match(snapshot.providers.find((item) => item.id === "deepseek")?.reason || "", /紧急回滚/);
 });
 
-test("buildModelOrchestrationPlan uses GPT-5.6 for QA and Astra for assessment generation", () => {
+test("buildModelOrchestrationPlan keeps QA configured and uses Sol for assessment generation", () => {
   const plan = buildModelOrchestrationPlan({
     GPT56_API_KEY: "test-key",
     GPT56_BASE_URL: "https://gpt56.example/v1",
@@ -132,7 +132,7 @@ test("buildModelOrchestrationPlan uses GPT-5.6 for QA and Astra for assessment g
   assert.equal(plan.routes.qa.providerId, "gpt56");
   assert.equal(plan.routes.qa.model, "gpt-5.6");
   assert.equal(plan.routes.assessmentDraft.providerId, "gpt56");
-  assert.equal(plan.routes.assessmentDraft.model, "gpt-6-astra");
+  assert.equal(plan.routes.assessmentDraft.model, "gpt-6.1-sol");
 });
 
 test("callGpt56Chat only sends reasoning_effort when intermediary support is enabled", async () => {
@@ -637,6 +637,7 @@ async function runSubmissionEscalationCase(workflow, primaryResponse, solRespons
   });
   const address = await listen(server);
   const config = {
+    TEACHING_PRIMARY_MODEL: "gpt-6-astra",
     GPT56_API_KEY: "test-key",
     GPT56_BASE_URL: `http://127.0.0.1:${address.port}`,
     GPT56_MODEL: "gpt-5.6",

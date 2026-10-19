@@ -5,19 +5,19 @@ import { classifyTaskFailure, resolveTaskModelPolicy, resolveTeachingTaskPolicy 
 
 test("grading and reference cap the first call while preserving the operation budget", () => {
   for (const task of ["grading", "reference"]) {
-    const policy = resolveTeachingTaskPolicy(task);
+    const policy = resolveTeachingTaskPolicy(task, { TEACHING_PRIMARY_MODEL: "gpt-6-astra" });
     assert.equal(policy.primaryTimeoutMs, 120000);
     assert.equal(policy.budget.timeoutMs, 180000);
   }
   assert.equal(resolveTeachingTaskPolicy("generation").primaryTimeoutMs, undefined);
 });
 
-test("teaching policies isolate Astra, Flash and Sol responsibilities from QA", () => {
+test("teaching policies use Sol high without a duplicate availability replacement and isolate QA", () => {
   for (const task of ["generation", "grading", "reference"]) {
     const policy = resolveTeachingTaskPolicy(task, { GPT56_MODEL: "legacy-model" });
-    assert.equal(policy.primary.model, "gpt-6-astra");
+    assert.equal(policy.primary.model, "gpt-6.1-sol");
     assert.equal(policy.primary.reasoningEffort, "high");
-    assert.equal(policy.replacement.model, "gpt-6.1-sol");
+    assert.equal(policy.replacement, null);
     assert.equal(policy.maxAdditionalAttempts, 1);
   }
   for (const task of ["extract-requirement", "extract-material"]) {

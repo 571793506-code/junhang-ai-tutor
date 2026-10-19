@@ -20,7 +20,7 @@ export function resolveTeachingTaskPolicy(task, config = {}) {
   if (!Object.hasOwn(TEACHING_TASKS, task)) throw new Error(`Unknown teaching task: ${task}`);
   const defaults = TEACHING_TASKS[task];
   const routes = {
-    primary: { providerId: "gpt56", model: config.TEACHING_PRIMARY_MODEL || config.teachingPrimaryModel || "gpt-6-astra", reasoningEffort: "high" },
+    primary: { providerId: "gpt56", model: config.TEACHING_PRIMARY_MODEL || config.teachingPrimaryModel || "gpt-6.1-sol", reasoningEffort: "high" },
     replacement: { providerId: "gpt56", model: config.TEACHING_REPLACEMENT_MODEL || config.teachingReplacementModel || "gpt-6.1-sol", reasoningEffort: "high" },
     assist: { providerId: "deepseek", model: config.TEACHING_ASSIST_MODEL || config.teachingAssistModel || "deepseek-flash", reasoningEffort: null }
   };
@@ -28,12 +28,13 @@ export function resolveTeachingTaskPolicy(task, config = {}) {
   const modernVision = task === "recognize" && (config.OCR_VISION_PROVIDER || config.ocrVisionProvider || "minimax") === "minimax"
     && /^MiniMax-M3\.1-Flash(?:-Preview)?$/.test(visionModel);
   const primary = modernVision ? { providerId: "minimax", model: visionModel, reasoningEffort: "low" } : routes[defaults.role];
+  const replacement = defaults.role === "primary" && primary.model !== routes.replacement.model ? routes.replacement : null;
   return {
     task, module: defaults.module, primary,
-    replacement: defaults.role === "primary" && primary.model !== routes.replacement.model ? routes.replacement : null,
+    replacement,
     maxAdditionalAttempts: 1,
     maxConcurrency: 2,
-    ...(defaults.primaryTimeoutMs ? { primaryTimeoutMs: defaults.primaryTimeoutMs } : {}),
+    ...(defaults.primaryTimeoutMs && replacement ? { primaryTimeoutMs: defaults.primaryTimeoutMs } : {}),
     budget: { timeoutMs: defaults.timeoutMs, maxTokens: defaults.maxTokens }
   };
 }

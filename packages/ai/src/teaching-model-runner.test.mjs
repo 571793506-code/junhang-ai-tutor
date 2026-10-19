@@ -7,11 +7,44 @@ const rulePack = await loadTeachingRulePack("generation");
 const gradingRules = await loadTeachingRulePack("grading");
 const good = () => ({ text: JSON.stringify({ title: "draft" }), usage: { completion_tokens: 10 } });
 const failure = (status, code) => Object.assign(new Error(code || `HTTP ${status}`), { status, code });
+
+test("default Sol grading uses the shared deadline and never retries an unavailable identical model", async () => {
+  const calls = [];
+  const result = await runTeachingUnit({ task: "grading", input: {}, rulePack: gradingRules,
+    budget: { deadlineAt: 180000, remainingTokens: 12000, additionalAttemptsUsed: 0 } }, {
+    now: () => 0, repairIssues: () => [],
+    call: async (route, _messages, options) => {
+      calls.push({ route, options });
+      throw failure(503);
+    }
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].route.model, "gpt-6.1-sol");
+  assert.equal(calls[0].route.reasoningEffort, "high");
+  assert.equal(calls[0].options.timeoutMs, 180000);
+  assert.equal(result.status, "review_required");
+});
+
+test("default Sol retains one bounded same-model structure repair", async () => {
+  const calls = [];
+  const result = await runTeachingUnit({ task: "generation", input: {}, rulePack,
+    budget: { deadlineAt: 240000, remainingTokens: 24000, additionalAttemptsUsed: 0 } }, {
+    now: () => 0, repairIssues: candidate => candidate.title ? [] : ["title_missing"],
+    call: async route => {
+      calls.push(route.model);
+      return calls.length === 1 ? { text: "{}" } : good();
+    }
+  });
+  assert.equal(result.status, "success");
+  assert.deepEqual(calls, ["gpt-6.1-sol", "gpt-6.1-sol"]);
+  assert.equal(result.internal.attempts[1].role, "quality-repair");
+});
 function setup(responses, overrides = {}) {
   const calls = [];
   const budget = { deadlineAt: 1000, remainingTokens: 100, additionalAttemptsUsed: 0 };
   let time = 0;
   const deps = {
+    config: { TEACHING_PRIMARY_MODEL: "gpt-6-astra" },
     now: () => time,
     call: async (route, messages, options) => {
       calls.push({ route, messages, options });
@@ -164,6 +197,7 @@ test("grading and reference primary timeouts leave time for one availability rep
     const calls = [];
     const budget = { deadlineAt: 180000, remainingTokens: 12000, additionalAttemptsUsed: 0 };
     const result = await runTeachingUnit({ task, input: {}, rulePack: gradingRules, budget }, {
+      config: { TEACHING_PRIMARY_MODEL: "gpt-6-astra" },
       now: () => time,
       repairIssues: () => [],
       call: async (route, _messages, options) => {
@@ -192,6 +226,7 @@ test("grading timeout respects exhaustion, cancellation and the single extra slo
     const controller = new AbortController();
     const budget = { deadlineAt: 180000, remainingTokens: 12000, additionalAttemptsUsed: mode === "slot-used" ? 1 : 0 };
     const result = await runTeachingUnit({ task: "grading", input: {}, rulePack: gradingRules, budget, signal: controller.signal }, {
+      config: { TEACHING_PRIMARY_MODEL: "gpt-6-astra" },
       now: () => time,
       repairIssues: () => [],
       call: async (_route, _messages, options) => {

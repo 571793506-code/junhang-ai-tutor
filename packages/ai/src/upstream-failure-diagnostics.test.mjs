@@ -25,7 +25,7 @@ async function gateway(reply, run) {
     res.end(reply.body);
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  try { await run({ GPT56_BASE_URL: `http://127.0.0.1:${server.address().port}`, GPT56_API_KEY: "test-private-key-12345" }, () => calls); }
+  try { await run({ GPT56_BASE_URL: `http://127.0.0.1:${server.address().port}`, GPT56_API_KEY: "test-private-key-12345", TEACHING_PRIMARY_MODEL: "gpt-6-astra" }, () => calls); }
   finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
 }
 

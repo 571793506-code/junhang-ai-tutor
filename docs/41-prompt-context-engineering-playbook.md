@@ -134,13 +134,13 @@
 
 ### 3.2 教学任务的有界调用
 
-- 生成、参考答案和主观批改由 Astra 承担；实际模型、档位和预算读取 `resolveTeachingTaskPolicy`，不在 Playbook 另列数值表。
-- availability 故障可替补 Sol 一次；结构或内容校验失败只能由主模型修复一次。两者共享同一个追加调用名额。
-- configuration 故障（配置、鉴权、模型或参数不支持）不得升级；evidence 故障（资料上下文、OCR、题干、作答或参考证据不足）不得调用 Sol，直接标记教师复核。
+- 2026-10-19教师指定生成、参考答案和主观批改由GPT-6.1 Sol高推理承担，取代此前Astra主调用；实际模型、档位和预算读取 `resolveTeachingTaskPolicy`，不在 Playbook 另列数值表。
+- 主模型与替补同型号时禁用availability追加调用，主调用使用原操作剩余预算；显式配置不同型号替补时才允许单次接替。结构或内容校验失败仍最多由主模型修复一次，接替与修复共享同一个追加调用名额及原操作预算。
+- configuration 故障（配置、鉴权、模型或参数不支持）不得升级；evidence 故障（资料上下文、OCR、题干、作答或参考证据不足）不得追加模型调用，直接标记教师复核。
 - 生成按完整分区或每日单元执行，阅读材料与问题保留在同一单元；批改先保守比较客观题，只把未解决题目及其证据发送模型。
 - 正常批改不追加风险复判或深度审查；遗留开关不能绕过执行器上限。不确定分数保持 null，模型顶层总分不能覆盖逐题合计。
 - 同一生成操作共享 deadline/token pool，各单元保留独立追加计数；参考答案与随后主观批改也共享操作预算，替补不重新获得一整份时间。
-- Sol 成功时内部记录 `usedModelEscalation=true`，不得误记为 `usedDynamicFallback=true`。强制 Sol 质量命令以 Sol 作为主调用，因此不要求 `usedModelEscalation=true`。
+- 只有替补实际成功时内部记录 `usedModelEscalation=true`，不得误记为 `usedDynamicFallback=true`。默认Sol主调用及强制Sol质量命令均不因使用Sol就标记升级。
 - Sol 后不自动串接 DeepSeek 或第三个文本模型。Sol 输出仍须经过 parse、normalize、validate、repair、项目审查和教师复核；模型、档位、触发原因、预算和升级元数据不得进入学生、家长、课堂平板或公共屏。
 - `check:generation:quality:sol` 使用六个项目样本证明强制 Sol 主调用的 availability 和合成生成质量门禁，不证明批改正确率；批改准确率只能通过教师确认的 gold 数据评估。
 
