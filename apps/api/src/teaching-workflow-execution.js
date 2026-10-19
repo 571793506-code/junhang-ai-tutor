@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { buildGradingSourcePackage, normalizeGradeLevel, normalizeTeachingPurpose, teachingExplanationContent } from "@junhang/core";
 import { runTeachingTask } from "@junhang/ai";
-import { buildGenerationContext, createTeachingWorkflowValidator, draftAssessmentService, gradeSubmissionService } from "@junhang/services";
+import { buildGenerationContext, createTeachingWorkflowValidator, draftAssessmentService, gradeSubmissionService, verifiedRecognitionCorrections } from "@junhang/services";
 import { publicUploadUrl } from "./uploads.js";
 
 const text = (value) => typeof value === "string" && Boolean(value.trim());
@@ -185,14 +185,14 @@ export function createTeachingWorkflowExecution({ config = {}, resolveGeneration
           subject: { name: resolved.subject }, items: refs.map((q) => ({ ...q, orderIndex: q.questionNo, answer: q.correctAnswer, score: q.maxScore, sourceContext: q.context })) }).package;
         if (!source) fail("WORKFLOW_CONTEXT_REQUIRED");
         const result = await grade(config, { subject: resolved.subject, grade: source.grade || request.grade, totalScore: source.totalScore,
-          gradingSourcePackage: source, teacherContext: instruction,
-          // Effective confidence applies only to teacher-corrected input; keep the measured OCR confidence in the saved question.
+          gradingSourcePackage: source, teacherContext: [request.requirement, instruction].filter(text).join("\n"),
+          // Keep measured OCR confidence; transcription review travels through server-owned options.
           ocrQuestions: questions.map((q) => ({ ...pick(q, ["questionNo", "printedPrompt", "studentAnswer", "bbox", "observedWork", "page", "sourceImageRef", "cropRef"]),
             itemType: gradingItemType(resolved, refs.find((ref) => ref.questionNo === q.questionNo)),
-            confidence: recognitionCorrected(q, actor) ? 1 : q.confidence ?? null })),
+            confidence: q.confidence ?? null })),
           referenceAnswers: refs.map((q) => ({ questionNo: q.questionNo, prompt: q.prompt, correctAnswer: q.correctAnswer, score: q.maxScore,
             knowledgePoint: q.knowledgePoint, analysisSteps: q.analysisSteps, itemType: gradingItemType(resolved, q), confidence: 1 }))
-        }, { persist: false, signal, teachingExecution });
+        }, { persist: false, signal, teachingExecution, verifiedRecognitionCorrections: verifiedRecognitionCorrections(questions, actor.teacherId) });
         checkSignal(signal);
         if (result.available !== true || !Array.isArray(result.structured?.questionResults)) fail("WORKFLOW_EXECUTION_FAILED");
         const byNo = new Map(result.structured.questionResults.map((q) => [String(q.questionNo), q]));

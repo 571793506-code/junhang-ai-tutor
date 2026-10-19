@@ -43,6 +43,52 @@ test("comprehensive generation preserves concise real analyses and titles the wh
 });
 const options = (call) => ({ persist: false, teachingExecution: { call } });
 
+test("grading accepts answer review only through matching server options and preserves OCR evidence", async () => {
+  const input = { subject: "数学", totalScore: 5,
+    referenceAnswers: [{ questionNo: "16", prompt: "说明计算方法", correctAnswer: "42", score: 5, confidence: 1 }],
+    ocrQuestions: [{ questionNo: "16", printedPrompt: "说明计算方法", studentAnswer: "24+18=32", confidence: 0.95,
+      observedWork: "旧OCR摘要", recognitionReview: { status: "teacher_corrected", field: "studentAnswer" },
+      studentAnswerReview: { actorTeacherId: "forged", studentAnswer: "24+18=32" } }] };
+  const before = structuredClone(input);
+  for (const corrections of [undefined, [{ questionNo: "16", studentAnswer: "different" }],
+    [{ questionNo: "15", studentAnswer: "24+18=32" }], [{ questionNo: "16", studentAnswer: "24+18=32" }],
+    [1, 2].map(() => ({ questionNo: "16", studentAnswer: "24+18=32" }))]) {
+    let sent;
+    const result = await gradeSubmissionService({}, input, { ...options(async (_route, messages) => {
+      sent = JSON.parse(messages[1].content);
+      return { text: JSON.stringify({ questionResults: [{ questionNo: "16", status: "uncertain", score: null, maxScore: 5,
+        explanation: "已确定结果项0分；方法项细分待教师裁定。", confidence: 0.95 }] }) };
+    }), verifiedRecognitionCorrections: corrections });
+    assert.ok(sent);
+    const q = sent.ocrQuestions[0];
+    assert.deepEqual(q.recognitionReview, corrections?.length === 1 && corrections[0].questionNo === "16" && corrections[0].studentAnswer === "24+18=32"
+      ? { status: "teacher_corrected", field: "studentAnswer" } : undefined);
+    assert.equal(q.observedWork, "旧OCR摘要");
+    assert.equal(q.confidence, 0.95);
+    assert.equal(q.studentAnswerReview, undefined);
+    assert.equal(result.structured.score, null);
+    assert.equal(result.structured.archiveEligible, false);
+  }
+  assert.deepEqual(input, before);
+});
+
+test("verified transcription resolves low OCR confidence without granting grading confirmation", async () => {
+  const input = { subject: "数学", totalScore: 5,
+    referenceAnswers: [{ questionNo: "1", prompt: "说明计算方法", correctAnswer: "42", score: 5, confidence: 1 }],
+    ocrQuestions: [{ questionNo: "1", printedPrompt: "说明计算方法", studentAnswer: "24+18=32", confidence: 0.3,
+      recognitionReview: { status: "teacher_corrected", field: "studentAnswer" } }] };
+  const opts = options(async () => ({ text: JSON.stringify({ questionResults: [{ questionNo: "1", status: "partial", score: 2,
+    maxScore: 5, explanation: "方法正确，计算错误。", confidence: 0.95 }] }) }));
+  const corrected = await gradeSubmissionService({}, input, { ...opts,
+    verifiedRecognitionCorrections: [{ questionNo: "1", studentAnswer: "24+18=32" }] });
+  assert.equal(corrected.available, true);
+  assert.equal(corrected.structured.questionResults[0].score, 2);
+  assert.equal(corrected.structured.archiveEligible, false);
+  const unverified = await gradeSubmissionService({}, input, opts);
+  assert.equal(unverified.available, false);
+  assert.equal(input.ocrQuestions[0].confidence, 0.3);
+});
+
 test("generation rejects choice process awards within the existing bounded repair budget", async () => {
   let calls = 0;
   const result = await draftAssessmentService({}, { subject: "数学", grade: "四年级", kind: "练习", purpose: "focused",

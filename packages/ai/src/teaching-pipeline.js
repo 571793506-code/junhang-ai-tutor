@@ -150,7 +150,8 @@ export function gradingContentIssues(candidate, input) {
   for (const q of questions) {
     const ref = refs.find((r) => String(r.questionNo) === String(q.questionNo));
     const evidence = expected.find((r) => String(r.questionNo) === String(q.questionNo));
-    if (evidence && ((!present(evidence.studentAnswer) && !present(evidence.observedWork)) || Number(evidence.confidence ?? 1) < 0.62) && q.status !== "uncertain") issues.push("student_evidence_insufficient");
+    const transcriptionReviewed = evidence?.recognitionReview?.status === "teacher_corrected" && evidence.recognitionReview.field === "studentAnswer";
+    if (evidence && ((!present(evidence.studentAnswer) && !present(evidence.observedWork)) || !transcriptionReviewed && Number(evidence.confidence ?? 1) < 0.62) && q.status !== "uncertain") issues.push("student_evidence_insufficient");
     if (evidence) q.studentAnswer = String(evidence.studentAnswer ?? "");
     if (!["correct", "wrong", "partial", "uncertain"].includes(q.status) || !present(q.explanation)) issues.push("judgment_evidence_missing");
     if (!Number.isFinite(q.maxScore) || q.maxScore <= 0 || ref?.score != null && Number(ref.score) !== q.maxScore) issues.push("max_score_invalid");

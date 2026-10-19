@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isTeachingWorkflowArchiveSubmission } from "@junhang/services";
+import { isTeachingWorkflowArchiveSubmission, verifiedRecognitionCorrections } from "@junhang/services";
 import { legacyAssignmentQuestionTypes } from "../apps/api/src/teaching-workflow-archive-resolvers.js";
 
 import { validateGradingGoldCases } from "./quality-gold-contract.mjs";
@@ -127,6 +127,9 @@ function buildInput(row, packageValue, packageQuestions, gradingQuestions, priva
   const packageByNo = new Map(packageQuestions.map((item, index) => [questionNo(item, index), item]));
   const recognitionQuestions = list(content.ocrQuestions).length ? content.ocrQuestions : list(content.ocr?.questions);
   const recognitionByNo = new Map(recognitionQuestions.map((item, index) => [questionNo(item, index), item]));
+  const archive = content.workflowArchive;
+  const correctedByNo = new Map(archive ? verifiedRecognitionCorrections(archive.snapshot.questions, archive.teacherId)
+    .map((q) => [q.questionNo, q]) : []);
   // Immutable archives retain their original type binding, even if live items
   // change. Other records use exactly the resolver's source-alignment rules.
   const typeEvidence = content.workflowArchive
@@ -160,6 +163,7 @@ function buildInput(row, packageValue, packageQuestions, gradingQuestions, priva
       questionNo: no,
       printedPrompt: sanitizeText(packageQuestion.prompt || item.prompt, privateNames),
       studentAnswer: sanitizeValue(item.studentAnswer, privateNames),
+      ...(correctedByNo.has(no) ? { recognitionReview: { status: "teacher_corrected", field: "studentAnswer" } } : {}),
       confidence: recognition.confidence == null ? null : finiteNumber(recognition.confidence),
       ...(itemType ? { itemType } : {}),
       ...(recognition.observedWork !== undefined ? { observedWork: sanitizeValue(recognition.observedWork, privateNames) } : {}),

@@ -151,7 +151,8 @@ test("validated immutable archive types survive changed live assignment fields; 
     resolvedRequest: { requirement: "学生甲：方法2分、计算2分、结果1分。允许正确的其他方法。" },
     archiveEvidence: { assignmentQuestionTypes: [{ questionNo: "1", itemType: "fill_blank" }] },
     questions: [{ id: "q1", questionNo: "1", printedPrompt: "1+1", studentAnswer: "2", correctAnswer: "2", maxScore: 5, score: 5,
-      status: "correct", explanation: "correct", knowledgePoint: "addition", reviewedByTeacher: true, confirmedBy: "t1" }] };
+      status: "correct", explanation: "correct", knowledgePoint: "addition", reviewedByTeacher: true, confirmedBy: "t1",
+      studentAnswerReview: { actorTeacherId: "t1", studentAnswer: "2" } }] };
   const archive = await buildTeachingWorkflowArchive({ actor: { teacherId: "t1" },
     workflow: { id: "w1", module: "grading", ownerTeacherId: "t1", currentRevision: 1, request: { studentId: "s1" } },
     snapshot, submissionId: "archive1", confirmedAt: "2026-10-10T10:00:00Z", resolveGradingSource: async () => source });
@@ -166,6 +167,8 @@ test("validated immutable archive types survive changed live assignment fields; 
   assert.equal(collected.input.teacherContext, "[REDACTED]：方法2分、计算2分、结果1分。允许正确的其他方法。");
   assert.equal(buildReplayInput(collected.input).teacherContext, collected.input.teacherContext);
   assert.equal(collected.expected.score, 5);
+  assert.deepEqual(collected.input.ocrQuestions[0].recognitionReview, { status: "teacher_corrected", field: "studentAnswer" });
+  assert.doesNotMatch(JSON.stringify(collected.input), /actorTeacherId|studentAnswerReview/);
   row.content.workflowArchive.snapshot.archiveEvidence.assignmentQuestionTypes[0].itemType = "choice";
   const invalid = buildGradingGoldCase(row);
   assert.equal(invalid.ok, false);
@@ -176,7 +179,10 @@ test("unbound live teacher context cannot replace an archived original request",
   const row = reviewedRow();
   row.content.teacherContext = "不可信的临时内容";
   row.grading.result.teacherContext = "不得从评分输出回填输入";
+  row.grading.result.questionResults[0].studentAnswerReview = { actorTeacherId: "teacher-secret-id", studentAnswer: "2" };
+  row.content.ocrQuestions = [{ questionNo: "1", recognitionReview: { status: "teacher_corrected", field: "studentAnswer" } }];
   assert.equal(buildGradingGoldCase(row).caseValue.input.teacherContext, undefined);
+  assert.equal(buildGradingGoldCase(row).caseValue.input.ocrQuestions[0].recognitionReview, undefined);
 });
 
 test("source-bound type overrides legacy and OCR types; OCR alone cannot supply a grading type", () => {

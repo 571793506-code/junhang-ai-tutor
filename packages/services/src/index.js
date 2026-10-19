@@ -25,6 +25,8 @@ import {
 } from "@junhang/db";
 import { buildQaLearningRecord, sanitizeQaAnswer } from "./qa-learning-record.js";
 import { buildGenerationContext, buildStudentProfileContext, buildSubmissionGradingContext } from "./context-engineering.js";
+import { applyVerifiedRecognitionCorrections } from "./grading-recognition-review.js";
+export { verifiedRecognitionCorrections } from "./grading-recognition-review.js";
 
 export { buildQaLearningRecord, sanitizeQaAnswer, sanitizeQaText } from "./qa-learning-record.js";
 export * from "./student-dictionary.js";
@@ -1250,7 +1252,7 @@ function normalizeSubmissionOcrQuestion(item, index, total, input = {}, referenc
   const source = item && typeof item === "object" ? item : {};
   const questionNo = String(source.questionNo || source.no || source.index || index + 1);
   const reference = referenceByQuestion.get(questionNo) || {};
-  const evidence = Object.fromEntries(["observedWork", "page", "sourceImageRef", "cropRef", "itemType", "type", "context"]
+  const evidence = Object.fromEntries(["observedWork", "page", "sourceImageRef", "cropRef", "itemType", "type", "context", "recognitionReview"]
     .filter((key) => source[key] !== undefined).map((key) => [key, source[key]]));
   return {
     ...evidence,
@@ -1269,7 +1271,8 @@ function compareObjectiveAnswers(reference = {}, question = {}, itemType = "") {
   const expected = String(reference.correctAnswer || question.correctAnswer || "").normalize("NFKC").trim();
   const actual = String(question.studentAnswer || "").normalize("NFKC").trim();
   const prompt = String(question.printedText || reference.prompt || "");
-  if (!expected || !actual || Number(question.confidence ?? 0) < 0.85 || Number(reference.confidence ?? 0) < 0.9) return null;
+  const transcriptionReviewed = question.recognitionReview?.status === "teacher_corrected" && question.recognitionReview.field === "studentAnswer";
+  if (!expected || !actual || !transcriptionReviewed && Number(question.confidence ?? 0) < 0.85 || Number(reference.confidence ?? 0) < 0.9) return null;
   if (itemType === "choice") {
     const option = (value) => String(value).normalize("NFKC").trim().replace(/^[（(]\s*|\s*[）)]$/g, "").toUpperCase();
     const expectedOption = option(expected);
@@ -4279,6 +4282,7 @@ export async function draftAssessmentService(config, input = {}, options = {}) {
 }
 
 export async function gradeSubmissionService(config, input = {}, options = {}) {
+  input = applyVerifiedRecognitionCorrections(input, options.verifiedRecognitionCorrections);
   options = { ...options, teachingExecution: { ...options.teachingExecution, signal: options.signal || options.teachingExecution?.signal,
     operationBudget: createTeachingOperationBudget("grading", config, options.teachingExecution) } };
   const baseOcr = buildSubmissionOcr(input);

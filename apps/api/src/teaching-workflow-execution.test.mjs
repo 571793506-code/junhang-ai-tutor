@@ -356,7 +356,7 @@ test("unknown OCR confidence is not promoted by creation or regrading without a 
   const seen = [];
   const f = fixture({ resolveGradingContext: async () => ({ ok: true, subject: "数学", sourcePackage, archiveEvidence,
     submission: { content: { ocr: { questions: [{ questionNo: "1", studentAnswer: "D", confidence: null }] } } } }),
-    grade: async (_config, input) => { seen.push(structuredClone(input)); return { available: true, structured: { questionResults: [
+    grade: async (_config, input, options) => { seen.push({ ...structuredClone(input), serverCorrections: options.verifiedRecognitionCorrections }); return { available: true, structured: { questionResults: [
       { questionNo: "1", status: "uncertain", score: null, maxScore: 2, explanation: "待复核" }
     ] } }; } });
   const r = { studentId: "s1", submissionId: "confidence-submission" };
@@ -367,8 +367,14 @@ test("unknown OCR confidence is not promoted by creation or regrading without a 
   await f.execution.runner(args);
   assert.deepEqual(seen.map((input) => input.ocrQuestions[0].confidence), [null, null]);
   const corrected = await f.execution.runner({ ...args, questions: [{ ...q, studentAnswerReview: { actorTeacherId: actor.teacherId, studentAnswer: "D" } }] });
-  assert.equal(seen[2].ocrQuestions[0].confidence, 1);
+  assert.equal(seen[2].ocrQuestions[0].confidence, null);
   assert.equal(corrected.questions[0].confidence, null);
+  assert.deepEqual(seen[2].serverCorrections, [{ questionNo: "1", studentAnswer: "D" }]);
+  assert.deepEqual(seen[1].serverCorrections, []);
+  const policy = "方法2分、计算2分、结果1分";
+  await f.execution.runner({ ...args, request: { ...r, requirement: policy } });
+  assert.ok(seen[3].teacherContext.includes(policy));
+  assert.ok(seen[3].teacherContext.includes("核对"));
 });
 
 test("HTTP teacher correction resolves the legacy choice rubric without a second model call", async (t) => {
@@ -440,7 +446,7 @@ test("subjective regrading sends only the selected evidence and teacher instruct
   assert.deepEqual(sent.referenceAnswers.map((q) => q.context), [sourcePackage.questions[1].context]);
   assert.doesNotMatch(JSON.stringify(sent), /第1题的分组材料/);
   assert.equal(sent.teacherContext, "检查是否属于合理异解");
-  assert.match(calls[0].messages[0].content, /grading-v2/); assert.doesNotMatch(JSON.stringify(calls), /ORIGINAL-SECRET/);
+  assert.match(calls[0].messages[0].content, /grading-v3/); assert.doesNotMatch(JSON.stringify(calls), /ORIGINAL-SECRET/);
 });
 
 test("changed generation context and cancellation block late draft or revision results", async () => {

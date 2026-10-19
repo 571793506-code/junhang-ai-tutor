@@ -12,6 +12,19 @@ const sample = () => ({ caseId: "synthetic-replay", sourceType: "generated_asses
   teacherReview: { confirmedBy: "synthetic-teacher", confirmedAt: "2026-09-01T00:00:00Z", modifiedQuestionNos: [] } });
 const result = () => ({ available: true, structured: { score: 5, questionResults: [{ questionNo: "1", status: "correct", correctAnswer: "2", score: 5, maxScore: 5 }] } });
 
+test("replay transports collected recognition review without passing teacher identities or scores", async () => {
+  const source = sample();
+  source.input.ocrQuestions[0].recognitionReview = { status: "teacher_corrected", field: "studentAnswer", actorTeacherId: "PRIVATE" };
+  let captured;
+  await replayGradingGoldCases([source], {}, { grade: async (_config, input, options) => {
+    captured = { input, options };
+    return result();
+  } });
+  assert.deepEqual(captured.input.ocrQuestions[0].recognitionReview, { status: "teacher_corrected", field: "studentAnswer" });
+  assert.deepEqual(captured.options.verifiedRecognitionCorrections, [{ questionNo: "1", studentAnswer: "2" }]);
+  assert.doesNotMatch(JSON.stringify(captured), /PRIVATE|expected|teacherReview/);
+});
+
 test("replay preserves available evidence fields and reports missing coverage without inventing it", () => {
   const source = sample();
   source.input.gradingSourcePackage = {

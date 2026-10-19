@@ -110,6 +110,11 @@ export declare function gradeSubmissionService(
   options?: Record<string, unknown>
 ): Promise<Record<string, unknown>>;
 
+export declare function verifiedRecognitionCorrections(
+  questions: Array<Record<string, unknown>>,
+  teacherId?: string
+): Array<{ questionNo: string; studentAnswer: unknown }>;
+
 export declare function dictationSpeechService(
   config: Record<string, string | undefined>,
   input?: Record<string, unknown>,

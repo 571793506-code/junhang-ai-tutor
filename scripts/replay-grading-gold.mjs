@@ -57,7 +57,9 @@ export function buildReplayInput(raw = {}) {
   const fields = ["subject", "grade", "kind", "totalScore", "gradingSourcePackage", "questionLayoutManifest", "ocrQuestions", "referenceAnswers", "answerKey", "assignmentItems", "teacherContext"];
   const input = Object.fromEntries(fields.filter((k) => raw[k] !== undefined).map((k) => [k, clean(raw[k])]));
   if (Array.isArray(input.ocrQuestions)) input.ocrQuestions = input.ocrQuestions.map((q) => Object.fromEntries(
-    ["questionNo", "printedPrompt", "printedText", "studentAnswer", "confidence", "bbox", "observedWork", "page", "sourceImageRef", "cropRef", "itemType", "type", "context"].filter((k) => q[k] !== undefined).map((k) => [k, q[k]])));
+    [...["questionNo", "printedPrompt", "printedText", "studentAnswer", "confidence", "bbox", "observedWork", "page", "sourceImageRef", "cropRef", "itemType", "type", "context"].filter((k) => q[k] !== undefined).map((k) => [k, q[k]]),
+      ...(q.recognitionReview?.status === "teacher_corrected" && q.recognitionReview.field === "studentAnswer"
+        ? [["recognitionReview", { status: "teacher_corrected", field: "studentAnswer" }]] : [])]));
   const sourcePackage = input.gradingSourcePackage;
   const packageQuestions = Array.isArray(sourcePackage?.questions) ? sourcePackage.questions : [];
   if (!packageQuestions.length) return input;
@@ -300,6 +302,9 @@ export async function replayGradingGoldCases(cases = [], config = process.env, o
       }
       const result = await grade(runnerConfig, input, {
         persist: false,
+        // Collected, de-identified transcription evidence; expected labels stay outside the runner.
+        verifiedRecognitionCorrections: (input.ocrQuestions || []).filter((q) => q.recognitionReview?.status === "teacher_corrected")
+          .map((q) => ({ questionNo: String(q.questionNo), studentAnswer: q.studentAnswer })),
         runDeepGradingAudit: options.deepAudit === true,
         teachingExecution: { ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}), ...(options.model ? { disableSolEscalation: true } : {}) }
       });
