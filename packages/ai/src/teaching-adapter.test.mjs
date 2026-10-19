@@ -37,9 +37,16 @@ test("teaching adapter sends independent model parameters and never retries HTTP
     assert.equal(payloads[1].model, "deepseek-flash");
     assert.equal(payloads[1].max_tokens, 100);
     assert.equal(Object.hasOwn(payloads[1], "reasoning_effort"), false);
+    assert.deepEqual(payloads[1].thinking, { type: "disabled" });
+    await callTeachingModel({ ...config, MINIMAX_API_KEY: "synthetic", MINIMAX_BASE_URL: baseUrl },
+      { providerId: "minimax", model: "MiniMax-M3.1-Flash", reasoningEffort: "low" }, messages, options);
+    assert.equal(payloads[2].model, "MiniMax-M3.1-Flash");
+    assert.equal(payloads[2].reasoning_effort, "low");
+    assert.equal(payloads[2].max_completion_tokens, 100);
+    assert.equal(Object.hasOwn(payloads[2], "thinking"), false);
     status = 503;
     await assert.rejects(callTeachingModel(config, resolveTeachingTaskPolicy("grading").primary, messages, options), { status: 503 });
-    assert.equal(payloads.length, 3);
+    assert.equal(payloads.length, 4);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

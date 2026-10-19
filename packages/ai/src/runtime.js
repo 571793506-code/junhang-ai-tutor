@@ -37,7 +37,7 @@ export const providerCatalog = [
     baseUrlKey: "MINIMAX_BASE_URL",
     modelKey: "MINIMAX_TEXT_MODEL",
     defaultBaseUrl: "https://api.minimaxi.com/v1",
-    defaultModel: "MiniMax-M3",
+    defaultModel: "MiniMax-M3.1-Flash",
     capabilities: ["vocabulary-voice", "spoken-practice", "avatar-dialog", "vision-ocr"]
   },
   {
@@ -137,12 +137,12 @@ export function normalizeRuntimeConfig(config = {}) {
     deepseekEmergencyFallbackModel:
       config.DEEPSEEK_EMERGENCY_FALLBACK_MODEL ||
       config.deepseekEmergencyFallbackModel ||
-      "deepseek-v4-flash",
+      "deepseek-flash",
     minimaxApiKey: config.MINIMAX_API_KEY || config.minimaxApiKey || "",
     minimaxBaseUrl:
       config.MINIMAX_BASE_URL || config.minimaxBaseUrl || "https://api.minimaxi.com/v1",
     minimaxModel:
-      config.MINIMAX_TEXT_MODEL || config.minimaxModel || "MiniMax-M3",
+      config.MINIMAX_TEXT_MODEL || config.minimaxModel || "MiniMax-M3.1-Flash",
     minimaxSpeechModel:
       config.MINIMAX_SPEECH_MODEL || config.minimaxSpeechModel || "speech-2.8-turbo",
     minimaxT2aBaseUrl:
@@ -155,7 +155,7 @@ export function normalizeRuntimeConfig(config = {}) {
     ocrVisionProvider: config.OCR_VISION_PROVIDER || config.ocrVisionProvider || "minimax",
     ocrVisionBaseUrl: config.OCR_VISION_BASE_URL || config.ocrVisionBaseUrl || "",
     ocrVisionApiKey: config.OCR_VISION_API_KEY || config.ocrVisionApiKey || "",
-    ocrVisionModel: config.OCR_VISION_MODEL || config.ocrVisionModel || "coding_plan/vlm",
+    ocrVisionModel: config.OCR_VISION_MODEL || config.ocrVisionModel || "MiniMax-M3.1-Flash",
     ocrTesseractLang: config.OCR_TESSERACT_LANG || config.ocrTesseractLang || "chi_sim+eng",
     gpt56ApiKey: config.GPT56_API_KEY || config.gpt56ApiKey || config.GPT55_API_KEY || config.gpt55ApiKey || config.OPENAI_API_KEY || config.openaiApiKey || "",
     gpt56BaseUrl: config.GPT56_BASE_URL || config.gpt56BaseUrl || config.GPT55_BASE_URL || config.gpt55BaseUrl || config.OPENAI_BASE_URL || config.openaiBaseUrl || "https://api.openai.com/v1",
@@ -165,7 +165,7 @@ export function normalizeRuntimeConfig(config = {}) {
     gpt56ReviewTimeoutMs: Number(config.GPT56_REVIEW_TIMEOUT_MS || config.gpt56ReviewTimeoutMs || config.GPT55_REVIEW_TIMEOUT_MS || config.gpt55ReviewTimeoutMs || 60000),
     gpt56ReasoningEffortEnabled: String(config.GPT56_REASONING_EFFORT_ENABLED ?? config.gpt56ReasoningEffortEnabled ?? "false").toLowerCase() === "true",
     gpt56SolFallbackEnabled: String(config.GPT56_SOL_FALLBACK_ENABLED ?? config.gpt56SolFallbackEnabled ?? "false").toLowerCase() === "true",
-    gpt56SolModel: config.GPT56_SOL_MODEL || config.gpt56SolModel || "gpt-5.6-sol",
+    gpt56SolModel: config.GPT56_SOL_MODEL || config.gpt56SolModel || "gpt-6.1-sol",
     gpt56SolFallbackTimeoutMs: Number(config.GPT56_SOL_FALLBACK_TIMEOUT_MS || config.gpt56SolFallbackTimeoutMs || 180000),
     gpt56ReadingDirectSolEnabled: String(config.GPT56_READING_DIRECT_SOL_ENABLED ?? config.gpt56ReadingDirectSolEnabled ?? "false").toLowerCase() === "true"
   };
@@ -322,6 +322,7 @@ export async function callOpenAiCompatibleChat({
   allowStructuredRetry = true,
   completionTokenLimit = false,
   omitTemperature = false,
+  thinking,
   onTransportProgress
 }) {
   if (!apiKey) throw new Error("Missing API key");
@@ -332,6 +333,7 @@ export async function callOpenAiCompatibleChat({
   if (responseFormat) payload.response_format = responseFormat;
   if (maxTokens) payload[completionTokenLimit ? "max_completion_tokens" : "max_tokens"] = maxTokens;
   if (reasoningEffort) payload.reasoning_effort = reasoningEffort;
+  if (thinking) payload.thinking = thinking;
   const requestBody = JSON.stringify(payload);
   const requestBytes = new TextEncoder().encode(requestBody).byteLength;
   const observeTransport = (phase, status = null, responseBytes) => {
@@ -435,10 +437,11 @@ export async function callDeepSeekChat(config, messages, options = {}) {
 
 export async function callTeachingModel(config, route, messages, options = {}) {
   const runtime = normalizeRuntimeConfig(config);
-  if (!["gpt56", "deepseek"].includes(route?.providerId)) throw new Error("Unsupported teaching provider");
+  if (!["gpt56", "deepseek", "minimax"].includes(route?.providerId)) throw new Error("Unsupported teaching provider");
   const openai = route.providerId === "gpt56";
-  const baseUrl = openai ? runtime.gpt56BaseUrl : runtime.deepseekBaseUrl;
-  const apiKey = openai ? runtime.gpt56ApiKey : runtime.deepseekApiKey;
+  const minimax = route.providerId === "minimax";
+  const baseUrl = openai ? runtime.gpt56BaseUrl : minimax ? runtime.ocrVisionBaseUrl || runtime.minimaxBaseUrl : runtime.deepseekBaseUrl;
+  const apiKey = openai ? runtime.gpt56ApiKey : minimax ? runtime.ocrVisionApiKey || runtime.minimaxApiKey : runtime.deepseekApiKey;
   if (!baseUrl || !apiKey || !route.model) throw new Error("Teaching model is not configured");
   const body = await callOpenAiCompatibleChat({
     baseUrl, apiKey, model: route.model, messages,
@@ -446,9 +449,10 @@ export async function callTeachingModel(config, route, messages, options = {}) {
     maxTokens: options.maxTokens,
     timeoutMs: options.timeoutMs,
     signal: options.signal,
-    reasoningEffort: openai ? route.reasoningEffort : undefined,
+    reasoningEffort: openai || minimax ? route.reasoningEffort : undefined,
+    thinking: route.providerId === "deepseek" ? { type: "disabled" } : undefined,
     allowStructuredRetry: false,
-    completionTokenLimit: openai,
+    completionTokenLimit: openai || minimax,
     omitTemperature: openai,
     onTransportProgress: options.onTransportProgress
   });

@@ -17,20 +17,30 @@ test("teaching policies isolate Astra, Flash and Sol responsibilities from QA", 
     const policy = resolveTeachingTaskPolicy(task, { GPT56_MODEL: "legacy-model" });
     assert.equal(policy.primary.model, "gpt-6-astra");
     assert.equal(policy.primary.reasoningEffort, "high");
-    assert.equal(policy.replacement.model, "gpt-5.6-sol");
+    assert.equal(policy.replacement.model, "gpt-6.1-sol");
     assert.equal(policy.maxAdditionalAttempts, 1);
   }
-  for (const task of ["extract-requirement", "extract-material", "recognize"]) {
+  for (const task of ["extract-requirement", "extract-material"]) {
     const policy = resolveTeachingTaskPolicy(task);
     assert.equal(policy.primary.model, "deepseek-flash");
     assert.equal(policy.primary.providerId, "deepseek");
     assert.equal(policy.replacement, null);
   }
-  assert.equal(resolveTeachingTaskPolicy("rewrite-feedback").primary.model, "gpt-5.6-sol");
+  assert.equal(resolveTeachingTaskPolicy("recognize", { OCR_VISION_PROVIDER: "deepseek-flash" }).primary.model, "deepseek-flash");
+  assert.equal(resolveTeachingTaskPolicy("rewrite-feedback").primary.model, "gpt-6.1-sol");
   assert.equal(resolveTeachingTaskPolicy("rewrite-feedback").replacement, null);
   assert.equal(resolveTaskModelPolicy("qa").primary.model, "gpt-5.6-terra");
   assert.equal(resolveTaskModelPolicy("qa").escalation.enabled, false);
   assert.throws(() => resolveTeachingTaskPolicy("qa"), /Unknown teaching task/);
+});
+
+test("modern MiniMax OCR uses its own verified low reasoning route without changing extraction", () => {
+  const config = { OCR_VISION_PROVIDER: "minimax", OCR_VISION_MODEL: "MiniMax-M3.1-Flash" };
+  const policy = resolveTeachingTaskPolicy("recognize", config);
+  assert.deepEqual(policy.primary, { providerId: "minimax", model: "MiniMax-M3.1-Flash", reasoningEffort: "low" });
+  assert.equal(policy.replacement, null);
+  assert.equal(policy.budget.timeoutMs, 90000);
+  assert.equal(resolveTeachingTaskPolicy("extract-material", config).primary.providerId, "deepseek");
 });
 
 test("teaching configuration overrides do not mutate global runtime configuration", () => {

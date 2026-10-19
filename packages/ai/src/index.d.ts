@@ -36,7 +36,7 @@ export interface RuntimeConfigLike {
 export type TeachingModule = "generation" | "grading";
 export type TeachingTask = "generation" | "grading" | "reference" | "extract-requirement" | "extract-material" | "recognize" | "rewrite-feedback";
 export interface TeachingRulePack { module: TeachingModule; version: string; hash: string; text: string }
-export interface TeachingRoute { providerId: "gpt56" | "deepseek"; model: string; reasoningEffort: string | null }
+export interface TeachingRoute { providerId: "gpt56" | "deepseek" | "minimax"; model: string; reasoningEffort: string | null }
 export interface TeachingBudget { deadlineAt: number; remainingTokens: number; additionalAttemptsUsed: number }
 export interface TeachingResult {
   status: "success" | "review_required" | "cancelled";
@@ -271,6 +271,7 @@ export declare function callOpenAiCompatibleChat(args: {
   allowStructuredRetry?: boolean;
   completionTokenLimit?: boolean;
   omitTemperature?: boolean;
+  thinking?: { type: "enabled" | "disabled" };
   onTransportProgress?: (event: TeachingTransportProgress) => void;
 }): Promise<unknown>;
 export declare function callDeepSeekChat(config: RuntimeConfigLike, messages: Array<{ role: string; content: string }>, options?: Record<string, unknown>): Promise<unknown>;

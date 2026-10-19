@@ -42,7 +42,7 @@ test("normal path loads actual rules and original requirements with one primary 
 
 test("availability uses Sol once; quality repair uses the primary once", async () => {
   for (const [responses, models] of [
-    [[failure(503), good()], ["gpt-6-astra", "gpt-5.6-sol"]],
+    [[failure(503), good()], ["gpt-6-astra", "gpt-6.1-sol"]],
     [[{ text: "not JSON" }, good()], ["gpt-6-astra", "gpt-6-astra"]],
     [[{ text: "{}" }, good()], ["gpt-6-astra", "gpt-6-astra"]]
   ]) {
@@ -177,7 +177,7 @@ test("grading and reference primary timeouts leave time for one availability rep
       }
     });
     assert.equal(result.status, "success");
-    assert.deepEqual(calls.map(x => x.route.model), ["gpt-6-astra", "gpt-5.6-sol"]);
+    assert.deepEqual(calls.map(x => x.route.model), ["gpt-6-astra", "gpt-6.1-sol"]);
     assert.deepEqual(calls.map(x => x.options.timeoutMs), [120000, 60000]);
     assert.equal(result.internal.attempts[0].failureCode, "TEACHING_DEADLINE");
     assert.equal(result.internal.attempts[0].triggerClass, "availability");

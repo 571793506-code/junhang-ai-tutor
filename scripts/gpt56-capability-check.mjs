@@ -33,7 +33,7 @@ export function buildGpt56ProbeTargets(env = {}, { includeSol = false } = {}) {
   if (solFallbackEnabled || includeSol) {
     targets.push({
       role: "sol-fallback",
-      model: env.GPT56_SOL_MODEL || "gpt-5.6-sol",
+      model: env.GPT56_SOL_MODEL || "gpt-6.1-sol",
       required: solFallbackEnabled
     });
   }

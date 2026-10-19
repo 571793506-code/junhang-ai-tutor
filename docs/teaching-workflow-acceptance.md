@@ -2,6 +2,16 @@
 
 更新日期：2026-10-10。对应日常工作台计划 Task 9。当前结论：第1至4项已按教师确认完成；第5项“当前学生/教材/教师留出任务”暂缓，待教师与学生继续磨合。第6项已完成业务库备份、工作流迁移、Prisma Client 更新及持久化启用；教师已确认本份生成内容，真实 Web 已完成发布、预览与正式学生卷/解析卷导出，两份均为1页A4。本轮16题真实批改已按教师最终决定确认，版本5、37.5/60分；独立归档、8条错题、真实数据库幂等及档案证据准入验收通过。Web教师确认和归档回显已修正，真实任务刷新后显示版本5已归档，分数及确认数保持一致。按已约定范围，第九阶段教学与数据库闭环验收完成，可进入下一阶段；第5项继续暂缓。下文较早的失败、未确认、未归档及旧界面问题均为历史记录，以最新记录为准。
 
+### 2026-10-19 当前模型升级与批改内容边界修正
+
+- 用户要求先更新生成、批改及其辅助调用到当前型号，再修正内容。主调用保留gpt-6-astra high，替补及独立反馈任务改为gpt-6.1-sol high，辅助提取使用deepseek-flash（官方说明当前映射V4.1-Flash-1017），MiniMax视觉OCR升级MiniMax-M3.1-Flash low。同步运行默认值、环境示例、本机.env与能力检查脚本；学生问答的Terra单调用职责保留，未改教师最终评分和归档。新型号不是全部任务改用同一个大模型。
+- 来源核对：OpenAI官方模型页、latest-model页及迁移页均返回403，resolver两次失败；OpenAI型号候选来自本地OpenAI Docs非权威快照，再以当前渠道/models清单及实际请求核验，不宣称已获得官方完整兼容性保证。DeepSeek官方https://api-docs.deepseek.com/quick_start/pricing及thinking_mode页确认最新Flash别名和默认思考；MiniMax官方https://platform.minimax.io/docs/api-reference/text-openai-api确认M3.1视觉输入、低推理档位与max_completion_tokens。渠道MiniMax列表列Preview，正式名称另经文本和真实裁图请求HTTP200验证。合成像素视觉探针曾400，不覆盖该失败；真实裁图随后成功。安全清单及探针见tmp/quality/model-upgrade-discovery-20261019.json、model-upgrade-probe-20261019.json、minimax-upgrade-diagnosis-20261019.json、minimax-vision-compatibility-20261019.json。
+- 新OCR与可选DeepSeek识别共用按页受限执行器：共享原90秒/24000tokens池、最多两路并发、保留图片/裁图绑定和服务端页号，无自动Sol追加。MiniMax显式low；DeepSeek辅助调用显式thinking.disabled，避免默认high思考。空题数组不再成功，未知置信度不再被Number(null)转换为0，保留不可辨认warnings与空白区别，修复输出模板闭合符号。旧coding_plan/vlm仅作显式兼容，不改历史OCR。真实裁图共享链路约4502ms返回，证据tmp/quality/modern-ocr-live-20261019.json；仅证明该裁图识别，不证明整页OCR准确率。
+- 默认新链路16题回放upgraded-model-latest16-20261019仍180022ms失败：Astra120016ms、Sol6.1 59981ms均仅request_started，未观察到响应头，usage及费用未知；质量CLI退出1，有效评估0，指标null。故升级没有解决整卷超时。所有回放persist:false，教师37.5/60归档及expected不变。
+- 小范围诊断明确强制Sol6.1、仅取同一金标前8题，保持原教师要求及原作答：upgraded-sol-eight-question-20261019约59230ms返回，第8题模型0分与教师金标1分不同，子集总分8/19与金标9/19相差1。现有质量CLI虽退出0，仍不据此宣称逐题分数一致或生产质量通过；这不是默认主模型或整卷验收。
+- 据该差异修正共享规则为grading-v2：本次教师要求可补充来源通用rubric；已知类别满分但局部正确方法的细分影响得分时，说明歧义并保留uncertain/score:null，不自行补分或直接清零；反馈避免重复题干、过程和通用长文。用同一8题同一Sol6.1再次独立验证upgraded-sol-content-revision-20261019，约43956ms返回，第8题保留待教师裁定且score:null。质量CLI退出0但分数误差指标null；这只验证本题歧义边界生效，不证明提速或完整批改准确率。原教师1分及整卷归档未改。
+- 验证：模型/路由/主备切换/共享服务/识别边界/采集回放/质量评测220项通过、0跳过（model-upgrade-final3-regression-20261019.log）；API、Skills、生成蓝图及Web类型检查通过。全量编码检查仍只报既有tmp/quality/task9-prisma-package-20260926/package/runtime/binary.js:126，未修改vendor或放宽守卫。当前无活动教学工作流时，通过已有守护进程重启API；/health HTTP200且database.ok=true，端口恢复，证据model-upgrade-live-health-20261019.json。没有执行Web界面操作、正式发布或写入新的评分归档；工作区继续保留。
+
 ### 2026-10-19 日常质量闭环：阅读生成修正与回放上下文补齐
 
 - 本轮保留既有工作区及原教师归档，未重启现有Web/API，真实调用均由当前源码的共享服务以persist:false执行。没有改变模型职责、高推理档位、预算、重试次数、评分或归档门禁；第5项留出任务仍暂缓。

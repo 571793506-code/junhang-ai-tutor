@@ -37,7 +37,7 @@ for (const status of [503, 524, 429]) {
     await withGateway((_p, n) => n === 1 ? { status, message: status === 429 ? "rate_limit" : "upstream error" } : {}, async (config, calls) => {
       const result = await draftAssessment(config, input);
       assert.equal(result.available, true);
-      assert.deepEqual(calls.map((p) => p.model), ["gpt-6-astra", "gpt-5.6-sol"]);
+      assert.deepEqual(calls.map((p) => p.model), ["gpt-6-astra", "gpt-6.1-sol"]);
       assert.equal(result.modelRun.metadata.usedModelEscalation, true);
     });
   });

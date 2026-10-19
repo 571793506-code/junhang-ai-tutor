@@ -79,7 +79,7 @@ test("normalizeRuntimeConfig supports the GPT56 assessment timeout migration ali
 test("normalizeRuntimeConfig exposes Sol defaults and explicit overrides", () => {
   const defaults = normalizeRuntimeConfig({});
   assert.equal(defaults.gpt56SolFallbackEnabled, false);
-  assert.equal(defaults.gpt56SolModel, "gpt-5.6-sol");
+  assert.equal(defaults.gpt56SolModel, "gpt-6.1-sol");
   assert.equal(defaults.gpt56SolFallbackTimeoutMs, 180000);
 
   const overridden = normalizeRuntimeConfig({
@@ -664,10 +664,10 @@ for (const workflow of ["reference", "grading"]) {
     });
 
     assert.equal(payloads.length, 2);
-    assert.deepEqual(payloads.map((item) => item.model), ["gpt-6-astra", "gpt-5.6-sol"]);
+    assert.deepEqual(payloads.map((item) => item.model), ["gpt-6-astra", "gpt-6.1-sol"]);
     assert.equal(payloads[1].reasoning_effort, "high");
     assert.equal(result.available, true);
-    assert.equal(result.model, "gpt-5.6-sol");
+    assert.equal(result.model, "gpt-6.1-sol");
     assert.equal(result.modelRun.metadata.usedModelEscalation, true);
     assert.equal(result.modelRun.metadata.solAttempted, true);
     assert.equal(result.modelRun.metadata.attempts.length, 2);

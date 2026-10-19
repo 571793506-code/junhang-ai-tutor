@@ -84,7 +84,7 @@ function normalizeOcrQuestion(question = {}, pageNumber = 1, index = 0) {
     printedPrompt: String(source.printedPrompt || source.prompt || source.question || source.text || "").trim(),
     studentAnswer: String(source.studentAnswer || source.answer || source.handwriting || source.filledAnswer || "").trim(),
     observedWork: String(source.observedWork || source.studentProcess || source.process || source.work || "").trim(),
-    confidence: Number.isFinite(Number(source.confidence)) ? Number(source.confidence) : null,
+    confidence: source.confidence != null && String(source.confidence).trim() !== "" && Number.isFinite(Number(source.confidence)) ? Number(source.confidence) : null,
     bbox: region ? { ...region, page: Math.max(1, Math.round(Number(region.page || pageNumber) || pageNumber)) } : null,
     warnings: Array.isArray(source.warnings) ? source.warnings.map((item) => String(item || "").trim()).filter(Boolean) : []
   };
@@ -193,7 +193,7 @@ async function callMiniMaxCodingPlanVlm({ baseUrl, apiKey, prompt, image }) {
   return body;
 }
 
-async function recognizeWithFlash(config, images, execution) {
+async function recognizeWithTeachingModel(config, images, execution) {
   const pool = createTeachingOperationBudget("recognize", config, execution);
   const allowance = Math.floor(pool.remainingTokens / images.length);
   const results = await mapWithConcurrency(images, 2, async (image, index) => {
@@ -223,12 +223,12 @@ async function recognizeWithFlash(config, images, execution) {
       };
       if (candidate && typeof candidate === "object") Object.assign(candidate, normalized);
       return typeof normalized.printedText === "string" && typeof normalized.studentAnswerText === "string" &&
-        Array.isArray(normalized.questions) && normalized.questions.every((q) =>
+        Array.isArray(normalized.questions) && normalized.questions.length > 0 && normalized.questions.every((q) =>
           q && typeof q.printedPrompt === "string" && typeof q.studentAnswer === "string" &&
           typeof q.questionNo === "string" && q.questionNo.trim() &&
           Number.isFinite(q.confidence) && q.confidence >= 0 && q.confidence <= 1)
         ? [] : ["ocr_structure_invalid"];
-    }, "只做识别，不批改不给分。区分印刷题干和学生手写作答，空白或不可辨认作答保留空字符串。为节省输出，text 可为空或一句摘要，printedText 与 studentAnswerText 只写汇总，不要重复整页全文；不要输出 warnings、markdown 或解释。输出严格 JSON {text,printedText,studentAnswerText,confidence,questions:[{questionNo,printedPrompt,studentAnswer,observedWork,confidence,bbox:{page,x,y,w,h}]}]}。坐标为 0 到 1 的相对坐标。");
+    }, "只做识别，不批改不给分。区分印刷题干和学生手写作答，保留实际可见过程，不推算学生应写的答案。空白或不可辨认作答保留空字符串；不可辨认时须降低confidence并在该题warnings说明遮挡或模糊原因，与确认可见空白区分。为节省输出，text 可为空或一句摘要，printedText 与 studentAnswerText 只写汇总，不要重复整页全文；不要输出markdown或额外解释。输出严格 JSON {text,printedText,studentAnswerText,confidence,questions:[{questionNo,printedPrompt,studentAnswer,observedWork,confidence,warnings:string[],bbox:{page,x,y,w,h}}]}。坐标为 0 到 1 的相对坐标，无法定位时bbox=null，不编造坐标。");
     if (result.status !== "success") return { page: pageNumber, questions: [], failed: true };
     const candidate = result.candidate;
     return {
@@ -378,7 +378,9 @@ export async function recognizeImages(config, input = {}, execution = {}) {
         reason: "没有可识别的图片文件。"
       };
     }
-    if (runtime.ocrVisionProvider === "deepseek-flash") return recognizeWithFlash(config, images, execution);
+    if (runtime.ocrVisionProvider === "deepseek-flash" || runtime.ocrVisionProvider === "minimax" && /^MiniMax-M3\.1-Flash(?:-Preview)?$/.test(runtime.ocrVisionModel)) {
+      return recognizeWithTeachingModel(config, images, execution);
+    }
     const vision = resolveVisionProvider(runtime);
     if (!vision.baseUrl || !vision.apiKey || !vision.model) {
       return {

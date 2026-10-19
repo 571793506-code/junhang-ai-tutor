@@ -34,7 +34,7 @@ test("gateway 503 hints, correlation and retry guidance reach internal attempts 
     body: JSON.stringify({ error: { message: "No available channel PRIVATE https://private.test" } }) }, async (config, calls) => {
     const result = await runTeachingTask(config, "generation", {}, { repairIssues: () => [] });
     assert.equal(calls(), 2);
-    assert.deepEqual(result.internal.attempts.map((a) => a.model), ["gpt-6-astra", "gpt-5.6-sol"]);
+    assert.deepEqual(result.internal.attempts.map((a) => a.model), ["gpt-6-astra", "gpt-6.1-sol"]);
     for (const a of result.internal.attempts) {
       assert.equal(a.upstreamStatus, 503);
       assert.deepEqual(a.upstreamDiagnostics, { requestId: "req-test-503-12345", requestIdSource: "x-request-id",

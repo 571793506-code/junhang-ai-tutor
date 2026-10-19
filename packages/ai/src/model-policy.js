@@ -21,10 +21,13 @@ export function resolveTeachingTaskPolicy(task, config = {}) {
   const defaults = TEACHING_TASKS[task];
   const routes = {
     primary: { providerId: "gpt56", model: config.TEACHING_PRIMARY_MODEL || config.teachingPrimaryModel || "gpt-6-astra", reasoningEffort: "high" },
-    replacement: { providerId: "gpt56", model: config.TEACHING_REPLACEMENT_MODEL || config.teachingReplacementModel || "gpt-5.6-sol", reasoningEffort: "high" },
+    replacement: { providerId: "gpt56", model: config.TEACHING_REPLACEMENT_MODEL || config.teachingReplacementModel || "gpt-6.1-sol", reasoningEffort: "high" },
     assist: { providerId: "deepseek", model: config.TEACHING_ASSIST_MODEL || config.teachingAssistModel || "deepseek-flash", reasoningEffort: null }
   };
-  const primary = routes[defaults.role];
+  const visionModel = config.OCR_VISION_MODEL || config.ocrVisionModel || "MiniMax-M3.1-Flash";
+  const modernVision = task === "recognize" && (config.OCR_VISION_PROVIDER || config.ocrVisionProvider || "minimax") === "minimax"
+    && /^MiniMax-M3\.1-Flash(?:-Preview)?$/.test(visionModel);
+  const primary = modernVision ? { providerId: "minimax", model: visionModel, reasoningEffort: "low" } : routes[defaults.role];
   return {
     task, module: defaults.module, primary,
     replacement: defaults.role === "primary" && primary.model !== routes.replacement.model ? routes.replacement : null,
@@ -66,9 +69,9 @@ export function resolveTaskModelPolicy(task, config = {}, input = {}) {
   const configuredModel = defaults.providerId === "gpt56"
     ? runtimeValue(config, "gpt56Model", "gpt-5.6-terra")
     : defaults.providerId === "deepseek"
-      ? runtimeValue(config, "deepseekEmergencyFallbackModel", "deepseek-v4-flash")
-      : runtimeValue(config, "minimaxModel", "MiniMax-M3");
-  const solModel = runtimeValue(config, "gpt56SolModel", "gpt-5.6-sol");
+      ? runtimeValue(config, "deepseekEmergencyFallbackModel", "deepseek-flash")
+      : runtimeValue(config, "minimaxModel", "MiniMax-M3.1-Flash");
+  const solModel = runtimeValue(config, "gpt56SolModel", "gpt-6.1-sol");
   const isSol = configuredModel === solModel || configuredModel.includes("-sol");
   const escalationEnabled = defaults.escalation && !isSol && String(runtimeValue(config, "gpt56SolFallbackEnabled", true)).toLowerCase() !== "false";
   return {
