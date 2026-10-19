@@ -9,6 +9,8 @@ When a request names a textbook or teaching material, load `skills/teaching-mate
 
 Minimum verification: `cmd /c npm.cmd run check:generation:blueprint`.
 
+For reading generation, the server supplies partition.readingRequirements from the validator, including passage count, length units and contextual-question count. English model and service reading gates share the same check. Never accept these limits from the client, weaken a gate to accept output, or count a repaired/fallback passage as model quality. Inspect partition attempt validationIssueCodes before changing prompts or budgets; a complete new draft still needs teacher content review.
+
 For daily quality regression, `fixtures/quality/generation-confirmed-calculation.json` preserves the existing teacher-reviewed four-question sample; `packages/services/src/generation-confirmed-regression.test.mjs` exercises scope, exact answers, analysis and rubric preservation through the shared service using a mocked model. This is offline regression, not a new generation, live model quality result or permission to confirm another draft. Its result-only awards are 1/1/1/1; the separate earlier remediation sample retains its confirmed 2/2/1/1 awards. Teacher request determines future quantity, grade and knowledge points.
 
 Read `skills/generation/references/runtime-rules.md` for the shared teaching rules. Change teaching details there, then verify `cmd /c npm.cmd run check:skills`. Runtime loading belongs in the AI layer; never accept a rule path or prompt from a client. Model routing and budgets belong in `packages/ai/src/model-policy.js`.

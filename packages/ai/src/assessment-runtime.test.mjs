@@ -118,6 +118,25 @@ test("four-part comprehensive generation gives each partition a complete first r
   assert.equal(peak, 4);
   assert.equal(result.modelRun.metadata.attempts.some((attempt) => attempt.maxTokens < 4000), false);
 });
+
+test("reading calls receive the same numerical requirements used by validation", async () => {
+  let requirements;
+  await draftAssessment({}, { subject: "英语", grade: "六年级", kind: "小测", purpose: "comprehensive", readingRequirements: { minimumGroupLength: 1 } }, {
+    maxTokens: 16000,
+    call: async (_route, messages) => {
+      const request = JSON.parse(messages[1].content);
+      if (request.partition.id === "reading") {
+        requirements = request.partition.readingRequirements;
+        assert.match(messages[0].content, /readingRequirements/);
+      }
+      return { text: "{}" };
+    }
+  });
+  assert.deepEqual(requirements, {
+    lengthUnit: "words", minimumGroups: 1, minimumGroupLength: 120,
+    minimumTotalLength: 120, minimumContextualQuestions: 6
+  });
+});
 test("focused English omits reading and explanation uses a separate schema", async () => {
   const focused = await draftAssessment({}, { ...input, subject: "英语", requestedItemTypes: ["fill"] }, { call: async (_route, messages) => {
     assert.deepEqual(JSON.parse(messages[1].content).partition.itemTypes, ["fill"]);

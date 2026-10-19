@@ -173,6 +173,19 @@ test("assessment partition validation accepts a complete English reading group",
   assert.deepEqual(result, { valid: true, codes: [], issues: [] });
 });
 
+test("comprehensive reading validation includes the service's six contextual questions", () => {
+  const items = Array.from({ length: 6 }, (_, index) => ({
+    itemType: "reading", prompt: index < 4 ? `According to the passage, what happened on day ${index + 1}?` : `Name a verb ${index}.`,
+    answer: "walked", analysisSteps: ["Locate the sentence."], knowledgePoint: "过去时",
+    passageGroupId: "past-tense", passageText: "word ".repeat(130)
+  }));
+  const partition = { id: "reading", subject: "英语", kind: "小测", itemTypes: ["reading"], targetItemCount: 6 };
+  assert.ok(validateAssessmentPartition({ sections: [{ items }] }, partition).codes.includes("reading_context_questions_insufficient"));
+  items[4].prompt = "Why did they return home?";
+  items[5].prompt = "What is the main idea of the passage?";
+  assert.equal(validateAssessmentPartition({ sections: [{ items }] }, partition).valid, true);
+});
+
 test("assessment partition validation rejects inconsistent passage text within one group", () => {
   const result = validateAssessmentPartition({
     sections: [{ items: [

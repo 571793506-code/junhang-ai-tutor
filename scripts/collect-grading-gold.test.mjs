@@ -148,6 +148,7 @@ test("validated immutable archive types survive changed live assignment fields; 
   const source = buildGradingSourcePackage({ id: "paper1", subject: { name: "数学" }, grade: "四年级",
     items: [{ orderIndex: 1, prompt: "1+1", answer: "2", score: 5 }] }).package;
   const snapshot = { gradingSourcePackage: source,
+    resolvedRequest: { requirement: "学生甲：方法2分、计算2分、结果1分。允许正确的其他方法。" },
     archiveEvidence: { assignmentQuestionTypes: [{ questionNo: "1", itemType: "fill_blank" }] },
     questions: [{ id: "q1", questionNo: "1", printedPrompt: "1+1", studentAnswer: "2", correctAnswer: "2", maxScore: 5, score: 5,
       status: "correct", explanation: "correct", knowledgePoint: "addition", reviewedByTeacher: true, confirmedBy: "t1" }] };
@@ -161,10 +162,21 @@ test("validated immutable archive types survive changed live assignment fields; 
   row.assignment.metadata.gradingSourcePackage = source;
   row.assignment.items = [{ orderIndex: 1, itemType: "calculation", prompt: "1+1", answer: "2", metadata: { score: 5 } }];
   assert.equal(buildGradingGoldCase(row).caseValue.input.gradingSourcePackage.questions[0].itemType, "fill_blank");
+  const collected = buildGradingGoldCase(row).caseValue;
+  assert.equal(collected.input.teacherContext, "[REDACTED]：方法2分、计算2分、结果1分。允许正确的其他方法。");
+  assert.equal(buildReplayInput(collected.input).teacherContext, collected.input.teacherContext);
+  assert.equal(collected.expected.score, 5);
   row.content.workflowArchive.snapshot.archiveEvidence.assignmentQuestionTypes[0].itemType = "choice";
   const invalid = buildGradingGoldCase(row);
   assert.equal(invalid.ok, false);
   assert.ok(invalid.summary.reasons.includes("WORKFLOW_ARCHIVE_EVIDENCE_INVALID"));
+});
+
+test("unbound live teacher context cannot replace an archived original request", () => {
+  const row = reviewedRow();
+  row.content.teacherContext = "不可信的临时内容";
+  row.grading.result.teacherContext = "不得从评分输出回填输入";
+  assert.equal(buildGradingGoldCase(row).caseValue.input.teacherContext, undefined);
 });
 
 test("source-bound type overrides legacy and OCR types; OCR alone cannot supply a grading type", () => {

@@ -64,3 +64,34 @@ test("legacy score allocation never rewrites existing comprehensive rubric or pa
     assert.notEqual(result.audit.passed, true);
   }
 });
+
+test("a complete English quiz survives both model and service reading gates at 60 points", async () => {
+  const vocabulary = ["走路", "玩耍", "看望", "清洁", "打开", "关闭", "听", "观看"];
+  const subjects = ["Amy", "Ben", "Clara", "Dan", "Emma", "Frank"];
+  const result = await draftAssessmentService({}, { subject: "英语", grade: "六年级", kind: "小测", requirement: "一般过去时基础小测" }, {
+    persist: false, teachingExecution: { call: async (_route, messages) => {
+      const { partition } = JSON.parse(messages[1].content);
+      const type = partition.itemTypes[0];
+      const items = partition.itemScores.map((score, index) => ({
+        itemType: type,
+        prompt: type === "fill" ? `根据中文写英文单词：${vocabulary[index]}。`
+          : type === "solution" ? `把句子翻译成英文：${subjects[index]}昨天去了公园。`
+            : type === "choice" ? `${subjects[index]} ______ to school yesterday.`
+              : `According to the passage, what did ${subjects[index]} do?`,
+        answer: type === "choice" ? "A" : "walked", score,
+        rubric: `答案正确得${score}分。`, analysisSteps: ["根据yesterday判断过去时。", "使用动词过去式。"],
+        knowledgePoint: "一般过去时", commonMistake: "注意动词过去式。",
+        ...(type === "choice" ? { options: ["A. walked", "B. walk", "C. walks", "D. walking"] } : {}),
+        ...(type === "reading" ? { passageGroupId: "past-day", passageTitle: "Yesterday", passageText: "A child walked to the park and played with friends yesterday. ".repeat(12), passageQuestionIndex: index + 1 } : {})
+      }));
+      return { text: JSON.stringify({ title: "一般过去时小测", sections: [{ title: partition.title, items }] }) };
+    } }
+  });
+  assert.equal(result.modelAvailable, true);
+  assert.equal(result.usedDynamicFallback, false);
+  assert.equal(result.totalScore, 60);
+  assert.equal(result.draftItems.length, 20);
+  assert.equal(result.audit.status, "passed");
+  assert.equal(result.generationPipeline.audit.passed, true);
+  assert.deepEqual(result.persisted, { modelRunId: null, draftReviewModelRunIds: {}, assignmentId: null });
+});

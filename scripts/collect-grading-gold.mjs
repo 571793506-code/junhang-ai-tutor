@@ -175,6 +175,11 @@ function buildInput(row, packageValue, packageQuestions, gradingQuestions, priva
     grade: sanitizeText(packageValue.grade || metadata.grade || content.grade, privateNames) || null,
     kind: sanitizeText(packageValue.kind || metadata.kind || content.kind, privateNames) || null,
     totalScore: finiteNumber(packageValue.totalScore || metadata.totalScore || result.maxScore || result.fullScore),
+    // Admission already validated this immutable archive. Restore the same
+    // original teacher instruction used by workflow execution, never judgments
+    // or final scores from grading output or a live mutable field.
+    ...(text(content.workflowArchive?.snapshot?.resolvedRequest?.requirement)
+      ? { teacherContext: sanitizeText(content.workflowArchive.snapshot.resolvedRequest.requirement, privateNames) } : {}),
     gradingSourcePackage: {
       schemaVersion: text(packageValue.schemaVersion) || SOURCE_PACKAGE_SCHEMA_VERSION,
       version: text(packageValue.version) || null,

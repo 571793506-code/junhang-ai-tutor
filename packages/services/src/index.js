@@ -14,6 +14,7 @@ export * from "./teaching-workflow-assignment.js";
 import { matchesTeacherConfirmedTextbookChapterScope, matchesTextbookEvidenceScope, normalizeGradeLevel, normalizeTeachingPurpose, allocateAssessmentScores, assessmentScoreIssues, normalizeAssessmentOptions, assessmentChoiceOptionsValid, normalizeAssessmentAnswerFormat } from "@junhang/core";
 import { assessmentContentIssues, createTeachingOperationBudget } from "../../ai/src/teaching-pipeline.js";
 import { buildAssessmentPartitions } from "../../ai/src/assessment-partitions.js";
+import { assessmentReadingIssues } from "../../ai/src/model-escalation.js";
 import {
   createAssignmentDraft,
   createLearningTask,
@@ -2272,6 +2273,12 @@ function shouldReplaceReadingSection(items = [], input = {}, blueprint = buildAs
   if (!readingTarget) return false;
   const readingItems = items.filter((item) => printableType(item) === "reading");
   if (readingItems.length < Math.max(3, Math.ceil(readingTarget * 0.7))) return true;
+  if (subject === "英语") {
+    return assessmentReadingIssues(readingItems.map(item => ({
+      prompt: item.prompt, passageText: item.metadata?.passageText,
+      passageTitle: item.metadata?.passageTitle, passageGroupId: item.metadata?.passageGroupId
+    })), { subject, kind, targetItemCount: readingTarget }).length > 0;
+  }
   const passageTexts = readingItems
     .map((item) => compactText(item.metadata?.passageText || ""))
     .filter(Boolean);
@@ -2280,17 +2287,11 @@ function shouldReplaceReadingSection(items = [], input = {}, blueprint = buildAs
     .map((item) => compactText(item.prompt || ""))
     .filter((text) => text.length >= 180);
   const uniquePassages = new Set(uniquePassageTexts.map((text) => text.slice(0, 80)));
-  const totalEnglishWords = uniquePassageTexts.join(" ").match(/[A-Za-z]+/g)?.length || 0;
   const totalChineseChars = uniquePassageTexts.join("").replace(/[^\u4e00-\u9fa5]/g, "").length;
   const contextualQuestionCount = readingItems.filter((item) => {
     const text = compactText(item.prompt || "");
     return /according|passage|infer|main idea|best title|why|because|learn from|根据|短文|联系上下文|推断|主要内容|原因|作者/i.test(text);
   }).length;
-  if (subject === "英语") {
-    const minWords = kind === "试卷" ? 560 : kind === "练习" ? 150 : 120;
-    const minContextualQuestions = Math.min(6, Math.max(1, readingTarget));
-    return uniquePassages.size < (kind === "试卷" ? 2 : 1) || totalEnglishWords < minWords || contextualQuestionCount < minContextualQuestions;
-  }
   if (subject === "语文") {
     const minChars = kind === "试卷" ? 950 : 700;
     const longestPassageChars = uniquePassageTexts.reduce((max, text) => {

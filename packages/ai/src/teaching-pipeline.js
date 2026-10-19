@@ -1,7 +1,7 @@
-import { normalizeTeachingPurpose, assessmentScoreIssues, normalizeAssessmentOptions, assessmentChoiceOptionsValid } from "@junhang/core";
+import { normalizeTeachingPurpose, assessmentScoreIssues, normalizeAssessmentOptions, assessmentChoiceOptionsValid, validateGradingSourcePackage } from "@junhang/core";
 import { buildAssessmentPartitions, mapWithConcurrency } from "./assessment-partitions.js";
 import { resolveTeachingTaskPolicy } from "./model-policy.js";
-import { validateAssessmentPartition } from "./model-escalation.js";
+import { validateAssessmentPartition, assessmentReadingRequirements } from "./model-escalation.js";
 
 const present = (value) => value != null && String(value).trim() !== "";
 const pick = (source, keys) => Object.fromEntries(keys.filter((key) => source[key] !== undefined).map((key) => [key, source[key]]));
@@ -99,11 +99,12 @@ export async function runAssessmentPipeline(config, input, execution, runTask) {
     ? partitions.length
     : resolveTeachingTaskPolicy("generation", config).maxConcurrency;
   const units = await mapWithConcurrency(partitions, partitionConcurrency, async (partition) => {
+    const readingRequirements = partition.itemTypes.includes("reading") ? assessmentReadingRequirements(partition) : null;
     const contract = partition.purpose === "explanation"
       ? "输出 {title, explanation:{concept,steps:string[],workedExamples:[{prompt,answer,analysisSteps:string[]}],commonMistakes:string[]}}。不要输出试卷分区。"
       : "输出 {title,layout,sections:[{title,type,items:[{itemType,prompt,answer,score,rubric,analysisSteps:string[],knowledgePoint,commonMistake,options?,figure?,answerFormat?,passageGroupId?,passageText?,passageTitle?,passageQuestionIndex?}]}],printNotes:string[]}。只生成 partition 指定题型和题量，同一阅读题组带完整材料。rubric 写明给分依据。prompt 只写题目正文，不加题号、分值或 partition/dayId 等内部编号；编号与分值由结构化字段及展示层提供。";
     const firstResponseBudget = purpose.purpose === "comprehensive" && partitions.length >= 4;
-    const result = await runTeachingPipelineUnit(runTask, config, "generation", { ...safeInput, partition }, {
+    const result = await runTeachingPipelineUnit(runTask, config, "generation", { ...safeInput, partition: { ...partition, ...(readingRequirements ? { readingRequirements } : {}) } }, {
       ...execution,
       evidenceSufficient,
       // Four formal quiz partitions otherwise reserve half of each partition's
@@ -114,7 +115,8 @@ export async function runAssessmentPipeline(config, input, execution, runTask) {
       if (execution.requireRubric === true && partition.purpose !== "explanation" && (candidate.sections || []).some((section) =>
         (section.items || []).some((item) => typeof item.rubric !== "string" || !item.rubric.trim()))) issues.push("rubric_missing");
       return issues;
-    }, contract + (partition.itemScores ? " partition.itemScores按题目顺序规定score，评分细则给分点总和必须与对应score一致，分区总分必须等于partition.targetScore。" : ""));
+    }, contract + (partition.itemScores ? " partition.itemScores按题目顺序规定score，评分细则给分点总和必须与对应score一致，分区总分必须等于partition.targetScore。" : "")
+      + (readingRequirements ? " 阅读材料和问题必须满足partition.readingRequirements：minimumGroups篇不同材料，每篇不少于minimumGroupLength个lengthUnit，总篇幅不少于minimumTotalLength；至少minimumContextualQuestions题明确依托材料（例如According to the passage、Why或根据短文）。同组每题保存完全一致的完整passageText与passageGroupId，不把篇幅要求当作学生题面。" : ""));
     return { id: partition.id, partition, result };
   });
   if (execution.signal?.aborted) throw execution.signal.reason || new Error("ASSESSMENT_GENERATION_CANCELLED");
@@ -161,8 +163,45 @@ export function gradingContentIssues(candidate, input) {
   return [...new Set(issues)];
 }
 
+function compactVerifiedGradingContext(input) {
+  const source = input.gradingSourcePackage;
+  const refs = input.referenceAnswers || [];
+  const questions = input.ocrQuestions || [];
+  if (!source || !validateGradingSourcePackage(source).ok || !refs.length || !questions.length) return input;
+  const byNo = new Map(source.questions.map(question => [String(question.questionNo), question]));
+  const refNos = new Set(refs.map(ref => String(ref.questionNo)));
+  const questionNos = new Set(questions.map(question => String(question.questionNo)));
+  const sameText = (left, right) => String(left ?? "").replace(/\s+/g, " ").trim() === String(right ?? "").replace(/\s+/g, " ").trim();
+  const sameAnswer = (reference, authoritative) => JSON.stringify(reference) === JSON.stringify(authoritative)
+    || Array.isArray(authoritative) && authoritative.every(value => typeof value === "string") && reference === authoritative.join(",");
+  if (refNos.size !== refs.length || refs.length !== questionNos.size || questions.some(q => !refNos.has(String(q.questionNo)))
+    || refs.some(ref => {
+      const authoritative = byNo.get(String(ref.questionNo));
+      return !authoritative || !sameText(ref.prompt, authoritative.prompt)
+        || !sameAnswer(ref.correctAnswer, authoritative.correctAnswer) || ref.score !== authoritative.maxScore
+        || ref.rubric && ref.rubric !== authoritative.rubric
+        || ref.context && JSON.stringify(ref.context) !== JSON.stringify(authoritative.context);
+    })) return input;
+  const projected = { ...input, referenceAnswers: refs.map(ref => {
+    const authoritative = byNo.get(String(ref.questionNo));
+    return { ...authoritative, ...ref, correctAnswer: authoritative.correctAnswer, rubric: authoritative.rubric,
+      ...(ref.analysisSteps && JSON.stringify(ref.analysisSteps) !== JSON.stringify(authoritative.analysisSteps) ? { sourceAnalysisSteps: authoritative.analysisSteps } : {}),
+      ...(authoritative.context ? { context: authoritative.context, itemType: authoritative.context.itemType || ref.itemType } : {}) };
+  }) };
+  // The complete, verified package remains at the service/archive boundary. Only
+  // the model request uses this per-question projection; never rehash a subset.
+  delete projected.gradingSourcePackage;
+  if (Array.isArray(projected.assignmentItems)) projected.assignmentItems = projected.assignmentItems.filter(item => questionNos.has(String(item.questionNo || item.orderIndex)));
+  for (const [field, questionField] of [["printedText", "printedText"], ["ocrText", "printedText"], ["studentAnswerText", "studentAnswer"]]) {
+    const numbered = questions.map(q => `${q.questionNo}. ${String(q[questionField] || "").trim()}`.trim()).filter(line => !/\.\s*$/.test(line)).join(" ");
+    if (projected[field] === numbered) delete projected[field];
+  }
+  return projected;
+}
+
 export async function runSubmissionPipeline(config, task, input, execution, runTask) {
-  const safeInput = pick(input, gradingKeys);
+  const selected = pick(input, gradingKeys);
+  const safeInput = task === "grading" ? compactVerifiedGradingContext(selected) : selected;
   const questions = safeInput.ocrQuestions || [];
   const printed = present(input.printedText) || questions.some((q) => present(q.printedPrompt || q.printedText));
   const answers = present(input.studentAnswerText) || present(input.manualText) || questions.some((q) => present(q.studentAnswer) || present(q.observedWork));

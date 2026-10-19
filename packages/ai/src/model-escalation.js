@@ -57,6 +57,51 @@ export function solEscalationEnabled(runtime = {}) {
   );
 }
 
+export function assessmentReadingRequirements(partition = {}) {
+  const english = partition.subject === "英语";
+  const comprehensive = !partition.purpose || partition.purpose === "comprehensive";
+  const formal = partition.kind === "试卷";
+  const practice = partition.kind === "练习";
+  const minimumGroups = comprehensive && english && formal ? 2 : 1;
+  const minimumGroupLength = english ? formal ? 280 : practice ? 150 : 120 : formal ? 700 : 550;
+  const contextualDefault = english ? formal ? 6 : practice ? 3 : 4 : 4;
+  // Comprehensive English must also meet the service's existing reading gate.
+  const contextualTarget = english && comprehensive ? 6 : contextualDefault;
+  return {
+    lengthUnit: english ? "words" : "chineseCharacters", minimumGroups, minimumGroupLength,
+    minimumTotalLength: minimumGroupLength * minimumGroups,
+    minimumContextualQuestions: Math.min(contextualTarget, partition.targetItemCount || contextualDefault)
+  };
+}
+
+export function assessmentReadingIssues(readingItems = [], partition = {}) {
+  const codes = [];
+  const requirements = assessmentReadingRequirements(partition);
+  const passageGroups = new Map();
+  for (const item of readingItems) {
+    const passageText = String(item?.passageText || item?.passage || item?.materialText || "").trim();
+    const groupId = String(item?.passageGroupId || item?.passageTitle || passageText.slice(0, 80) || "missing").trim();
+    const group = passageGroups.get(groupId) || { passageText, passageTexts: new Set() };
+    if (passageText) group.passageTexts.add(passageText);
+    if (passageText.length > group.passageText.length) group.passageText = passageText;
+    passageGroups.set(groupId, group);
+  }
+  const groups = [...passageGroups.values()];
+  if (!groups.length || groups.some((group) => !group.passageText)) codes.push("reading_passage_missing");
+  if (groups.some((group) => group.passageTexts.size > 1)) codes.push("reading_passage_inconsistent");
+  const distinctPassages = new Set(groups.filter(group => group.passageText).map(group => group.passageText.replace(/\s+/g, " ").slice(0, 80)));
+  if (distinctPassages.size < requirements.minimumGroups) codes.push("reading_passage_groups_insufficient");
+  if (groups.some((group) => {
+    const length = requirements.lengthUnit === "words"
+      ? (group.passageText.match(/[A-Za-z]+(?:['-][A-Za-z]+)*/g) || []).length
+      : group.passageText.replace(/[^\u4e00-\u9fa5]/g, "").length;
+    return length < requirements.minimumGroupLength;
+  })) codes.push("reading_passage_too_short");
+  const contextualQuestionCount = readingItems.filter((item) => /according|passage|infer|main idea|best title|why|because|learn from|根据|短文|联系上下文|推断|主要内容|原因|作者|题目/i.test(String(item?.prompt || ""))).length;
+  if (contextualQuestionCount < requirements.minimumContextualQuestions) codes.push("reading_context_questions_insufficient");
+  return codes;
+}
+
 export function validateAssessmentPartition(parsed = {}, partition = {}) {
   const sections = Array.isArray(parsed?.sections) ? parsed.sections : [];
   const items = sections.flatMap((section) => Array.isArray(section?.items) ? section.items : []);
@@ -87,40 +132,7 @@ export function validateAssessmentPartition(parsed = {}, partition = {}) {
 
   if (allowedItemTypes.has("reading")) {
     const readingItems = items.filter((item) => String(item?.itemType || "").trim() === "reading");
-    const passageGroups = new Map();
-    for (const item of readingItems) {
-      const passageText = String(item?.passageText || item?.passage || item?.materialText || "").trim();
-      const groupId = String(item?.passageGroupId || item?.passageTitle || passageText.slice(0, 80) || "missing").trim();
-      const group = passageGroups.get(groupId) || { passageText, passageTexts: new Set(), prompts: [] };
-      if (passageText) group.passageTexts.add(passageText);
-      if (passageText.length > group.passageText.length) group.passageText = passageText;
-      group.prompts.push(String(item?.prompt || ""));
-      passageGroups.set(groupId, group);
-    }
-    const subject = String(partition?.subject || "");
-    const kind = String(partition?.kind || "");
-    const groups = [...passageGroups.values()];
-    const comprehensive = !partition.purpose || partition.purpose === "comprehensive";
-    const minimumGroups = comprehensive && subject === "英语" && kind === "试卷" ? 2 : 1;
-    if (!groups.length || groups.some((group) => !group.passageText)) codes.push("reading_passage_missing");
-    if (groups.some((group) => group.passageTexts.size > 1)) codes.push("reading_passage_inconsistent");
-    if (groups.length < minimumGroups) codes.push("reading_passage_groups_insufficient");
-    const minimumLength = subject === "英语"
-      ? kind === "试卷" ? 280 : kind === "练习" ? 150 : 120
-      : kind === "试卷" ? 700 : 550;
-    const shortGroup = groups.some((group) => {
-      const text = group.passageText;
-      const length = subject === "英语"
-        ? (text.match(/[A-Za-z]+(?:['-][A-Za-z]+)*/g) || []).length
-        : text.replace(/[^\u4e00-\u9fa5]/g, "").length;
-      return length < minimumLength;
-    });
-    if (shortGroup) codes.push("reading_passage_too_short");
-    const contextualQuestionCount = readingItems.filter((item) => /according|passage|infer|main idea|best title|why|because|learn from|根据|短文|联系上下文|推断|主要内容|原因|作者|题目/i.test(String(item?.prompt || ""))).length;
-    const minimumContextualQuestions = subject === "英语"
-      ? kind === "试卷" ? 6 : kind === "练习" ? 3 : 4
-      : 4;
-    if (contextualQuestionCount < Math.min(minimumContextualQuestions, partition.targetItemCount || minimumContextualQuestions)) codes.push("reading_context_questions_insufficient");
+    codes.push(...assessmentReadingIssues(readingItems, partition));
   }
 
   const uniqueCodes = [...new Set(codes)];

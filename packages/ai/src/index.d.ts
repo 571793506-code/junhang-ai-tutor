@@ -167,6 +167,14 @@ export declare function validateAssessmentPartition(
   codes: string[];
   issues: string[];
 };
+export declare function assessmentReadingRequirements(partition?: Record<string, unknown>): {
+  lengthUnit: "words" | "chineseCharacters";
+  minimumGroups: number;
+  minimumGroupLength: number;
+  minimumTotalLength: number;
+  minimumContextualQuestions: number;
+};
+export declare function assessmentReadingIssues(items?: Record<string, unknown>[], partition?: Record<string, unknown>): string[];
 
 export interface AssessmentExecutionOptions {
   call?: TeachingCall;
