@@ -193,3 +193,74 @@ test("malformed actual question collections are rejected without granting metric
     assert.ok(report.executionIssues.some((i) => i.code === "ACTUAL_RESULTS_INCOMPLETE"));
   }
 });
+
+test("question score metrics expose partial-score differences and unresolved scores despite binary agreement", () => {
+  const sample = goldCase({
+    expected: { score: 4, questionResults: [
+      { questionNo: "1", status: "partial", score: 1, maxScore: 5, correctAnswer: "5" },
+      { questionNo: "2", status: "partial", score: 2, maxScore: 5, correctAnswer: "5" },
+      { questionNo: "3", status: "partial", score: 1, maxScore: 5, correctAnswer: "5" },
+      { questionNo: "4", status: "wrong", score: 0, maxScore: 5, correctAnswer: "5" }
+    ] },
+    actual: { score: null, questionResults: [
+      { questionNo: "1", status: "partial", score: 1, maxScore: 5 },
+      { questionNo: "2", status: "partial", score: 1, maxScore: 5 },
+      { questionNo: "3", status: "uncertain", score: null, maxScore: 5 },
+      { questionNo: "4", status: "wrong", score: 0, maxScore: 5 }
+    ] }
+  });
+  const original = structuredClone(sample);
+  const report = evaluateGradingCases([sample]);
+  assert.equal(report.ok, true); // Execution provenance is valid, not a scoring-quality pass.
+  assert.equal(report.metrics.questionAccuracy, 1);
+  assert.equal(report.counts.goldScoredQuestions, 4);
+  assert.equal(report.counts.scoreComparableQuestions, 3);
+  assert.equal(report.counts.scoreMatchedQuestions, 2);
+  assert.equal(report.counts.scoreMismatchedQuestions, 1);
+  assert.equal(report.counts.scoreUnresolvedQuestions, 1);
+  assert.equal(report.metrics.questionScoreCoverage, 0.75);
+  assert.equal(report.metrics.questionScoreAgreement, 0.5);
+  assert.equal(report.metrics.questionScoreMeanAbsoluteError, 0.3333);
+  assert.equal(report.metrics.scoreMeanAbsoluteError, null);
+  assert.deepEqual(sample, original);
+});
+
+test("question score metrics preserve unknown gold and reject invalid execution coverage", () => {
+  const unknown = goldCase();
+  let report = evaluateGradingCases([unknown]);
+  assert.equal(report.counts.goldScoredQuestions, 0);
+  assert.equal(report.metrics.questionScoreCoverage, null);
+  assert.equal(report.metrics.questionScoreAgreement, null);
+  assert.equal(report.metrics.questionScoreMeanAbsoluteError, null);
+  const valid = goldCase({ expected: { score: 1, questionResults: [{ questionNo: "1", status: "partial", score: 1, maxScore: 5, correctAnswer: "5" }] },
+    actual: { score: 1, questionResults: [{ questionNo: "1", status: "partial", score: 1, maxScore: 5 }] } });
+  const tampered = structuredClone(valid);
+  tampered.caseId = "tampered-score-run";
+  report = evaluateGradingCases([valid, tampered]);
+  assert.equal(report.ok, false);
+  assert.equal(report.counts.evaluatedCases, 1);
+  assert.equal(report.counts.goldScoredQuestions, 1);
+  assert.equal(report.counts.scoreComparableQuestions, 1);
+  assert.equal(report.metrics.questionScoreCoverage, 1);
+  assert.equal(report.metrics.questionScoreAgreement, 1);
+  assert.equal(report.metrics.questionScoreMeanAbsoluteError, 0);
+});
+
+test("uncertain and nonnumeric question scores never count as resolved credit", () => {
+  for (const prediction of [
+    { status: "uncertain", score: 1 },
+    { status: "partial", score: "1" },
+    { status: "partial", score: null },
+    { status: "partial", score: Number.NaN }
+  ]) {
+    const report = evaluateGradingCases([goldCase({
+      expected: { score: 1, questionResults: [{ questionNo: "1", status: "partial", score: 1, maxScore: 5, correctAnswer: "5" }] },
+      actual: { score: null, questionResults: [{ questionNo: "1", maxScore: 5, ...prediction }] }
+    })]);
+    assert.equal(report.counts.scoreComparableQuestions, 0);
+    assert.equal(report.counts.scoreUnresolvedQuestions, 1);
+    assert.equal(report.metrics.questionScoreCoverage, 0);
+    assert.equal(report.metrics.questionScoreAgreement, 0);
+    assert.equal(report.metrics.questionScoreMeanAbsoluteError, null);
+  }
+});

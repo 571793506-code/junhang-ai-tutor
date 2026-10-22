@@ -35,6 +35,12 @@ export function evaluateGradingCases(cases = [], options = {}) {
   let statusAgreements = 0;
   let scoreAbsoluteError = 0;
   let scoreCaseCount = 0;
+  let goldScoredQuestions = 0;
+  let scoreComparableQuestions = 0;
+  let scoreMatchedQuestions = 0;
+  let scoreMismatchedQuestions = 0;
+  let scoreUnresolvedQuestions = 0;
+  let questionScoreAbsoluteError = 0;
   let lowConfidenceExpected = 0;
   let lowConfidenceDetected = 0;
   let unsafeHighConfidenceErrors = 0;
@@ -84,6 +90,17 @@ export function evaluateGradingCases(cases = [], options = {}) {
       questionCount += 1;
       if ((expectedStatus === "correct") === (actualStatus === "correct")) binaryCorrect += 1;
       if (expectedStatus === actualStatus) statusAgreements += 1;
+      // Keep abstentions in the agreement denominator. Equal binary/status
+      // labels do not establish equal partial credit, and null is not zero.
+      if (typeof gold.score === "number" && Number.isFinite(gold.score)) {
+        goldScoredQuestions += 1;
+        if (actualStatus !== "uncertain" && typeof prediction.score === "number" && Number.isFinite(prediction.score)) {
+          scoreComparableQuestions += 1;
+          questionScoreAbsoluteError += Math.abs(gold.score - prediction.score);
+          if (gold.score === prediction.score) scoreMatchedQuestions += 1;
+          else scoreMismatchedQuestions += 1;
+        } else scoreUnresolvedQuestions += 1;
+      }
       if (expectedStatus !== actualStatus && Number(prediction.confidence || 0) >= 0.85) {
         highConfidencePredictionErrors += 1;
       }
@@ -130,6 +147,11 @@ export function evaluateGradingCases(cases = [], options = {}) {
       evaluatedCases,
       questions: questionCount,
       scoreCases: scoreCaseCount,
+      goldScoredQuestions,
+      scoreComparableQuestions,
+      scoreMatchedQuestions,
+      scoreMismatchedQuestions,
+      scoreUnresolvedQuestions,
       lowConfidenceGoldCases: lowConfidenceExpected,
       goldErrorQuestions: eligibleGoldErrors,
       teacherReviewedQuestions,
@@ -149,6 +171,9 @@ export function evaluateGradingCases(cases = [], options = {}) {
       questionAccuracy: ratio(binaryCorrect, questionCount),
       statusAgreement: ratio(statusAgreements, questionCount),
       scoreMeanAbsoluteError: scoreCaseCount ? roundMetric(scoreAbsoluteError / scoreCaseCount) : null,
+      questionScoreCoverage: ratio(scoreComparableQuestions, goldScoredQuestions),
+      questionScoreAgreement: ratio(scoreMatchedQuestions, goldScoredQuestions),
+      questionScoreMeanAbsoluteError: scoreComparableQuestions ? roundMetric(questionScoreAbsoluteError / scoreComparableQuestions) : null,
       lowConfidenceRecall: ratio(lowConfidenceDetected, lowConfidenceExpected),
       unsafeHighConfidenceErrorRate: ratio(unsafeHighConfidenceErrors, highConfidencePredictionErrors),
       teacherModificationRate: ratio(teacherModifiedQuestions, teacherReviewedQuestions)
