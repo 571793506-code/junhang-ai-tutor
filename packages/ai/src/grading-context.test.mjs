@@ -65,3 +65,99 @@ test("grading preserves structured multi-blank answers after legacy reference st
   assert.equal(sent.gradingSourcePackage, undefined);
   assert.deepEqual(sent.referenceAnswers[0].correctAnswer, ["50", "3000"]);
 });
+
+test("compact grading output restores source-owned fields without another model call", async () => {
+  const input = {
+    referenceAnswers: [
+      { questionNo: "1", correctAnswer: ["50", "3000"], score: 2 },
+      { questionNo: "2", correctAnswer: "768", score: 5 }
+    ],
+    ocrQuestions: [
+      { questionNo: "1", printedPrompt: "填两个空", studentAnswer: "50；3000", confidence: 1,
+        bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.1, page: 1 } },
+      { questionNo: "2", printedPrompt: "32×24", studentAnswer: "", confidence: 0.4, bbox: null }
+    ]
+  };
+  const original = structuredClone(input);
+  let calls = 0;
+  let contract;
+  const result = await gradeSubmissionText({}, input, { call: async (_route, messages) => {
+    calls++;
+    contract = messages[0].content;
+    return { text: JSON.stringify({ questionResults: [
+      { questionNo: "1", status: "correct", score: 2, maxScore: 2, explanation: "两个空正确。" },
+      { questionNo: "2", status: "uncertain", score: null, maxScore: 5, explanation: "作答无法辨认。" }
+    ] }) };
+  } });
+  assert.equal(result.available, true);
+  assert.equal(calls, 1);
+  const parsed = JSON.parse(result.gradingText);
+  assert.deepEqual(parsed.questionResults.map(q => q.correctAnswer), [["50", "3000"], "768"]);
+  assert.deepEqual(parsed.questionResults.map(q => q.studentAnswer), ["50；3000", ""]);
+  assert.deepEqual(parsed.questionResults.map(q => q.bbox), input.ocrQuestions.map(q => q.bbox));
+  assert.equal(parsed.score, null);
+  assert.equal(parsed.needsTeacherReview, true);
+  assert.match(contract, /studentAnswer、correctAnswer、bbox.*服务端/);
+  assert.deepEqual(input, original);
+});
+
+test("source-owned grading fields override hallucinated echoes but keep judgment evidence", async () => {
+  const input = {
+    referenceAnswers: [{ questionNo: "1", correctAnswer: 0, score: 5 }],
+    ocrQuestions: [{ questionNo: "1", printedPrompt: "2−2", studentAnswer: "1", observedWork: "2−2=1", confidence: 1,
+      bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.1, page: 2 } }]
+  };
+  const original = structuredClone(input);
+  const result = await gradeSubmissionText({}, input, { call: async () => ({ text: JSON.stringify({ questionResults: [
+    { questionNo: "1", status: "partial", score: 2, maxScore: 5, studentAnswer: "0", correctAnswer: "1",
+      bbox: { x: 0, y: 0, w: 1, h: 1, page: 9 }, studentProcess: ["2−2=1"],
+      explanation: "列式正确，减法计算错误。", errorStep: "2−2=1", confidence: 0.8 }
+  ] }) }) });
+  const q = JSON.parse(result.gradingText).questionResults[0];
+  assert.equal(q.studentAnswer, "1");
+  assert.equal(q.correctAnswer, 0);
+  assert.deepEqual(q.bbox, input.ocrQuestions[0].bbox);
+  assert.deepEqual(q.studentProcess, ["2−2=1"]);
+  assert.equal(q.errorStep, "2−2=1");
+  assert.equal(q.score, 2);
+  assert.equal(q.confidence, 0.8);
+  assert.deepEqual(input, original);
+});
+
+test("compact responses still require complete alignment, valid scores and recognition evidence", async () => {
+  const input = { referenceAnswers: [{ questionNo: "1", correctAnswer: "5", score: 5 }],
+    ocrQuestions: [{ questionNo: "1", printedPrompt: "2+3", studentAnswer: "5", confidence: 0.4 }] };
+  const valid = { questionNo: "1", status: "uncertain", score: null, maxScore: 5, explanation: "待核对字迹。" };
+  for (const patch of [
+    { questionNo: "2" }, { maxScore: 6 }, { maxScore: undefined }, { score: 0 },
+    { status: "correct", score: 5 }, { status: "partial", score: 6 }, { explanation: "" }
+  ]) {
+    let calls = 0;
+    const result = await gradeSubmissionText({}, input, { call: async () => {
+      calls++;
+      return { text: JSON.stringify({ questionResults: [{ ...valid, ...patch }] }) };
+    } });
+    assert.equal(result.available, false, JSON.stringify(patch));
+    assert.equal(calls, 2, "invalid grading gets only the existing single repair");
+    assert.equal(result.gradingText, "");
+  }
+});
+
+test("unverified references cannot overwrite an explicit source-conflict answer", async () => {
+  const source = buildGradingSourcePackage({ id: "conflict", items: [
+    { orderIndex: 1, prompt: "2+3", answer: "5", score: 2 }
+  ] }).package;
+  for (const gradingSourcePackage of [source, { ...source, fingerprint: "invalid" }]) {
+    const result = await gradeSubmissionText({}, {
+      gradingSourcePackage,
+      referenceAnswers: [{ questionNo: "1", prompt: "2+3", correctAnswer: "6", score: 2 }],
+      ocrQuestions: [{ questionNo: "1", printedPrompt: "2+3", studentAnswer: "5", confidence: 1 }]
+    }, { call: async () => ({ text: JSON.stringify({ questionResults: [
+      { questionNo: "1", status: "uncertain", score: null, maxScore: 2, correctAnswer: null, explanation: "参考依据冲突。" }
+    ] }) }) });
+    const q = JSON.parse(result.gradingText).questionResults[0];
+    assert.equal(q.correctAnswer, null);
+    assert.equal(q.score, null);
+    assert.equal(q.status, "uncertain");
+  }
+});

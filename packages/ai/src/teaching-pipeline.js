@@ -152,7 +152,15 @@ export function gradingContentIssues(candidate, input) {
     const evidence = expected.find((r) => String(r.questionNo) === String(q.questionNo));
     const transcriptionReviewed = evidence?.recognitionReview?.status === "teacher_corrected" && evidence.recognitionReview.field === "studentAnswer";
     if (evidence && ((!present(evidence.studentAnswer) && !present(evidence.observedWork)) || !transcriptionReviewed && Number(evidence.confidence ?? 1) < 0.62) && q.status !== "uncertain") issues.push("student_evidence_insufficient");
-    if (evidence) q.studentAnswer = String(evidence.studentAnswer ?? "");
+    // These are source evidence, not model judgments. Restore them by question
+    // identity so the response need not copy long answers or image coordinates.
+    if (evidence) {
+      q.studentAnswer = String(evidence.studentAnswer ?? "");
+      q.bbox = structuredClone(evidence.bbox ?? null);
+    }
+    // A retained package failed the verified projection. Preserve the model's
+    // conflict/unknown report rather than treating its reference as authoritative.
+    if (!input.gradingSourcePackage && ref && Object.hasOwn(ref, "correctAnswer")) q.correctAnswer = structuredClone(ref.correctAnswer);
     if (!["correct", "wrong", "partial", "uncertain"].includes(q.status) || !present(q.explanation)) issues.push("judgment_evidence_missing");
     if (!Number.isFinite(q.maxScore) || q.maxScore <= 0 || ref?.score != null && Number(ref.score) !== q.maxScore) issues.push("max_score_invalid");
     if (q.status === "uncertain" ? q.score !== null : !Number.isFinite(q.score) || q.score < 0 || q.score > q.maxScore) issues.push("question_score_invalid");
@@ -215,7 +223,7 @@ export async function runSubmissionPipeline(config, task, input, execution, runT
   }
   const pool = createTeachingOperationBudget(task, config, execution);
   const contract = task === "grading"
-    ? "输出 {summary,strengths:string[],mistakes:[],nextPractice,needsTeacherReview:true,questionResults:[{questionNo,status:correct|wrong|partial|uncertain,studentAnswer,correctAnswer,score:number|null,maxScore:number,studentProcess:string[],explanation,errorStep,knowledgePoint,suggestedPractice,confidence,bbox}]}。逐题 score/maxScore 必填；证据不足 score=null。"
+    ? "输出 {summary,strengths:string[],mistakes:[],nextPractice,needsTeacherReview:true,questionResults:[{questionNo,status:correct|wrong|partial|uncertain,score:number|null,maxScore:number,explanation,errorStep,knowledgePoint,suggestedPractice,confidence,studentProcess?:string[]}]}。逐题 score/maxScore 必填；证据不足 score=null。studentAnswer、correctAnswer、bbox 由服务端按题号从原始证据回填，无需重复输出；studentProcess 仅在判断所需时摘录关键可见步骤，不抄写全部过程。评分依据和待裁定原因必须保留。"
     : "只依据印刷题干和可信来源生成参考答案，不使用学生答案推导标准答案。输出 {referenceAnswers:[{questionNo,prompt,correctAnswer,score,analysisSteps:string[],knowledgePoint,confidence}],summary,confidence,needsTeacherReview:true}。证据不足时 correctAnswer=null、confidence=0，并说明缺项。";
   const validate = task === "grading" ? (candidate) => gradingContentIssues(candidate, safeInput) : (candidate) => {
     const refs = candidate.referenceAnswers;
