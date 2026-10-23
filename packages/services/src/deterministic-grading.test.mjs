@@ -252,6 +252,42 @@ test("objective grading extracts the final numeric answer from calculation work"
   assert.equal(result.structured.questionResults[0].score, 2);
 });
 
+test("multi-blank and nonliteral text answers reach semantic grading while single objective answers stay local", async () => {
+  const orderPrompt = "计算720÷[15×(14-8)]时，先算（ ），再算（ ），最后算（ ），结果是（ ）。";
+  const inputs = [
+    { questionNo: "1", prompt: orderPrompt, answer: ["14-8", "15×6", "720÷90", "8"], studentAnswer: "小括号；中括号；除法；80" },
+    { questionNo: "2", prompt: orderPrompt, answer: "14-8,15×6,720÷90,8", studentAnswer: "14-8,15×6,720÷90,8" },
+    { questionNo: "3", prompt: orderPrompt, answer: "14-8；15×6；720÷90；8", studentAnswer: "小括号；中括号；除法；80" },
+    { questionNo: "4", prompt: "先算（ ）。", answer: "小括号内", studentAnswer: "小括号" },
+    { questionNo: "5", prompt: "填数（ ）和（ ）。", answer: "8", studentAnswer: "8" },
+    { questionNo: "6", prompt: "6×7=（ ）", answer: "42", studentAnswer: "41" },
+    { questionNo: "7", itemType: "choice", prompt: "选择正确选项。", answer: "D", studentAnswer: "D" }
+  ];
+  let received;
+  let calls = 0;
+  const result = await gradeSubmissionService({}, {
+    subject: "数学", totalScore: 14,
+    assignmentItems: inputs.map(q => ({ questionNo: q.questionNo, prompt: q.prompt, answer: q.answer, score: 2, itemType: q.itemType || "fill" })),
+    ocrQuestions: inputs.map(q => ({ questionNo: q.questionNo, printedText: q.prompt, studentAnswer: q.studentAnswer, confidence: 1 }))
+  }, { persist: false, gradingRunner: async (_config, input) => {
+    calls++;
+    received = input;
+    return { available: true, gradingText: JSON.stringify({ questionResults: input.ocrQuestions.map(q => ({
+      questionNo: q.questionNo, status: q.questionNo === "1" ? "partial" : "uncertain",
+      score: q.questionNo === "1" ? 1.5 : null, maxScore: 2, confidence: 1,
+      explanation: "路由契约测试：保留语义批改结果及待裁定状态。"
+    })) }) };
+  }});
+  assert.equal(calls, 1);
+  assert.deepEqual(received.ocrQuestions.map(q => q.questionNo), ["1", "2", "3", "4", "5"]);
+  assert.deepEqual(received.ocrQuestions.map(q => q.studentAnswer), inputs.slice(0, 5).map(q => q.studentAnswer));
+  assert.deepEqual(received.referenceAnswers.map(q => q.correctAnswer), inputs.slice(0, 5).map(q => String(q.answer)));
+  assert.deepEqual(result.structured.questionResults.map(q => [q.questionNo, q.status, q.score]), [
+    ["1", "partial", 1.5], ["2", "uncertain", null], ["3", "uncertain", null],
+    ["4", "uncertain", null], ["5", "uncertain", null], ["6", "wrong", 0], ["7", "correct", 2]
+  ]);
+});
+
 test("low-confidence references remain teacher-review drafts without a service retry", async () => {
   const executions = [];
   const referenceAnswerRunner = async (_config, _input, execution) => {

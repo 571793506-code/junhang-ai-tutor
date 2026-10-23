@@ -24,7 +24,38 @@ export function buildCarryForwardCase() {
     { questionNo: "7", answer: "100", work: "57×4－128＝218－128＝100", expectedScore: 1, reason: "最终答案碰巧正确，但两个计算步骤均错" }
   ];
   return { cases, input: { subject: "数学", grade: "四年级", kind: "练习", totalScore: 35,
+    teacherContext: "合成诊断：第4题已核对原作答，确认只写了结果，没有计算过程。其他题按可见过程评分。",
     assignmentItems: cases.map((q) => ({ questionNo: q.questionNo, itemType: "calculation", prompt: "57×4－128", answer: "100", score: 5, rubric: q.rubric || rubric })),
     ocrQuestions: cases.map((q) => ({ questionNo: q.questionNo, itemType: "calculation", printedPrompt: "57×4－128", studentAnswer: q.answer, observedWork: q.work, confidence: 1 }))
+  } };
+}
+
+// Expected judgments are diagnostic assertions, never supplied to the model or teacher gold.
+export function buildGradingEvidenceBoundaryCase() {
+  const rubric = "满分5分：乘法20×3=60正确得2分；以正确积完成60-8=52得2分；最终结果52得1分。只写结果且确实未写过程时，结果正确得1分、错误得0分；有过程按上述项目评分，不叠加结果特例，不允许错误传递。";
+  const orderPrompt = "计算720÷[15×(14-8)]时，应先算（ ），再算（ ），最后算（ ），结果是（ ）。";
+  const cases = [
+    { questionNo: "1", answer: "42", expectedScore: null, reason: "错误结果，过程未采集" },
+    { questionNo: "2", answer: "42", work: null, expectedScore: null, reason: "null不证明过程为空" },
+    { questionNo: "3", answer: "42", work: "", expectedScore: null, reason: "空字符串不证明原卷无过程" },
+    { questionNo: "4", answer: "42", expectedScore: 0, reason: "教师确认实际未写过程，错误结果按规则零分" },
+    { questionNo: "5", answer: "52", expectedScore: 1, reason: "教师确认实际未写过程，正确结果按规则给1分" },
+    { questionNo: "6", answer: "52", work: "20×3-8=60-8=52", expectedScore: 5, reason: "完整可见过程正确" },
+    { questionNo: "7", answer: "52", work: "20×3-8=50-8=52", expectedScore: 1, reason: "可见两处计算错，结果正确仅得结果1分" },
+    { questionNo: "8", answer: "52", expectedScore: null, reason: "正确结果仍不能证明缺失的过程满足步骤分" },
+    { questionNo: "9", answer: "小括号；中括号；除法；80", itemType: "fill_blank", prompt: orderPrompt,
+      reference: ["14-8", "15×6", "720÷90", "8"], score: 2,
+      rubric: "每空0.5分。按题意判断运算顺序和结果。", expectedScore: 1.5, reason: "前三空语义符合题意，结果空错误" },
+    { questionNo: "10", answer: "小括号；中括号；除法；80", itemType: "fill_blank", prompt: orderPrompt,
+      reference: ["14-8", "15×6", "720÷90", "8"], score: 2,
+      rubric: "先小括号，再中括号，最后除法，结果8。", expectedScore: null, reason: "前三空符合题意但逐空分值未提供" }
+  ];
+  return { cases, input: { subject: "数学", grade: "四年级", kind: "练习",
+    teacherContext: "合成诊断：教师已核对第4、5题的完整原作答，确认这两题实际只写了结果，没有过程。第1、2、3、8题仅采集了最终答案，原作答是否写有过程未知。此说明不确认得分。",
+    assignmentItems: cases.map(q => ({ questionNo: q.questionNo, itemType: q.itemType || "calculation",
+      prompt: q.prompt || "20×3-8", answer: q.reference || "52", score: q.score || 5, rubric: q.rubric || rubric })),
+    ocrQuestions: cases.map(q => ({ questionNo: q.questionNo, itemType: q.itemType || "calculation",
+      printedPrompt: q.prompt || "20×3-8", studentAnswer: q.answer, confidence: 1,
+      ...(Object.hasOwn(q, "work") ? { observedWork: q.work } : {}) }))
   } };
 }

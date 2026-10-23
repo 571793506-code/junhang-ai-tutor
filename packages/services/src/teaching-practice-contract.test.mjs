@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { draftAssessmentService, gradeSubmissionService } from "./index.js";
-import { buildPracticeStageCases, buildCarryForwardCase } from "../../../scripts/test-support/teaching-practice-cases.mjs";
+import { buildPracticeStageCases, buildCarryForwardCase, buildGradingEvidenceBoundaryCase } from "../../../scripts/test-support/teaching-practice-cases.mjs";
 import { loadTeachingRulePack } from "../../ai/src/teaching-rules.js";
 
 test("all practice stages preserve teacher scope, counts and evidence through the shared service and current rules", async () => {
@@ -53,6 +53,33 @@ test("carry-forward scoring preserves source rubrics and visible work, including
   assert.deepEqual(input, before);
   for (const q of cases) assert.equal(result.structured.questionResults.find((p) => p.questionNo === q.questionNo).score, q.expectedScore);
   assert.equal(result.structured.questionResults.find((q) => q.questionNo === "6").status, "uncertain");
+});
+
+test("grading evidence preserves unknown work states and teacher context without diagnostic labels in the model payload", async () => {
+  const { input } = buildGradingEvidenceBoundaryCase();
+  const before = structuredClone(input);
+  let calls = 0;
+  const result = await gradeSubmissionService({}, input, { persist: false, teachingExecution: { call: async (_route, messages) => {
+    calls++;
+    const payload = JSON.parse(messages[1].content);
+    const byNo = new Map(payload.ocrQuestions.map(q => [q.questionNo, q]));
+    assert.equal(payload.teacherContext, input.teacherContext);
+    assert.equal(Object.hasOwn(byNo.get("1"), "observedWork"), false);
+    assert.equal(byNo.get("2").observedWork, null);
+    assert.equal(byNo.get("3").observedWork, "");
+    assert.equal(byNo.get("7").observedWork, input.ocrQuestions[6].observedWork);
+    assert.deepEqual([...byNo.keys()], input.ocrQuestions.map(q => q.questionNo));
+    assert.equal(payload.referenceAnswers.find(q => q.questionNo === "9").correctAnswer, "14-8,15×6,720÷90,8");
+    assert.doesNotMatch(JSON.stringify(payload), /"(?:expectedScore|expected|teacherReview|reason)":/);
+    return { text: JSON.stringify({ questionResults: payload.ocrQuestions.map(q => ({ questionNo: q.questionNo,
+      status: "uncertain", score: null, maxScore: ["9", "10"].includes(q.questionNo) ? 2 : 5,
+      explanation: "合成输出仅验证证据传递，不代表实际评分判断。", confidence: 1
+    })) }) };
+  } } });
+  assert.equal(calls, 1);
+  assert.deepEqual(input, before);
+  assert.equal(result.structured.questionResults.length, 10);
+  assert.ok(result.structured.questionResults.every(q => q.status === "uncertain" && q.score === null));
 });
 
 test("contradictory result-only full credit is rejected through bounded service repair", async () => {

@@ -1287,6 +1287,8 @@ function compareObjectiveAnswers(reference = {}, question = {}, itemType = "") {
   }
   if (/言之有理|合理即可|答案不唯一|多种答案|任意|参考答案|示例|开放题|略|酌情|或/.test(expected)) return null;
   if (/说明|分析|理由|为什么|简答|作文|写作|解答|证明|过程|结合|谈谈|概括|赏析|造句|翻译/.test(prompt)) return null;
+  // A whole-question boolean comparison cannot judge multiple blanks or semantic alternatives.
+  if (/[,，;；、\n]/.test(expected) || (prompt.match(/（\s*）|\(\s*\)|_{2,}/g) || []).length > 1) return null;
 
   const clean = (value) => value
     .toLowerCase()
@@ -1309,7 +1311,7 @@ function compareObjectiveAnswers(reference = {}, question = {}, itemType = "") {
   }
   const shortExactAnswer = expectedClean.length <= 24 && !/[。！？!?；;]/.test(expectedClean);
   if (!shortExactAnswer) return null;
-  return expectedClean === actualClean;
+  return expectedClean === actualClean ? true : null;
 }
 
 function extractFinalNumericAnswer(value) {
