@@ -81,7 +81,7 @@ test("grading browser corrects one answer, preserves confirmation, rejects stale
       res.end(await server.transformIndexHtml("/__grading", '<html><head><title>批改工作台交互验证</title></head><body><div id="root"></div><script type="module" src="/@id/__x00__grading-entry"></script></body></html>'));
     }); },
     resolveId(id) { if (id === "\0grading-entry") return id; },
-    load(id) { if (id === "\0grading-entry") return `import React from 'react'; import {createRoot} from 'react-dom/client'; import {GradingWorkbench} from '/src/components/GradingWorkbench.tsx'; import '/src/styles.css'; createRoot(document.getElementById('root')).render(React.createElement('div',{className:'app-shell',style:{padding:20}},React.createElement(GradingWorkbench,{teacherId:'t1',active:true,sources:[{submissionId:'submission1',studentId:'s1',assignmentId:'paper1',title:'加法作业',studentName:'测试学生'}],onLegacy:()=>{},onArchived:()=>{}})));`; }
+    load(id) { if (id === "\0grading-entry") return `import React from 'react'; import {createRoot} from 'react-dom/client'; import {GradingWorkbench} from '/src/components/GradingWorkbench.tsx'; import '/src/styles.css'; createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode,null,React.createElement('div',{className:'app-shell',style:{padding:20}},React.createElement(GradingWorkbench,{teacherId:'t1',active:true,sources:[{submissionId:'submission1',studentId:'s1',assignmentId:'paper1',title:'加法作业',studentName:'测试学生'}],onLegacy:()=>{},onArchived:()=>{}}))));`; }
   }], define: { "import.meta.env.VITE_API_BASE_URL": JSON.stringify("/__workflow-api") }, server: { host: "127.0.0.1", port: 0, proxy: { "/__workflow-api": { target: f.baseUrl, rewrite: (p) => p.replace("/__workflow-api", "") } } } });
   await vite.listen(); t.after(() => vite.close());
   const browser = await launch(); t.after(() => browser.close());
@@ -89,7 +89,7 @@ test("grading browser corrects one answer, preserves confirmation, rejects stale
   const errors = []; page.on("pageerror", (e) => errors.push(e.message));
   await page.route("**/qa/page*.png", (route) => route.fulfill({ contentType: "image/svg+xml", body: pageSvg(route.request().url().includes("page2") ? 2 : 1) }));
   await page.addInitScript((token) => localStorage.setItem("junhang.web.sessionToken", token), f.tokens.teacher);
-  await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}/__grading`);
+  await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}/__grading`, { timeout: 30000 });
   await page.getByText("服务可用", { exact: true }).waitFor();
   await page.getByLabel("已上传批次", { exact: true }).selectOption("submission1");
   await page.getByRole("button", { name: "从此批次开始持续批改", exact: true }).click();
@@ -112,8 +112,13 @@ test("grading browser corrects one answer, preserves confirmation, rejects stale
   await page.getByText("学生用交换两堆小棒说明总量不变，属于合理异解。", { exact: true }).waitFor();
   assert.deepEqual(f.calls[1].ocrQuestions.map((q) => q.questionNo), ["1"]);
   assert.equal((await c.get("workflow-1")).content.questions[1].reviewedByTeacher, true);
+  // StrictMode replays mount effects. A saved task must load again after the
+  // first read is invalidated, without a manual selection or another grading.
+  const callsBeforeReload = f.calls.length;
   await page.reload();
   await page.getByText("交换两堆小棒，总数一样", { exact: true }).waitFor();
+  assert.equal(await page.getByLabel("继续已有批改任务", { exact: true }).inputValue(), "workflow-1");
+  assert.equal(f.calls.length, callsBeforeReload);
   await page.getByLabel("本题重判要求", { exact: true }).fill("请核对学生的合理异解");
   await page.getByRole("button", { name: "按要求仅重判本题", exact: true }).click();
   await page.getByText("已保存新版本，请核对改动后的题目。", { exact: true }).waitFor();

@@ -53,7 +53,11 @@ export function GradingWorkbench({ teacherId, active, sources, onLegacy, onArchi
   const [edit, setEdit] = useState<Edit | null>(null); const [instruction, setInstruction] = useState("");
   const [checked, setChecked] = useState(false); const [history, setHistory] = useState(1);
   const [head, setHead] = useState({ revision: 0, status: "" });
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; readSeq.current++; }; }, []);
+  useEffect(() => { mounted.current = true; return () => {
+    mounted.current = false; readSeq.current++;
+    // A replayed mount must restart the read invalidated by this cleanup.
+    currentId.current = "";
+  }; }, []);
   const fail = useCallback((error: unknown) => {
     if (!mounted.current) return;
     const e = error as Error & { unavailable?: boolean };
