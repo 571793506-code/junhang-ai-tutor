@@ -8,7 +8,7 @@ const INTERNAL_KEYS = new Set([
   "rulePath", "root", "budget", "generationBudget", "reasoningEffort", "apiKey", "outputContract",
   "assessmentTotalTimeoutMs", "assessmentMaxTokens", "generationTimeoutMs", "generationMaxTokens",
   "confirmedBy", "confirmedAt", "archiveEligible", "finalScore", "upstreamDiagnostics", "transportDiagnostics", "onTransportProgress",
-  "transportStages", "completionDiagnostics"
+  "transportStages", "completionDiagnostics", "primaryTokenShare"
 ]);
 
 const DIAGNOSTIC_ISSUES = new Set([
@@ -154,8 +154,8 @@ export async function runTeachingUnit(
       if (budget.additionalAttemptsUsed >= policy.maxAdditionalAttempts) return stop("TEACHING_ATTEMPTS_EXHAUSTED");
       budget.additionalAttemptsUsed++;
     }
-    const slots = index === 0 && budget.additionalAttemptsUsed < policy.maxAdditionalAttempts ? 2 : 1;
-    const maxTokens = Math.max(1, Math.min(policy.budget.maxTokens, Math.floor(budget.remainingTokens / slots)));
+    const tokenShare = canRetry ? policy.primaryTokenShare : 1;
+    const maxTokens = Math.max(1, Math.min(policy.budget.maxTokens, Math.floor(budget.remainingTokens * tokenShare)));
     budget.remainingTokens -= maxTokens; // Reserve before awaiting, including concurrent units.
     const messages = [
       { role: "system", content: `${rulePack.text}\nRule version: ${rulePack.version}; SHA-256: ${rulePack.hash}\nTask: ${task}. Return a valid JSON object only.\n${outputContract}${issues.length ? `\nRepair these validation issues: ${JSON.stringify(issues)}` : ""}` },

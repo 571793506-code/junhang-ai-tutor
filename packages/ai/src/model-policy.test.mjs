@@ -3,6 +3,18 @@ import test from "node:test";
 
 import { classifyTaskFailure, resolveTaskModelPolicy, resolveTeachingTaskPolicy } from "./model-policy.js";
 
+test("single-model grading fronts output tokens without changing total budget or other tasks", () => {
+  const grading = resolveTeachingTaskPolicy("grading");
+  assert.equal(grading.primaryTokenShare, 0.75);
+  assert.deepEqual(grading.budget, { timeoutMs: 180000, maxTokens: 12000 });
+  assert.equal(grading.maxAdditionalAttempts, 1);
+  assert.equal(grading.replacement, null);
+  for (const task of ["generation", "reference", "recognize", "extract-material", "extract-requirement", "rewrite-feedback"]) {
+    assert.equal(resolveTeachingTaskPolicy(task).primaryTokenShare, 0.5);
+  }
+  assert.equal(resolveTeachingTaskPolicy("grading", { TEACHING_PRIMARY_MODEL: "gpt-6-astra" }).primaryTokenShare, 0.5);
+});
+
 test("grading and reference cap the first call while preserving the operation budget", () => {
   for (const task of ["grading", "reference"]) {
     const policy = resolveTeachingTaskPolicy(task, { TEACHING_PRIMARY_MODEL: "gpt-6-astra" });

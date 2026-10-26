@@ -87,7 +87,7 @@ test("runner retains all three transport stages and safe channel accounting from
     res.writeHead(200);
     res.flushHeaders();
     res.end(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: '{"title":"draft"}' } }],
-      usage: { prompt_tokens: 300, completion_tokens: 65, total_tokens: 365,
+      usage: { prompt_tokens: 300, completion_tokens: 90, total_tokens: 390,
         prompt_tokens_details: { cached_tokens: 100, raw: "PRIVATE_USAGE" },
         completion_tokens_details: { reasoning_tokens: 40, audio_tokens: 0, secret: "PRIVATE_USAGE" },
         secret: "PRIVATE_USAGE" } }));
@@ -96,7 +96,7 @@ test("runner retains all three transport stages and safe channel accounting from
     const result = await runTeachingTask(config, "grading", {}, { budget, repairIssues: () => [] });
     assert.equal(count(), 1);
     assert.equal(result.status, "success");
-    assert.equal(payload.max_completion_tokens, 50);
+    assert.equal(payload.max_completion_tokens, 75);
     assert.equal(Object.hasOwn(payload, "max_tokens"), false);
     const attempt = result.internal.attempts[0];
     assert.deepEqual(Object.keys(attempt.transportStages), ["request_started", "response_headers", "response_body_complete"]);
@@ -104,11 +104,11 @@ test("runner retains all three transport stages and safe channel accounting from
     assert.ok(stages.every(s => Number.isFinite(s.elapsedMs)));
     assert.ok(stages[0].elapsedMs <= stages[1].elapsedMs && stages[1].elapsedMs <= stages[2].elapsedMs);
     assert.deepEqual(attempt.transportDiagnostics, stages[2]);
-    assert.deepEqual(attempt.usage, { prompt_tokens: 300, completion_tokens: 65, total_tokens: 365,
+    assert.deepEqual(attempt.usage, { prompt_tokens: 300, completion_tokens: 90, total_tokens: 390,
       prompt_tokens_details: { cached_tokens: 100 }, completion_tokens_details: { reasoning_tokens: 40, audio_tokens: 0 } });
     assert.deepEqual(attempt.completionDiagnostics, { limitField: "max_completion_tokens", finishReason: "stop",
-      reportedOutputTokens: 65, exceedsRequestedLimit: true });
-    assert.equal(budget.remainingTokens, 35);
+      reportedOutputTokens: 90, exceedsRequestedLimit: true });
+    assert.equal(budget.remainingTokens, 10);
     assert.equal(attempt.cost, "unknown");
     assert.doesNotMatch(JSON.stringify(result), /PRIVATE_USAGE|private-test-key|127\.0\.0\.1/);
     for (const role of ["teacher", "student", "parent"]) {

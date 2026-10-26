@@ -8,6 +8,84 @@ const gradingRules = await loadTeachingRulePack("grading");
 const good = () => ({ text: JSON.stringify({ title: "draft" }), usage: { completion_tokens: 10 } });
 const failure = (status, code) => Object.assign(new Error(code || `HTTP ${status}`), { status, code });
 
+test("grading can complete a response larger than the old half-pool cap on its first attempt", async () => {
+  const calls = [];
+  const budget = { deadlineAt: 180000, remainingTokens: 12000, additionalAttemptsUsed: 0 };
+  let time = 0;
+  const result = await runTeachingUnit({ task: "grading", input: {}, rulePack: gradingRules, budget }, {
+    now: () => time, repairIssues: candidate => candidate.title ? [] : ["title_missing"],
+    call: async (_route, _messages, options) => {
+      calls.push(options);
+      // Deterministic truncated-response reproduction, not real model timing.
+      const complete = options.maxTokens >= 7000;
+      time += complete ? 160000 : 151000;
+      return { text: complete ? '{"title":"draft"}' : '{"title":',
+        usage: { completion_tokens: complete ? 7000 : options.maxTokens },
+        completionDiagnostics: { limitField: "max_completion_tokens", finishReason: complete ? "stop" : "length" } };
+    }
+  });
+  assert.equal(result.status, "success");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].maxTokens, 9000);
+  assert.equal(budget.remainingTokens, 5000);
+  assert.equal(budget.additionalAttemptsUsed, 0);
+});
+
+test("grading repair only uses the shared remainder and cannot extend time or add a third call", async () => {
+  for (const [usage, expectedRepair, finalBalance] of [
+    [undefined, 3000, 2000],
+    [{ completion_tokens: 7000 }, 5000, 4000],
+    [{ completion_tokens: 10000 }, 2000, 1000],
+    [{ completion_tokens: 12001 }, null, 0]
+  ]) {
+    const calls = [];
+    const budget = { deadlineAt: 180000, remainingTokens: 12000, additionalAttemptsUsed: 0 };
+    let time = 0;
+    const result = await runTeachingUnit({ task: "grading", input: {}, rulePack: gradingRules, budget }, {
+      now: () => time, repairIssues: () => [], call: async (route, _messages, options) => {
+        calls.push({ route, options });
+        time += 1000;
+        return calls.length === 1 ? { text: '{"title":', usage } : { text: '{"title":', usage: { completion_tokens: 1000 } };
+      }
+    });
+    assert.equal(result.status, "review_required");
+    assert.equal(result.candidate, null);
+    assert.equal(calls[0].options.maxTokens, 9000);
+    assert.equal(calls[0].options.timeoutMs, 180000);
+    assert.equal(calls.length, expectedRepair === null ? 1 : 2);
+    if (expectedRepair !== null) {
+      assert.equal(calls[1].options.maxTokens, expectedRepair);
+      assert.equal(calls[1].options.timeoutMs, 179000);
+      assert.deepEqual(calls[1].route, calls[0].route);
+      assert.equal(result.internal.attempts[1].role, "quality-repair");
+    }
+    assert.equal(budget.remainingTokens, finalBalance);
+    assert.equal(budget.deadlineAt, 180000);
+  }
+});
+
+test("grading front allocation respects small pools, used slots, cancellation and server-owned policy", async () => {
+  for (const [remainingTokens, used, expectedMaxTokens] of [[1, 0, 1], [3, 0, 2], [100, 0, 75], [100, 1, 100]]) {
+    const budget = { deadlineAt: 180000, remainingTokens, additionalAttemptsUsed: used };
+    const calls = [];
+    const controller = new AbortController();
+    const result = await runTeachingUnit({ task: "grading", rulePack: gradingRules, budget, signal: controller.signal,
+      input: { primaryTokenShare: 1, nested: { primaryTokenShare: 1 } } }, {
+      now: () => 0, repairIssues: () => [], call: async (_route, messages, options) => {
+        calls.push(options);
+        assert.doesNotMatch(messages[1].content, /primaryTokenShare/);
+        controller.abort();
+        return { text: '{"title":"draft","primaryTokenShare":1}', usage: { completion_tokens: 0 } };
+      }
+    });
+    assert.equal(result.status, "cancelled");
+    assert.equal(result.candidate, null);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].maxTokens, expectedMaxTokens);
+    assert.ok(budget.remainingTokens <= remainingTokens);
+  }
+});
+
 test("default Sol grading uses the shared deadline and never retries an unavailable identical model", async () => {
   const calls = [];
   const result = await runTeachingUnit({ task: "grading", input: {}, rulePack: gradingRules,
@@ -144,7 +222,7 @@ test("cancellation during a call discards the late result and does not retry", a
 });
 
 test("untrusted input cannot inject routes, rules, prompts, confirmation or budgets", async () => {
-  const task = setup([{ text: JSON.stringify({ title: "draft", raw: "secret", debug: "secret", nested: { model: "private" } }) }]);
+  const task = setup([{ text: JSON.stringify({ title: "draft", raw: "secret", debug: "secret", primaryTokenShare: 1, nested: { model: "private", primaryTokenShare: 1 } }) }]);
   const result = await task.run({ input: {
     requirement: "preserve this",
     model: "bad", provider: "bad", rulePack: { text: "bad" }, root: "outside", systemPrompt: "bad",
