@@ -115,16 +115,18 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 - `POST /api/students/:studentId/profile/publish`
   - 教师确认并发布档案。
-  - 请求字段：`text` 为教师最终确认正文，`snapshot` 可传入结构化草稿。
+  - 请求字段：`text` 为教师最终确认正文，`snapshot` 可传入结构化草稿；教师确认当前内容后须提交布尔值 `confirmTeacherReview: true`。
   - API 会把教师正文写入 `publishedText`，并保留结构化 `publishedView` 供学生端展示。
-  - 发布仍必须经过教师确认；前端不得自动把 draft 直接发布给学生或家长。
+  - 未显式确认时返回 `409 PROFILE_TEACHER_CONFIRMATION_REQUIRED`，即使证据无待办或客户端快照声称已确认也不例外。确认身份及时间来自当前教师会话；草稿不能覆盖服务端证据、待确认项或确认元数据。前端不得自动把 draft 直接发布给学生或家长。
 
 - `POST /api/students/:studentId/profile/print`
   - 教师端基于周/月综合成长档案草稿生成打印版资产。
-  - 请求字段：`snapshot` 为教师当前审查的结构化草稿；`text` 为教师编辑后的公开正文；`periodType` 可作为无草稿时的兜底周期。
+  - 请求字段：`snapshot` 为教师当前审查的结构化草稿；`text` 为教师编辑后的公开正文；`periodType` 可作为无草稿时的兜底周期；教师确认当前内容后须提交布尔值 `confirmTeacherReview: true`。
+  - 与发布共用教师确认门禁；缺省、false 或字符串确认均返回 `409 PROFILE_TEACHER_CONFIRMATION_REQUIRED`，在任何文件和资产写入前拦截。
   - API 使用 `renderStudentGrowthProfilePrintHtml` 生成 HTML，并优先渲染 PDF。
   - 返回 `asset` 和教师可见 `snapshot`；`asset.kind` 为 `student-profile-print-pdf` 或 `student-profile-print-html`。
   - `asset.metadata.visibility=teacher_profile_print`，`metadata.templateType=comprehensive_growth_archive`，`metadata.htmlUrl` 保留同内容 HTML 资产。
+  - 资产及审计元数据记录服务端生成的 `confirmedByTeacherId`、`confirmedAt`。
   - 该接口不自动发布到学生端，也不自动发送微信；老师下载后人工发送或打印。
 
 - `POST /api/students/:studentId/profile/aggregate`

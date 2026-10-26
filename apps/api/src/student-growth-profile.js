@@ -1088,7 +1088,9 @@ function mergeTeacherReview(baseReview, draftReview) {
   return {
     ...base,
     ...Object.fromEntries(
-      Object.entries(draft).filter(([, value]) => value != null)
+      Object.entries(draft).filter(([key, value]) =>
+        ["sampleLimitNotes", "internalRisks", "publishChecklist"].includes(key) && Array.isArray(value)
+      )
     )
   };
 }

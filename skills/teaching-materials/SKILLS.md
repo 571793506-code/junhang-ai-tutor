@@ -20,6 +20,8 @@
 
 客户端只提交来源类型、标题、学科、年级、版本、教材资产和章节标识。服务端派生来源 ID、索引状态、license 状态、`allowedForGeneration`、版本范围和可见摘要，禁止接收绝对路径、数据库字段、prompt 或模型字段。
 
+请求指定章节 ID 或仅提供章节名时，都必须解析到所选真实教材资产中的章节；章节不存在返回 `TEXTBOOK_CHAPTER_NOT_FOUND`，不能静默改用全书上下文。链路测试同样使用真实章节 ID/标题；确需全书范围时应不传章节，不虚构名称。
+
 ## 输出契约
 
 教师端看到来源摘要、版本、章节、知识点、chunk 数、审核状态和 `allowedForGeneration`。生成服务只消费有来源指纹和审核状态的 `contentContext` 摘要，不向任何端返回完整 Markdown chunk、绝对路径或内部索引记录。
@@ -88,6 +90,7 @@ MarkItDown 是普通资料默认转换路线，复杂版式只在教师复核需
 
 ## 验证
 
+- 修改教材章节解析或审批上下文门禁时，先运行 `node --test apps/api/src/approved-content-context.test.mjs`；端到端检查仍只证明资料、上下文、复核与导出链路，不代表生成教学质量已获教师认可。
 - 修改资料转换或索引脚本时运行 `cmd /c npm.cmd run check:content-context`。
 - 修改教师上传 UI 或 API 封装时运行 `cmd /c npm.cmd run check:content-upload-ui`。
 - 同时涉及资料上传和生成上下文时运行 `cmd /c npm.cmd run check:teaching-content`。

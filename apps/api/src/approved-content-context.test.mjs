@@ -5,6 +5,32 @@ import test from "node:test";
 const moduleUrl = new URL("./approved-content-context.js", import.meta.url);
 const serverSource = fs.readFileSync(new URL("./server.js", import.meta.url), "utf8");
 
+test("chapter titles must resolve to a real chapter before querying approved sources", async () => {
+  const { resolveApprovedAssessmentContentContext } = await import(moduleUrl);
+  let sourceQueries = 0;
+  const prisma = {
+    textbookAsset: { findUnique: async () => ({
+      id: "tb-math", title: "人教版五年级数学下册", subject: "数学", grade: "五年级",
+      edition: "人教版", volume: "下册",
+      metadata: { chapters: [{ id: "ch-1", title: "小数乘法", focusItems: ["小数位数"] }] }
+    }) },
+    knowledgeSource: { findMany: async () => { sourceQueries += 1; return []; } }
+  };
+  const missing = await resolveApprovedAssessmentContentContext(prisma, {
+    textbookAssetId: "tb-math", textbookChapterTitle: "不存在的章节"
+  });
+  assert.equal(missing.reason, "TEXTBOOK_CHAPTER_NOT_FOUND");
+  assert.equal(missing.textbookContext.resolved, false);
+  assert.equal(sourceQueries, 0);
+  const found = await resolveApprovedAssessmentContentContext(prisma, {
+    textbookAssetId: "tb-math", textbookChapterTitle: " 小数乘法 "
+  });
+  assert.equal(found.textbookContext.resolved, true);
+  assert.equal(found.textbookContext.chapterId, "ch-1");
+  assert.deepEqual(found.textbookContext.knowledgePoints, ["小数位数"]);
+  assert.equal(sourceQueries, 1);
+});
+
 test("approved content resolver queries only generation-approved sources", async () => {
   assert.equal(fs.existsSync(moduleUrl), true, "approved-content-context.js must exist");
   const { resolveApprovedAssessmentContentContext } = await import(moduleUrl);

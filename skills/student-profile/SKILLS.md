@@ -20,6 +20,8 @@
 
 Web 只提交学生、周期、阶段标签和教师编辑文本。服务端派生证据包、样本覆盖、阻断原因、角色可见字段和发布门禁；客户端不得提交 `profileEvidencePack`、provider、model、raw 或 debug 以授权发布。
 
+周/月档案的 `/profile/publish` 和 `/profile/print` 均须在教师确认当前内容后显式提交布尔值 `confirmTeacherReview: true`；缺省、false 或字符串均不能授权。历史已确认快照也不能代替本次确认。AI/客户端草稿中的 `teacherReview` 只接受数组类型的 `sampleLimitNotes`、`internalRisks`、`publishChecklist`，不能覆盖服务端证据、待确认项、确认状态、教师身份或时间。
+
 ## 输出契约
 
 教师端接收结构化草稿、证据覆盖、教师复核清单、`blockedEvidence` 和发布状态；已确认后才产生学生/家长可见的 `publishedView` 与教师打印用 `printView`。阶段报告保持教师 PDF 和人工发送状态边界。
@@ -27,6 +29,8 @@ Web 只提交学生、周期、阶段标签和教师编辑文本。服务端派�
 ## 执行顺序
 
 先按证据优先级过滤和归一化，再生成结构化草稿，标出样本不足与冲突，教师编辑并确认，最后由服务端发布过滤后的 `publishedView` 或生成 `printView`。问答只能作为辅助证据，不能单独提高掌握度或形成强结论。
+
+发布和打印在写文件、资产或正式档案前执行同一教师确认门禁，未确认返回 `409 PROFILE_TEACHER_CONFIRMATION_REQUIRED`，即使没有待确认来源也不例外。服务端记录当前会话教师及确认时间；打印仅产生教师专用资产，不等于发布档案或向家长发送。
 
 ## 模型与复核
 
@@ -173,6 +177,7 @@ image 2 模板候选图只用于教师端 UI 视觉讨论，提示词应只包�
 - 修改档案 API 时运行 `cmd /c npm.cmd run check --workspace apps/api`。
 - 修改阶段报告 API 时运行 `node --test apps/api/src/student-term-report.test.mjs`。
 - 修改周/月档案打印版 API 时运行 `node --test apps/api/src/student-growth-profile.test.mjs`。
+- 修改周/月发布、打印确认或草稿合并时，同时运行 `node --test apps/api/src/student-profile-publish-gate.test.mjs apps/api/src/student-profile-routes.test.mjs`；覆盖缺省及伪造确认被拦截且无输出写入、显式确认记录真实教师、打印不发布。真实接口负向验收不代替教师对档案正文的确认。
 - 修改 Web 档案展示时运行 `cmd /c npm.cmd run typecheck --workspace apps/web`。
 - 修改档案中文文案或提示词时运行 `cmd /c npm.cmd run check:encoding`。
 - 涉及批改归档来源时确认 `needsTeacherReview`、`archiveEligible` 和教师确认分数逻辑未被绕过。

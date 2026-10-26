@@ -2,6 +2,8 @@
 
 > 后续计划：生成与批改的新一轮工作见 [2026-09-11 日常工作台计划](2026-09-11-generation-grading-daily-workbench.md)。本计划保留历史任务记录，不能依据尚未同步的复选框重复实施全部任务；先核查当前代码与提交。新计划文档完成不代表其工程阶段已经实施。
 
+> 2026-10-26 收口更新：第九阶段既有正式双卷、教师最终评分、独立归档及真实数据库闭环已完成。后续日常质量闭环继续推进；本轮补齐学生周/月档案发布和打印的显式教师确认、服务端复核字段保护及资源库真实章节解析，运行验收范围和证据见 [工作台验收记录](../../teaching-workflow-acceptance.md)。真实新档案的教师内容评价/发布、评分缺失证据、稳定时长及近期两份新稿打印版式仍待验收，不据此勾选全部历史任务；学生磨合留出任务继续暂缓，工作区清理后置。旧模型矩阵仅作历史记录，当前配置与后续验收记录为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把生成、批改、资源库和学生档案统一到同一套能力契约、上下文工程、模型路由、教师复核和多端可见性流程，使 Web 成为服务层能力的完整联调入口，并为小程序复用留下稳定契约。

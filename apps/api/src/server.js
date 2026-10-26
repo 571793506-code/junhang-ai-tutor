@@ -5843,7 +5843,7 @@ app.post("/api/students/:studentId/profile/publish", requireDatabase, requireSes
     ? markStudentProfileTeacherConfirmation(snapshot, req.session.teacherId)
     : snapshot;
   const publishGate = evaluateStudentProfilePublish(publishCandidate);
-  if (!publishGate.ok) {
+  if (body.confirmTeacherReview !== true || !publishGate.ok) {
     return res.status(409).json({
       ok: false,
       error: "PROFILE_TEACHER_CONFIRMATION_REQUIRED",
@@ -5852,7 +5852,7 @@ app.post("/api/students/:studentId/profile/publish", requireDatabase, requireSes
     });
   }
   const confirmedSnapshot = {
-    ...markStudentProfileTeacherConfirmation(snapshot, req.session.teacherId),
+    ...publishCandidate,
     teacherReview: {
       ...publishCandidate.teacherReview,
       excludedEvidenceRefs: publishGate.excludedEvidenceRefs
@@ -5894,7 +5894,7 @@ app.post("/api/students/:studentId/profile/print", requireDatabase, requireSessi
     ? mergeStudentProfileAiDraft(fallbackSnapshot, incomingSnapshot)
     : fallbackSnapshot;
   const teacherEditedText = typeof body.text === "string" ? body.text.trim() : "";
-  const snapshot = {
+  const printDraft = {
     ...structuredSnapshot,
     ...(teacherEditedText ? { publishedText: teacherEditedText } : {}),
     narrative: {
@@ -5902,6 +5902,20 @@ app.post("/api/students/:studentId/profile/print", requireDatabase, requireSessi
       ...(teacherEditedText ? { teacherEditedText } : {})
     }
   };
+
+  const snapshot = body.confirmTeacherReview === true
+    ? markStudentProfileTeacherConfirmation(printDraft, req.session.teacherId)
+    : printDraft;
+  const publishGate = evaluateStudentProfilePublish(snapshot);
+  if (body.confirmTeacherReview !== true || !publishGate.ok) {
+    return res.status(409).json({
+      ok: false,
+      error: "PROFILE_TEACHER_CONFIRMATION_REQUIRED",
+      message: "请先复核档案内容，再确认生成打印版。",
+      blockers: publishGate.blockers,
+      excludedEvidenceRefs: publishGate.excludedEvidenceRefs
+    });
+  }
 
   const html = renderStudentGrowthProfilePrintHtml(student, snapshot);
   fs.mkdirSync(storageGeneratedRoot(), { recursive: true });
@@ -5928,6 +5942,8 @@ app.post("/api/students/:studentId/profile/print", requireDatabase, requireSessi
         periodType,
         periodLabel: snapshot.period?.label || null,
         templateType: snapshot.printView?.templateType || "comprehensive_growth_archive",
+        confirmedByTeacherId: snapshot.teacherReview.confirmedByTeacherId,
+        confirmedAt: snapshot.teacherReview.confirmedAt,
         htmlUrl: publicGeneratedUrl(htmlFileName, req),
         pdfGenerated: pdfResult.ok,
         pdfReason: pdfResult.ok ? null : pdfResult.reason,
@@ -5940,7 +5956,11 @@ app.post("/api/students/:studentId/profile/print", requireDatabase, requireSessi
     studentId: student.id,
     feature: "student-profile",
     action: "profile-print",
-    metadata: { studentId: student.id, assetId: asset.id, periodType, pdfGenerated: pdfResult.ok }
+    metadata: {
+      studentId: student.id, assetId: asset.id, periodType, pdfGenerated: pdfResult.ok,
+      confirmedByTeacherId: snapshot.teacherReview.confirmedByTeacherId,
+      confirmedAt: snapshot.teacherReview.confirmedAt
+    }
   });
 
   res.json({

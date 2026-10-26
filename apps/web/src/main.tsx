@@ -2202,7 +2202,7 @@ function TeacherWorkspace({
                 if (!selectedArchiveStudent) return;
                 const asset = await onProfilePrint(selectedArchiveStudent.id, profileDraft.snapshot, profileDraftText);
                 if (asset) setProfilePrintAsset(asset);
-              }} type="button"><Printer size={17} />生成打印版</button>
+              }} type="button"><Printer size={17} />确认内容并生成打印版</button>
               {profilePrintAsset ? <a className="draft-pdf-link" href={profilePrintAsset.url} target="_blank" rel="noreferrer"><FileText size={17} />下载打印版</a> : null}
               <button className="secondary-button" onClick={() => setProfileDraftText(profileDraft.text)}><RotateCcw size={17} />恢复草稿原文</button>
             </div>

@@ -305,7 +305,7 @@ export async function generateStudentProfilePrint(studentId: string, input: { sn
   const response = await fetch(`${API_BASE_URL}/api/students/${studentId}/profile/print`, {
     method: "POST",
     headers: jsonHeaders(),
-    body: JSON.stringify(input)
+    body: JSON.stringify({ ...input, confirmTeacherReview: true })
   });
   return readJson<{
     ok: boolean;

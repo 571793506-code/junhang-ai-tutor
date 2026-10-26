@@ -482,6 +482,10 @@ const e2eTextbook = selectContentContextE2eTextbook(textbookResponse?.body.asset
   subject: zh.math,
   grade: zh.grade5
 });
+// The link guard may use whole-book context, but must not invent a chapter.
+const e2eTextbookChapter = e2eTextbook?.chapters?.find((chapter) =>
+  String(chapter?.title || "").includes(zh.decimalMultiplication)
+) || null;
 pass("server resolves a real math textbook asset", Boolean(e2eTextbook?.id && e2eTextbook?.grade), {
   status: textbookResponse?.status || 0,
   assetId: e2eTextbook?.id || null,
@@ -694,7 +698,8 @@ const assessment = teacherToken
         difficulty: zh.base,
         textbookAssetId: e2eTextbook?.id || null,
         textbookTitle: "客户端伪造教材标题",
-        textbookChapterTitle: zh.decimalMultiplication,
+        textbookChapterId: e2eTextbookChapter?.id || null,
+        textbookChapterTitle: e2eTextbookChapter?.title || null,
         requirement: zh.guardRequirement,
         assessmentTotalTimeoutMs: generationModelBudgetMs,
         knowledgePoints: [zh.decimalMultiplication, zh.figure, e2eContentSentinel]

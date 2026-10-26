@@ -93,7 +93,7 @@ async function resolveTextbookInput(prisma, input) {
     : requestedChapterTitle
       ? chapters.find((item) => normalizedText(item?.title) === requestedChapterTitle)
       : null;
-  if (requestedChapterId && !chapter) {
+  if ((requestedChapterId || requestedChapterTitle) && !chapter) {
     return {
       input,
       valid: false,

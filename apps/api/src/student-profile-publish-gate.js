@@ -13,7 +13,7 @@ export function evaluateStudentProfilePublish(snapshot = {}) {
     ...submissions.filter((item) => item?.archiveEligible === false || item?.needsTeacherReview === true).map((item) => item?.sourceId || item?.id || item?.ref)
   ].filter(Boolean).map(String))];
   const blockers = [];
-  if (review.status !== "confirmed" && (blocked.length || (Array.isArray(review.pendingConfirmations) && review.pendingConfirmations.length))) {
+  if (review.status !== "confirmed") {
     blockers.push("TEACHER_CONFIRMATION_REQUIRED");
   }
   if (excludedEvidenceRefs.length && review.status !== "confirmed" && !blockers.includes("TEACHER_CONFIRMATION_REQUIRED")) {
