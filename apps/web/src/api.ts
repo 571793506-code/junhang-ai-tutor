@@ -574,7 +574,15 @@ export async function archiveTeachingGrading(id: string, expectedRevision: numbe
 export function teachingImageUrl(value?: string | null) {
   if (!value) return "";
   try {
-    const url = new URL(value, new URL(API_BASE_URL, window.location.origin));
+    const apiBase = new URL(API_BASE_URL, window.location.origin);
+    const url = new URL(value, apiBase);
+    // Historical local uploads belong to this API deployment. Resolve only
+    // their display URL; keep stored evidence and external resources intact.
+    if (["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
+      && url.port === "8787" && url.pathname.startsWith("/uploads/")
+      && !url.username && !url.password && ["http:", "https:"].includes(url.protocol)) {
+      return new URL(`${url.pathname}${url.search}${url.hash}`, apiBase).href;
+    }
     return ["http:", "https:"].includes(url.protocol) ? url.href : "";
   } catch { return ""; }
 }

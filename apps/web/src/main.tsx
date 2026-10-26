@@ -97,6 +97,7 @@ import {
   removeStudentAccessApi,
   setClassroomDeviceLock,
   setSessionToken,
+  teachingImageUrl,
   syncKnowledgeSourcesFromIndex,
   type TermReportType,
   updateTextbookChapters,
@@ -3192,7 +3193,7 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onImportDialoguePackage,
       <div className="review-image-tabs">{active?.pages.map((item) => <button className={item.pageNumber === page?.pageNumber ? "active" : ""} key={item.id} onClick={() => selectPage(item.pageNumber)}>第 {item.pageNumber} 页</button>)}</div>
       {page ? <p className={`context-note ${page.qualityStatus === "ready" ? "" : "blocked"}`}><ShieldCheck size={15} />{pageQualityText}{page.qualityScore != null ? ` · 质量分 ${Math.round(page.qualityScore * 100)}%` : ""}{pageQualityIssues.length ? ` · ${pageQualityIssues.slice(0, 2).join("；")}` : ""}</p> : null}
       <div className="grading-image-stage">
-        {page?.imageUrl ? <img src={page.imageUrl} alt={`${active?.studentName || ""} 上传页面 ${page.pageNumber}`} /> : <div className="annotation-empty">暂无图片预览</div>}
+        {page?.imageUrl && teachingImageUrl(page.imageUrl) ? <img src={teachingImageUrl(page.imageUrl)} alt={`${active?.studentName || ""} 上传页面 ${page.pageNumber}`} /> : <div className="annotation-empty">暂无图片预览</div>}
         {markers.map((marker, index) => <button aria-label={`第${marker.questionNo}题，${statusText(marker.status)}`} className={`annotation-marker ${marker.status}`} key={`${marker.id}-${index}`} style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }} title={`第${marker.questionNo}题 ${statusText(marker.status)}`} onClick={() => {
           const target = active?.questions.find((item) => item.questionNo === marker.questionNo);
           if (target) setActiveQuestionId(target.id);

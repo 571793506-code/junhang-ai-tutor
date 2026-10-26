@@ -13,7 +13,9 @@ import { createTeachingWorkflowClient } from "./teaching-workflow-client.mjs";
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || "playwright");
 const artifactDir = process.env.WEB_QA_OUTPUT || path.join(os.tmpdir(), "junhang-grading-web-qa");
-const launch = () => chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
+const launch = () => chromium.launch({ headless: true,
+  ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}),
+  ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}) });
 const pageSvg = (n) => `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800"><rect width="600" height="800" fill="white"/><g font-family="sans-serif" font-size="24" fill="#163b45"><text x="50" y="65">合成作业 · 第 ${n} 页</text><text x="60" y="155">${n === 1 ? "1. 说明交换加数为什么和不变" : "2. 24 + 18 = 42"}</text><text x="60" y="205">${n === 1 ? "交换两堆小棒，总数一样。" : "个位相加满十，向十位进一。"}</text></g></svg>`;
 
 test("actual teacher page preserves multipart upload, source management and disabled workflow fallback", { timeout: 40000 }, async (t) => {
@@ -29,7 +31,8 @@ test("actual teacher page preserves multipart upload, source management and disa
   let uploaded = false, workflowStatus = 404, multipart = "";
   const workbench = { id: "submission1", submissionId: "submission1", assignmentId: "paper1", title: "测试上传", studentId: "s1", studentName: "测试学生",
     subject: "数学", kind: "作业", materialType: "external_workbook", status: "待复核", workflowState: "review_required", needsTeacherReview: true,
-    archiveEligible: false, archiveBlockers: ["ANSWER_SOURCE_NOT_CONFIRMED"], questions: [], pages: [], questionCount: 0, pendingQuestionCount: 0,
+    archiveEligible: false, archiveBlockers: ["ANSWER_SOURCE_NOT_CONFIRMED"], questions: [],
+    pages: [{ id: "page1", pageNumber: 1, imageUrl: "http://127.0.0.1:8787/uploads/qa-page.png", qualityStatus: "ready" }], questionCount: 0, pendingQuestionCount: 0,
     ocrStatusLabel: "待核对", summary: "合成上传记录", uploadedBy: "teacher", submittedAt: "2026-09-17T10:00:00Z" };
   const base = { ok: true, teacher, teachers: [teacher], sessionToken: "synthetic-intercept-only", students: [student, disabled], tasks: [], assignments: [],
     classroomDevices: [], classroomBroadcasts: [], dictationTasks: [], readingTasks: [], corrections: [], logs: [], reports: [], submissions: [], jobs: [], assets: [],
@@ -42,6 +45,7 @@ test("actual teacher page preserves multipart upload, source management and disa
       return route.fulfill({ json: { ok: true, result: { available: false, queued: true }, uploadedFiles: [], persistence: { active: false } } }); }
     return route.fulfill({ json: { ...base, workbenches: uploaded ? [workbench] : [] } });
   });
+  await page.route("**/uploads/qa-page.png", (route) => route.fulfill({ contentType: "image/svg+xml", body: pageSvg(1) }));
   await page.goto(process.env.WEB_BASE_URL || "http://127.0.0.1:5173/");
   await page.getByRole("button", { name: "登录同步真实数据", exact: true }).click();
   await page.getByText("教师端已登录：测试教师", { exact: true }).waitFor();
@@ -59,6 +63,13 @@ test("actual teacher page preserves multipart upload, source management and disa
   assert.equal(await continuous.getByRole("button", { name: "从此批次开始持续批改", exact: true }).isDisabled(), true);
   await continuous.getByRole("button", { name: "原有批改与来源管理", exact: true }).first().click();
   await page.locator(".legacy-grading-workspace").waitFor({ state: "visible" });
+  const legacyImage = page.getByRole("img", { name: "测试学生 上传页面 1", exact: true });
+  const apiOrigin = await page.evaluate(async () => {
+    const { teachingImageUrl } = await import("/src/api.ts");
+    return new URL(teachingImageUrl("/uploads/qa-page.png")).origin;
+  });
+  assert.equal(await legacyImage.getAttribute("src"), `${apiOrigin}/uploads/qa-page.png`);
+  await legacyImage.evaluate((img) => img.decode());
   await page.getByText("登记对话生成内容为统一批改来源", { exact: true }).waitFor();
   await page.getByRole("button", { name: "持续批改与版本", exact: true }).click();
   workflowStatus = 503;
@@ -90,6 +101,30 @@ test("grading browser corrects one answer, preserves confirmation, rejects stale
   await page.route("**/qa/page*.png", (route) => route.fulfill({ contentType: "image/svg+xml", body: pageSvg(route.request().url().includes("page2") ? 2 : 1) }));
   await page.addInitScript((token) => localStorage.setItem("junhang.web.sessionToken", token), f.tokens.teacher);
   await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}/__grading`, { timeout: 30000 });
+  const imageUrls = await page.evaluate(async () => {
+    const { teachingImageUrl } = await import("/src/api.ts");
+    return [
+      "http://127.0.0.1:8787/uploads/2026-10-09/page.jpg",
+      "http://localhost:8787/uploads/page.jpg?version=1#page",
+      "http://[::1]:8787/uploads/page.jpg",
+      "/uploads/page.jpg",
+      "https://school.example/uploads/page.jpg",
+      "http://127.0.0.1:9000/uploads/page.jpg",
+      "http://127.0.0.1:8787/other/page.jpg",
+      "javascript:alert(1)",
+      "data:image/png;base64,AA=="
+    ].map(teachingImageUrl);
+  });
+  const webOrigin = new URL(page.url()).origin;
+  assert.deepEqual(imageUrls, [
+    `${webOrigin}/uploads/2026-10-09/page.jpg`,
+    `${webOrigin}/uploads/page.jpg?version=1#page`,
+    `${webOrigin}/uploads/page.jpg`,
+    `${webOrigin}/uploads/page.jpg`,
+    "https://school.example/uploads/page.jpg",
+    "http://127.0.0.1:9000/uploads/page.jpg",
+    "http://127.0.0.1:8787/other/page.jpg", "", ""
+  ]);
   await page.getByText("服务可用", { exact: true }).waitFor();
   await page.getByLabel("已上传批次", { exact: true }).selectOption("submission1");
   await page.getByRole("button", { name: "从此批次开始持续批改", exact: true }).click();
