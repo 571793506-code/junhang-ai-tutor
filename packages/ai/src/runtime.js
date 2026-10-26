@@ -456,7 +456,9 @@ export async function callTeachingModel(config, route, messages, options = {}) {
     omitTemperature: openai,
     onTransportProgress: options.onTransportProgress
   });
-  return { text: extractChatText(body), usage: body.usage || null };
+  return { text: extractChatText(body), usage: body.usage || null,
+    completionDiagnostics: { limitField: options.maxTokens ? (openai || minimax ? "max_completion_tokens" : "max_tokens") : null,
+      finishReason: body.choices?.[0]?.finish_reason ?? null } };
 }
 
 // execution contains server-owned dependencies, never a forwarded HTTP body.

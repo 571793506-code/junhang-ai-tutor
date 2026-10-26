@@ -2,6 +2,17 @@
 
 更新日期：2026-10-10。对应日常工作台计划 Task 9。当前结论：第1至4项已按教师确认完成；第5项“当前学生/教材/教师留出任务”暂缓，待教师与学生继续磨合。第6项已完成业务库备份、工作流迁移、Prisma Client 更新及持久化启用；教师已确认本份生成内容，真实 Web 已完成发布、预览与正式学生卷/解析卷导出，两份均为1页A4。本轮16题真实批改已按教师最终决定确认，版本5、37.5/60分；独立归档、8条错题、真实数据库幂等及档案证据准入验收通过。Web教师确认和归档回显已修正，真实任务刷新后显示版本5已归档，分数及确认数保持一致。按已约定范围，第九阶段教学与数据库闭环验收完成，可进入下一阶段；第5项继续暂缓。下文较早的失败、未确认、未归档及旧界面问题均为历史记录，以最新记录为准。
 
+### 2026-10-26 整卷耗时与渠道计量诊断：实现收口，真实回放失败
+
+- 共享教学执行器保留原最后阶段transportDiagnostics，并在transportStages中最多记录request_started、response_headers、response_body_complete各一次安全观测；结束后的回调不能修改记录。模型运行层回传实际请求的token上限字段与finish_reason，执行器仅保留白名单终止原因、输出量及推理/缓存等有限数值。未知用量仍为null、未知费用仍为unknown；渠道报告超过请求量时按报告扣减共享余额，不追加调用。这些字段不进入模型业务输入、教学候选或产品响应。没有修改Sol 6.1 high、180秒/12000输出总预算或现有单次质量修复规则。
+- 先以本地真实HTTP请求复现阶段记录缺失及候选字段隔离失败，再完成最小修改。92项定向回归全部通过、0跳过，覆盖实际发送max_completion_tokens、三个阶段、响应体停滞、未知/零/超额用量、白名单、重复及晚到回调、产品投影和独立回放失败门禁；API检查通过。本轮未重启API，也未操作Web，不能据离线加载测试宣称运行中的Web/API已经加载新诊断。
+- 只对原29题grading-35179edc0d80724a执行一次现行策略真实回放。首次调用请求6000 max_completion_tokens，约151.1秒返回HTTP200，finish_reason=length，JSON无法解析；渠道报告prompt_tokens=13635、completion_tokens=6000、total_tokens=19635，其中completion_tokens_details.reasoning_tokens=3624。响应头151089ms、响应体完成151092ms，客户端读取响应体区间约3ms；不能从响应头前等待进一步区分渠道排队与上游推理。现有一次整卷质量修复仅剩28894ms、6000额度，未观察到响应头，在28903ms触发截止。总执行180016ms、evaluationRun.status=failed、脚本退出1；completed=true只表示回放循环结束，不是评分成功。
+- 本次29题全部待定、actualScore=null、有效评分覆盖为0，不能计算通过准确率。该样本已证明一种失败机制：首次6000额度耗尽导致截断JSON，剩余时间不足以完成整卷修复；不能推广为所有历史超时的唯一原因。此前同卷179908ms成功与其他卷成功不证明稳定低于180秒。历史两份completion_tokens超过请求6000的现象仍需渠道核实，本次恰为6000不能证明所有请求均严格受限；修复用量与实际费用仍未知，不据此推算账单。
+- persist:false，expected及teacherReview不进入模型。源gold、原作答及教师评分输入前后不变；业务工作流、全部历史版本和独立归档完整对象哈希一致，Submission/GradingResult/MistakeRecord/Assignment/TeachingWorkflow数量仍42/42/114/272/10，原版本5、37.5/60、GRADED、needsReview=false不变。本轮没有重新OCR、发布、归档或修改教师评分。
+- 证据位于tmp/quality/，前缀latency-metering：red、green、regression、api日志；live-20261026.log、完整回放JSON、checkpoint、quality、differences、inventory、inspection及db-before/db-after；live-20261026-summary.json保留两次调用的阶段、用量、失败及业务不变结论。受控回放与检查辅助脚本仅本地保留，不将学生样本或运行产物纳入源码提交。
+- 下一步仍为整卷稳定耗时验收：先验证长卷首次输出与修复额度的分配，必要时评估现有分组契约；保留总预算、完整题号、教师裁量及失败不评分边界，再做真实对照。单纯加大单次额度或延长上限不算通过。本轮只收口诊断能力与失败取证；缺失原评分证据/第5题原卷、新周月档案教师实际评价确认发布仍开放，留出任务和工作区清理继续后置。
+- 编码收尾：源码扫描1225文件、历史扫描1236文件均退出1、0修复，共3处告警，分别为既有教学中间JSON的777行、旧临时扫描报告重复引用该行，以及Prisma临时vendor文件binary.js:126；不称全量编码通过，不改教学产物、vendor或放宽守卫。本轮7份修改文件严格UTF-8解码及补丁新增行共享编码守卫通过，git diff --check通过。历史扫描报告另存latency-metering-history-report-20261026.txt，原docs/encoding-history-report.md按运行前字节恢复；编码日志与latency-metering-changed-encoding-20261026.json本地保留，output/未处理。
+
 ### 2026-10-26 新稿打印版式与教师验收收口
 
 - 沿用此前教师已认可内容及评分点的四年级计算4题与六年级一般过去时20题，调用当前生产的generationSnapshot、共享校验器、来源包转换及打印函数离线渲染，不重做模型生成。原题干、答案、rubric、分值及源JSON哈希保持不变；数学每题5分、仅结果正确各1分，不改为旧样本的2/2/1/1口径。本轮0模型调用、0业务写入，不是正式发布、业务导出或运行Web的新验收。

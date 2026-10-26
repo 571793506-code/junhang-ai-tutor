@@ -10,6 +10,8 @@
 
 规则 root 只允许服务端配置与测试使用，HTTP 输入、上传文件和资料文本不能指定规则路径或替换规则。版本/hash 只属于内部可追踪元数据，不向学生或家长输出正文或内部配置。模型策略及数值预算归 `packages/ai/src/model-policy.js` 管理；Playbook 不复制第二套预算表。规则装配接入状态按 9 月 11 日实施计划记录，规则文件存在不等于所有旧入口已完成迁移。
 
+教学调用的内部attempt保留`transportDiagnostics`最后阶段，并在`transportStages`中最多保存request_started、response_headers、response_body_complete各一次安全观测。响应头耗时与响应体完成耗时之差只表示客户端读取响应体的区间，不能直接当作上游推理或排队时间。未观察到的阶段不补造。`usage`仅保留白名单数值和渠道返回的推理/缓存明细；`completionDiagnostics`记录实际请求上限字段、白名单finishReason及报告输出量是否超过请求值。它们不能证明渠道强制上限或实际费用，未知用量仍未知；不因诊断标记追加调用，也不改变教师评分与复核门禁。这些字段仅用于内部追踪，不进入模型输入、教学候选或产品响应。
+
 ### 1.1 Prompt engineering 负责“怎么说”
 
 每一次模型调用都必须明确：

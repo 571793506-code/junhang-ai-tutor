@@ -77,3 +77,85 @@ test("diagnostic observer failure cannot change a successful model call", async 
     assert.equal(count(), 1);
   });
 });
+
+test("runner retains all three transport stages and safe channel accounting from the actual wire", async () => {
+  let payload;
+  await gateway(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    payload = JSON.parse(body);
+    res.writeHead(200);
+    res.flushHeaders();
+    res.end(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: '{"title":"draft"}' } }],
+      usage: { prompt_tokens: 300, completion_tokens: 65, total_tokens: 365,
+        prompt_tokens_details: { cached_tokens: 100, raw: "PRIVATE_USAGE" },
+        completion_tokens_details: { reasoning_tokens: 40, audio_tokens: 0, secret: "PRIVATE_USAGE" },
+        secret: "PRIVATE_USAGE" } }));
+  }, async (config, count) => {
+    const budget = { deadlineAt: Date.now() + 3000, remainingTokens: 100, additionalAttemptsUsed: 0 };
+    const result = await runTeachingTask(config, "grading", {}, { budget, repairIssues: () => [] });
+    assert.equal(count(), 1);
+    assert.equal(result.status, "success");
+    assert.equal(payload.max_completion_tokens, 50);
+    assert.equal(Object.hasOwn(payload, "max_tokens"), false);
+    const attempt = result.internal.attempts[0];
+    assert.deepEqual(Object.keys(attempt.transportStages), ["request_started", "response_headers", "response_body_complete"]);
+    const stages = Object.values(attempt.transportStages);
+    assert.ok(stages.every(s => Number.isFinite(s.elapsedMs)));
+    assert.ok(stages[0].elapsedMs <= stages[1].elapsedMs && stages[1].elapsedMs <= stages[2].elapsedMs);
+    assert.deepEqual(attempt.transportDiagnostics, stages[2]);
+    assert.deepEqual(attempt.usage, { prompt_tokens: 300, completion_tokens: 65, total_tokens: 365,
+      prompt_tokens_details: { cached_tokens: 100 }, completion_tokens_details: { reasoning_tokens: 40, audio_tokens: 0 } });
+    assert.deepEqual(attempt.completionDiagnostics, { limitField: "max_completion_tokens", finishReason: "stop",
+      reportedOutputTokens: 65, exceedsRequestedLimit: true });
+    assert.equal(budget.remainingTokens, 35);
+    assert.equal(attempt.cost, "unknown");
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE_USAGE|private-test-key|127\.0\.0\.1/);
+    for (const role of ["teacher", "student", "parent"]) {
+      assert.doesNotMatch(JSON.stringify(projectTeachingResult(result, role)), /transportStages|completionDiagnostics|reasoning_tokens/);
+    }
+  });
+});
+
+test("stalled body preserves the header timing and unknown usage without inventing completion", async () => {
+  await gateway((_req, res) => { res.writeHead(200); res.flushHeaders(); res.write(" "); }, async (config, count) => {
+    const rules = await loadTeachingRulePack("grading");
+    const result = await runTeachingUnit({ task: "grading", input: {}, rulePack: rules,
+      budget: { deadlineAt: Date.now() + 200, remainingTokens: 100, additionalAttemptsUsed: 1 } }, {
+      config, repairIssues: () => [], call: (route, messages, options) => callTeachingModel(config, route, messages, options)
+    });
+    assert.equal(count(), 1);
+    const attempt = result.internal.attempts[0];
+    assert.deepEqual(Object.keys(attempt.transportStages), ["request_started", "response_headers"]);
+    assert.equal(attempt.usage, null);
+    assert.equal(attempt.completionDiagnostics, undefined);
+    assert.equal(attempt.failureCode, "TEACHING_DEADLINE");
+  });
+});
+
+test("injected stage floods and accounting metadata are bounded and cannot enter candidates or prompts", async () => {
+  let observe;
+  const result = await runTeachingTask({}, "generation", { transportStages: { raw: "PRIVATE_INPUT" },
+    completionDiagnostics: { raw: "PRIVATE_INPUT" } }, { repairIssues: () => [], call: async (_route, messages, options) => {
+    assert.doesNotMatch(messages[1].content, /PRIVATE_INPUT/);
+    observe = options.onTransportProgress;
+    for (let i = 0; i < 100; i++) observe({ phase: "response_headers", elapsedMs: i, raw: "PRIVATE_EVENT" });
+    observe({ phase: "PRIVATE_PHASE", elapsedMs: 200 });
+    return { text: JSON.stringify({ title: "draft", transportStages: { raw: "PRIVATE_CANDIDATE" },
+      completionDiagnostics: { raw: "PRIVATE_CANDIDATE" } }),
+      usage: { output_tokens: 12, input_tokens_details: { cached_tokens: 4, secret: "PRIVATE_USAGE" },
+        output_tokens_details: { reasoning_tokens: -1, raw: "PRIVATE_USAGE" }, completion_tokens: Infinity },
+      completionDiagnostics: { limitField: "PRIVATE_LIMIT", finishReason: "PRIVATE_REASON", raw: "PRIVATE_RAW" } };
+  } });
+  const attempt = result.internal.attempts[0];
+  assert.deepEqual(result.candidate, { title: "draft" });
+  assert.deepEqual(Object.keys(attempt.transportStages), ["response_headers"]);
+  assert.equal(attempt.transportStages.response_headers.elapsedMs, 0);
+  const before = JSON.stringify(attempt);
+  observe({ phase: "response_body_complete", elapsedMs: 201 });
+  assert.equal(JSON.stringify(attempt), before);
+  assert.deepEqual(attempt.usage, { output_tokens: 12, input_tokens_details: { cached_tokens: 4 } });
+  assert.deepEqual(attempt.completionDiagnostics, { limitField: null, finishReason: null,
+    reportedOutputTokens: 12, exceedsRequestedLimit: false });
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE/);
+});

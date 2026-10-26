@@ -323,3 +323,22 @@ test("encoding defects and model names in prose fail closed after a bounded repa
     assert.equal(task.calls.length, 2);
   }
 });
+
+test("channel accounting keeps missing usage unknown and charges reported overages without new retries", async () => {
+  for (const [usage, remaining, reported, exceeds] of [
+    [undefined, 50, null, null],
+    [{ completion_tokens: 0 }, 100, 0, false],
+    [{ completion_tokens: 150, completion_tokens_details: { reasoning_tokens: 100 } }, 0, 150, true]
+  ]) {
+    const task = setup([{ text: '{"title":"draft"}', usage,
+      completionDiagnostics: { limitField: "max_tokens", finishReason: "length" } }]);
+    const result = await task.run();
+    assert.equal(result.status, "success");
+    assert.equal(task.calls.length, 1);
+    assert.equal(task.budget.remainingTokens, remaining);
+    assert.deepEqual(result.internal.attempts[0].completionDiagnostics, {
+      limitField: "max_tokens", finishReason: "length", reportedOutputTokens: reported, exceedsRequestedLimit: exceeds
+    });
+    assert.equal(result.internal.attempts[0].cost, "unknown");
+  }
+});

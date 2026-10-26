@@ -7,7 +7,8 @@ const INTERNAL_KEYS = new Set([
   "provider", "providerId", "model", "modelRun", "raw", "debug", "attempts", "rulePack",
   "rulePath", "root", "budget", "generationBudget", "reasoningEffort", "apiKey", "outputContract",
   "assessmentTotalTimeoutMs", "assessmentMaxTokens", "generationTimeoutMs", "generationMaxTokens",
-  "confirmedBy", "confirmedAt", "archiveEligible", "finalScore", "upstreamDiagnostics", "transportDiagnostics", "onTransportProgress"
+  "confirmedBy", "confirmedAt", "archiveEligible", "finalScore", "upstreamDiagnostics", "transportDiagnostics", "onTransportProgress",
+  "transportStages", "completionDiagnostics"
 ]);
 
 const DIAGNOSTIC_ISSUES = new Set([
@@ -52,6 +53,34 @@ function failureDiagnostics(error) {
     : TRANSPORT_CODES.has(code) ? "transport_error" : "unknown_failure";
   const upstreamDiagnostics = sanitizeUpstreamFailureDiagnostics(error?.upstreamDiagnostics);
   return { failureCode, upstreamStatus, upstreamCode, ...(upstreamDiagnostics ? { upstreamDiagnostics } : {}) };
+}
+
+function sanitizeUsage(value) {
+  if (!value || typeof value !== "object") return null;
+  const counts = (source, keys) => Object.fromEntries(keys
+    .filter(key => Number.isFinite(source?.[key]) && source[key] >= 0)
+    .map(key => [key, source[key]]));
+  const usage = counts(value, ["prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens"]);
+  for (const [key, fields] of [
+    ["prompt_tokens_details", ["cached_tokens", "audio_tokens"]],
+    ["completion_tokens_details", ["reasoning_tokens", "audio_tokens", "accepted_prediction_tokens", "rejected_prediction_tokens"]],
+    ["input_tokens_details", ["cached_tokens"]],
+    ["output_tokens_details", ["reasoning_tokens"]]
+  ]) {
+    const details = counts(value[key], fields);
+    if (Object.keys(details).length) usage[key] = details;
+  }
+  return usage;
+}
+
+function completionDiagnostics(value, outputTokens, maxTokens) {
+  return {
+    limitField: ["max_completion_tokens", "max_tokens"].includes(value?.limitField) ? value.limitField : null,
+    finishReason: ["stop", "length", "content_filter", "tool_calls", "function_call"].includes(value?.finishReason) ? value.finishReason : null,
+    reportedOutputTokens: outputTokens ?? null,
+    // Channel-reported counts are observations, not proof of billing or limit enforcement.
+    exceedsRequestedLimit: outputTokens == null ? null : outputTokens > maxTokens
+  };
 }
 
 // Defense in depth; business fields and actor permissions are validated by the service.
@@ -142,15 +171,21 @@ export async function runTeachingUnit(
       const response = await boundedCall(call, route, messages, { timeoutMs, signal, maxTokens,
         onTransportProgress: (event) => {
           const diagnostic = sanitizeTransportDiagnostics(event);
-          if (observing && diagnostic) attempt.transportDiagnostics = diagnostic;
+          if (observing && diagnostic) {
+            attempt.transportDiagnostics = diagnostic;
+            attempt.transportStages ||= {};
+            // At most three snapshots; preserve the first observation of each stage.
+            attempt.transportStages[diagnostic.phase] ||= diagnostic;
+          }
         }
       });
-      const usage = response?.usage;
+      const usage = sanitizeUsage(response?.usage);
       const outputTokens = usage?.completion_tokens ?? usage?.output_tokens;
       if (Number.isFinite(outputTokens) && outputTokens >= 0) {
         budget.remainingTokens = Math.max(0, budget.remainingTokens + maxTokens - outputTokens);
       }
-      attempt.usage = usage ? Object.fromEntries(Object.entries(usage).filter(([key, value]) => ["prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens"].includes(key) && Number.isFinite(value) && value >= 0)) : null;
+      attempt.usage = usage;
+      attempt.completionDiagnostics = completionDiagnostics(response?.completionDiagnostics, outputTokens, maxTokens);
       if (signal?.aborted) return stop("TEACHING_CANCELLED");
       if (now() >= budget.deadlineAt) return stop("TEACHING_BUDGET_EXHAUSTED");
       let candidate;
