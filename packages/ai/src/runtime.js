@@ -476,7 +476,7 @@ export async function runTeachingTask(config, task, input, execution = {}) {
   } catch {
     return { status: "review_required", candidate: null, issueCodes: ["TEACHING_RULES_INVALID"], internal: { attempts: [], rules: null } };
   }
-  return runTeachingUnit({ task, input, rulePack, budget, signal: execution.signal, evidenceSufficient: execution.evidenceSufficient }, {
+  return runTeachingUnit({ task, input, rulePack, budget, additionalAttemptBudget: execution.additionalAttemptBudget, signal: execution.signal, evidenceSufficient: execution.evidenceSufficient }, {
     config, now, repairIssues: execution.repairIssues, outputContract: execution.outputContract,
     call: execution.call || ((route, messages, options) => callTeachingModel(config, route, messages, options))
   });

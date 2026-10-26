@@ -8,6 +8,37 @@ const gradingRules = await loadTeachingRulePack("grading");
 const good = () => ({ text: JSON.stringify({ title: "draft" }), usage: { completion_tokens: 10 } });
 const failure = (status, code) => Object.assign(new Error(code || `HTTP ${status}`), { status, code });
 
+test("group primary overages reduce the shared repair reserve before another call", async () => {
+  for (const [output, repairLimit] of [[7000, 500], [7500, null]]) {
+    const budget = { deadlineAt: 180000, remainingTokens: 4500, additionalAttemptsUsed: 0 };
+    const additionalAttemptBudget = { remainingTokens: 3000, additionalAttemptsUsed: 0 };
+    const calls = [];
+    await runTeachingUnit({ task: "grading", input: {}, rulePack: gradingRules, budget, additionalAttemptBudget }, {
+      now: () => 0, repairIssues: () => [], call: async (_route, _messages, options) => {
+        calls.push(options.maxTokens);
+        return { text: "{", usage: { completion_tokens: calls.length === 1 ? output : options.maxTokens } };
+      }
+    });
+    assert.deepEqual(calls, repairLimit == null ? [4500] : [4500, repairLimit]);
+    assert.equal(additionalAttemptBudget.remainingTokens, 0);
+  }
+});
+
+test("shared additional-attempt controls are removed recursively from input and candidate", async () => {
+  let sent;
+  const result = await runTeachingUnit({ task: "grading", input: {
+    additionalAttemptBudget: { remainingTokens: 99999 }, nested: { questionGroupThreshold: 1, additionalAttemptBudget: {} }
+  }, rulePack: gradingRules, budget: { deadlineAt: 180000, remainingTokens: 4500, additionalAttemptsUsed: 0 },
+  additionalAttemptBudget: { remainingTokens: 3000, additionalAttemptsUsed: 0 } }, {
+    now: () => 0, repairIssues: () => [], call: async (_route, messages) => {
+      sent = JSON.parse(messages[1].content);
+      return { text: JSON.stringify({ title: "draft", nested: { additionalAttemptBudget: {}, questionGroupThreshold: 1 } }) };
+    }
+  });
+  assert.deepEqual(sent, { nested: {} });
+  assert.deepEqual(result.candidate, { title: "draft", nested: {} });
+});
+
 test("grading can complete a response larger than the old half-pool cap on its first attempt", async () => {
   const calls = [];
   const budget = { deadlineAt: 180000, remainingTokens: 12000, additionalAttemptsUsed: 0 };

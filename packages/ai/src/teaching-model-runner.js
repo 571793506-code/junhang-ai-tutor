@@ -8,7 +8,7 @@ const INTERNAL_KEYS = new Set([
   "rulePath", "root", "budget", "generationBudget", "reasoningEffort", "apiKey", "outputContract",
   "assessmentTotalTimeoutMs", "assessmentMaxTokens", "generationTimeoutMs", "generationMaxTokens",
   "confirmedBy", "confirmedAt", "archiveEligible", "finalScore", "upstreamDiagnostics", "transportDiagnostics", "onTransportProgress",
-  "transportStages", "completionDiagnostics", "primaryTokenShare"
+  "transportStages", "completionDiagnostics", "primaryTokenShare", "additionalAttemptBudget", "questionGroupThreshold"
 ]);
 
 const DIAGNOSTIC_ISSUES = new Set([
@@ -127,7 +127,7 @@ async function boundedCall(call, route, messages, { timeoutMs, signal, maxTokens
 // budget.remainingTokens is an output-token allowance shared by the operation.
 // Unknown usage consumes the reservation; no estimated currency cost is invented.
 export async function runTeachingUnit(
-  { task, input, rulePack, budget, signal, evidenceSufficient = true },
+  { task, input, rulePack, budget, additionalAttemptBudget, signal, evidenceSufficient = true },
   { call, repairIssues, outputContract = "", config = {}, now = Date.now } = {}
 ) {
   const attempts = [];
@@ -139,6 +139,8 @@ export async function runTeachingUnit(
   if (rulePack?.module !== policy.module || !rulePack.text?.trim() || !/^[a-f0-9]{64}$/.test(rulePack.hash || "")) return stop("TEACHING_RULES_INVALID");
   if (typeof call !== "function" || typeof repairIssues !== "function") return stop("TEACHING_VALIDATOR_REQUIRED");
   if (!Number.isFinite(budget?.deadlineAt) || !Number.isFinite(budget?.remainingTokens) || !Number.isInteger(budget?.additionalAttemptsUsed) || budget.additionalAttemptsUsed < 0) return stop("TEACHING_BUDGET_INVALID");
+  if (additionalAttemptBudget && (!Number.isFinite(additionalAttemptBudget.remainingTokens) || !Number.isInteger(additionalAttemptBudget.additionalAttemptsUsed) || additionalAttemptBudget.additionalAttemptsUsed < 0)) return stop("TEACHING_BUDGET_INVALID");
+  const attemptCounter = additionalAttemptBudget || budget;
   const cleanInput = stripInternal(input);
   let route = policy.primary;
   let issues = [];
@@ -146,17 +148,20 @@ export async function runTeachingUnit(
   for (let index = 0; index <= policy.maxAdditionalAttempts; index++) {
     if (signal?.aborted) return stop("TEACHING_CANCELLED");
     const remainingMs = Math.floor(budget.deadlineAt - now());
-    if (remainingMs <= 0 || budget.remainingTokens < 1) return stop("TEACHING_BUDGET_EXHAUSTED");
-    const canRetry = index === 0 && budget.additionalAttemptsUsed < policy.maxAdditionalAttempts;
+    const tokenBudget = index > 0 && additionalAttemptBudget ? additionalAttemptBudget : budget;
+    if (remainingMs <= 0 || tokenBudget.remainingTokens < 1) return stop("TEACHING_BUDGET_EXHAUSTED");
+    const canRetry = index === 0 && attemptCounter.additionalAttemptsUsed < policy.maxAdditionalAttempts;
     const timeoutMs = canRetry && policy.primaryTimeoutMs
       ? Math.min(remainingMs, policy.primaryTimeoutMs) : remainingMs;
     if (index > 0) {
-      if (budget.additionalAttemptsUsed >= policy.maxAdditionalAttempts) return stop("TEACHING_ATTEMPTS_EXHAUSTED");
-      budget.additionalAttemptsUsed++;
+      if (attemptCounter.additionalAttemptsUsed >= policy.maxAdditionalAttempts) return stop("TEACHING_ATTEMPTS_EXHAUSTED");
+      attemptCounter.additionalAttemptsUsed++;
     }
-    const tokenShare = canRetry ? policy.primaryTokenShare : 1;
-    const maxTokens = Math.max(1, Math.min(policy.budget.maxTokens, Math.floor(budget.remainingTokens * tokenShare)));
-    budget.remainingTokens -= maxTokens; // Reserve before awaiting, including concurrent units.
+    // Group primaries already have separate reservations; only the one shared
+    // additional attempt can spend the operation's repair reservation.
+    const tokenShare = canRetry && !additionalAttemptBudget ? policy.primaryTokenShare : 1;
+    const maxTokens = Math.max(1, Math.min(policy.budget.maxTokens, Math.floor(tokenBudget.remainingTokens * tokenShare)));
+    tokenBudget.remainingTokens -= maxTokens; // Reserve before awaiting, including concurrent units.
     const messages = [
       { role: "system", content: `${rulePack.text}\nRule version: ${rulePack.version}; SHA-256: ${rulePack.hash}\nTask: ${task}. Return a valid JSON object only.\n${outputContract}${issues.length ? `\nRepair these validation issues: ${JSON.stringify(issues)}` : ""}` },
       { role: "user", content: JSON.stringify(cleanInput) }
@@ -182,7 +187,11 @@ export async function runTeachingUnit(
       const usage = sanitizeUsage(response?.usage);
       const outputTokens = usage?.completion_tokens ?? usage?.output_tokens;
       if (Number.isFinite(outputTokens) && outputTokens >= 0) {
-        budget.remainingTokens = Math.max(0, budget.remainingTokens + maxTokens - outputTokens);
+        const balance = tokenBudget.remainingTokens + maxTokens - outputTokens;
+        if (additionalAttemptBudget && tokenBudget !== additionalAttemptBudget && balance < 0) {
+          additionalAttemptBudget.remainingTokens = Math.max(0, additionalAttemptBudget.remainingTokens + balance);
+        }
+        tokenBudget.remainingTokens = Math.max(0, balance);
       }
       attempt.usage = usage;
       attempt.completionDiagnostics = completionDiagnostics(response?.completionDiagnostics, outputTokens, maxTokens);

@@ -34,6 +34,7 @@ export function resolveTeachingTaskPolicy(task, config = {}) {
     replacement,
     // Single-model grading favors a complete first answer over a full-paper repair.
     primaryTokenShare: task === "grading" && !replacement ? 0.75 : 0.5,
+    ...(task === "grading" ? { questionGroupThreshold: 16 } : {}),
     maxAdditionalAttempts: 1,
     maxConcurrency: 2,
     ...(defaults.primaryTimeoutMs && replacement ? { primaryTimeoutMs: defaults.primaryTimeoutMs } : {}),

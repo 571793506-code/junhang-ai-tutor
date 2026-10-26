@@ -14,7 +14,8 @@ export function createTeachingOperationBudget(task, config = {}, execution = {})
   return { deadlineAt: (execution.now || Date.now)() + (execution.timeoutMs || policy.budget.timeoutMs), remainingTokens: execution.maxTokens || policy.budget.maxTokens };
 }
 
-// Reserve each unit's allowance before awaiting. Every unit retains its own repair slot.
+// Reserve each unit's allowance before awaiting. Grouped grading explicitly
+// supplies one additional-attempt reservation shared by both units.
 export async function runTeachingPipelineUnit(runTask, config, task, input, execution, pool, allowance, validate, outputContract) {
   const quota = Math.max(0, Math.min(allowance, pool.remainingTokens));
   pool.remainingTokens -= quota;
@@ -29,7 +30,8 @@ export async function runTeachingPipelineUnit(runTask, config, task, input, exec
 function runtimeResult(task, input, units, text, extra = {}) {
   const policy = resolveTeachingTaskPolicy(task);
   const attempts = units.flatMap((unit) => unit.result.internal.attempts.map((attempt) => ({ ...attempt, partitionId: unit.id })));
-  const success = units.some((unit) => unit.result.status === "success");
+  const success = units.some((unit) => unit.result.status === "success")
+    && (task !== "grading" || Boolean(text) && units.every(unit => unit.result.status === "success"));
   const replacementAttempts = attempts.filter((attempt) => attempt.role === "availability-replacement");
   const model = attempts.findLast((attempt) => attempt.status === "SUCCESS")?.model || attempts[0]?.model || policy.primary.model;
   return {
@@ -208,6 +210,51 @@ function compactVerifiedGradingContext(input) {
   return projected;
 }
 
+async function runGroupedGrading(config, input, safeInput, execution, runTask, pool, contract) {
+  const policy = resolveTeachingTaskPolicy("grading", config);
+  const questionNos = safeInput.ocrQuestions.map(q => String(q.questionNo));
+  const middle = Math.ceil(questionNos.length / 2);
+  const groups = [questionNos.slice(0, middle), questionNos.slice(middle)];
+  const primaryTotal = Math.floor(Math.min(pool.remainingTokens, policy.budget.maxTokens)
+    * (execution.disableSolEscalation ? 1 : policy.primaryTokenShare));
+  const repairTokens = Math.min(pool.remainingTokens, policy.budget.maxTokens) - primaryTotal;
+  const additionalAttemptBudget = { remainingTokens: repairTokens, additionalAttemptsUsed: execution.disableSolEscalation ? 1 : 0 };
+  pool.remainingTokens -= repairTokens;
+  let units;
+  try {
+    units = await mapWithConcurrency(groups, policy.maxConcurrency, async (targets, index) => {
+      const expected = { ...safeInput, ocrQuestions: safeInput.ocrQuestions.filter(q => targets.includes(String(q.questionNo))) };
+      const allowance = Math.floor(primaryTotal / 2) + (index === 0 ? primaryTotal % 2 : 0);
+      const result = await runTeachingPipelineUnit(runTask, config, "grading", {
+        // Both groups retain ALL source and student evidence, including global
+        // instructions and cross-question materials. Only output targets differ.
+        ...safeInput, gradingQuestionNos: targets
+      }, { ...execution, additionalAttemptBudget }, pool, allowance,
+      candidate => gradingContentIssues(candidate, expected),
+      contract + " 上下文保留全卷证据供交叉核对；本次只批改 gradingQuestionNos 指定题号，questionResults 必须且只能包含这些题号。不要输出其他题的评分或把本组当成整卷结论。");
+      return { id: `grading-${index + 1}`, result };
+    });
+  } finally {
+    pool.remainingTokens += additionalAttemptBudget.remainingTokens;
+  }
+  if (execution.signal?.aborted) throw execution.signal.reason || new Error("TEACHING_CANCELLED");
+  let merged = null;
+  if (units.every(unit => unit.result.status === "success")) {
+    const candidates = units.map(unit => unit.result.candidate);
+    const byNo = new Map(candidates.flatMap(candidate => candidate.questionResults).map(q => [String(q.questionNo), q]));
+    const texts = values => [...new Set(values.filter(value => typeof value === "string" && value.trim()))];
+    merged = {
+      summary: texts(candidates.map(candidate => candidate.summary)).join("\n"),
+      strengths: texts(candidates.flatMap(candidate => Array.isArray(candidate.strengths) ? candidate.strengths : [])),
+      mistakes: candidates.flatMap(candidate => Array.isArray(candidate.mistakes) ? candidate.mistakes : []),
+      nextPractice: texts(candidates.map(candidate => candidate.nextPractice)).join("\n"),
+      questionResults: questionNos.map(no => byNo.get(no))
+    };
+    if (gradingContentIssues(merged, safeInput).length) merged = null;
+  }
+  return runtimeResult("grading", input, units, merged ? JSON.stringify(merged) : "");
+}
+
 export async function runSubmissionPipeline(config, task, input, execution, runTask) {
   const selected = pick(input, gradingKeys);
   const safeInput = task === "grading" ? compactVerifiedGradingContext(selected) : selected;
@@ -234,7 +281,13 @@ export async function runSubmissionPipeline(config, task, input, execution, runT
     candidate.needsTeacherReview = true;
     return [];
   };
-  const result = await runTeachingPipelineUnit(runTask, config, task, safeInput, { ...execution, evidenceSufficient }, pool, resolveTeachingTaskPolicy(task, config).budget.maxTokens, validate, contract);
+  const policy = resolveTeachingTaskPolicy(task, config);
+  // A verified projection establishes aligned references without modifying or
+  // rehashing the original package. Unverified sources keep the original path.
+  if (task === "grading" && safeInput !== selected && questions.length >= policy.questionGroupThreshold) {
+    return runGroupedGrading(config, input, safeInput, { ...execution, evidenceSufficient }, runTask, pool, contract);
+  }
+  const result = await runTeachingPipelineUnit(runTask, config, task, safeInput, { ...execution, evidenceSufficient }, pool, policy.budget.maxTokens, validate, contract);
   if (execution.signal?.aborted) throw execution.signal.reason || new Error("TEACHING_CANCELLED");
   return runtimeResult(task, input, [{ id: task, result }], result.candidate ? JSON.stringify(result.candidate) : "");
 }
