@@ -54,6 +54,26 @@ test("comprehensive default pagination remains fixed", () => {
   assert.equal((html.match(/<section class="page">/g) || []).length, 2);
 });
 
+test("printed section numbers follow actual order across pages without changing source titles", () => {
+  const draft = assignment("comprehensive", 20);
+  draft.metadata.subject = "英语";
+  draft.metadata.kind = "小测";
+  draft.items.forEach((q, i) => {
+    q.itemType = i < 8 ? "fill" : i < 10 ? "solution" : i < 14 ? "choice" : "reading";
+    q.prompt = `Question ${i + 1}`;
+    q.metadata.answerFormat = i < 10 ? "english-four-line" : null;
+    if (i >= 10) q.metadata.options = ["A. one", "B. two", "C. three", "D. four"];
+    if (i >= 8 && i < 10) q.metadata.sectionTitle = "四、句子翻译";
+  });
+  const before = structuredClone(draft);
+  const html = render.printableAssignmentHtml(draft);
+  const headings = [...html.matchAll(/<h2 class="section-title">([^<]+)<\/h2>/g)].map(m => m[1]);
+  assert.deepEqual(headings, ["一、填空题", "二、句子翻译", "三、选择题", "四、阅读理解"]);
+  assert.equal((html.match(/data-question-no=/g) || []).length, 20);
+  assert.equal((html.match(/<section class="page">/g) || []).length, 2);
+  assert.deepEqual(draft, before);
+});
+
 test("Chinese writingLines survive the source package and reserve matching blank writing space", async () => {
   const input = { title: "语文病句专项", subject: "语文", grade: "四年级", kind: "练习", purpose: "focused", questions: [{
     id: "q1", questionNo: "1", itemType: "solution", prompt: "参加这次跳绳比赛的同学全部到齐了，只有小林还没有到。", answer: "教师答案标记", score: 5,

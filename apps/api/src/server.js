@@ -2172,7 +2172,7 @@ function calculationSheetPrompt(prompt) {
   return /^[0-9\s.+＋\-−－×÷*/()（）\[\]＝=]+$/.test(expression) ? expression : text;
 }
 
-function renderStudentItem({ item, number, showSection, subject, kind = "", suppressWritingSpace = false, calculationSheet = false }) {
+function renderStudentItem({ item, number, showSection, sectionTitle, subject, kind = "", suppressWritingSpace = false, calculationSheet = false }) {
   const metadata = safeJson(item?.metadata, {});
   const questionNo = metadata.sourceQuestionNo ?? number;
   const itemType = printableItemType(item);
@@ -2198,7 +2198,7 @@ function renderStudentItem({ item, number, showSection, subject, kind = "", supp
       }).join("")}</div>`
     : "";
   const scoreText = questionScoreText(item);
-  return `${showSection ? `<h2 class="section-title">${escapeHtml(sectionTitleForItem(item))}</h2>` : ""}
+  return `${showSection ? `<h2 class="section-title">${escapeHtml(sectionTitle || sectionTitleForItem(item))}</h2>` : ""}
     ${(itemType === "reading" || metadata.showPassage) ? renderReadingPassage(metadata) : ""}
     <div class="item item-${itemType}" data-question-id="${escapeHtml(item?.id || `question-${number}`)}" data-question-no="${escapeHtml(questionNo)}">
       <div class="prompt"><strong>${escapeHtml(questionNo)}.</strong>${calculationSheet ? "" : `<span class="score">${scoreText}</span>`} ${escapeHtml(promptText)}${choiceAnswerBox}</div>
@@ -2419,6 +2419,7 @@ function printableAssignmentHtml(assignment, options = {}) {
   const titleSuffix = options.titleSuffix || "";
   const subtitle = plan.adaptive ? `共${plan.items.length}题` : profile.answerSpace || "";
   const sheetTitle = plan.calculationSheet ? assignment.title.replace(/\s*[（(]待教师复核(?:草稿|稿)?[）)]\s*$/, "") : assignment.title;
+  let sectionNumber = 0;
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -2520,7 +2521,14 @@ ${pageItems.map(({ pageIndex, items: currentItems }) => {
   <div class="items">${currentItems.length ? currentItems.map(({ item, number }, index, list) => {
     const currentSection = sectionTitleForItem(item);
     const previousSection = index > 0 ? sectionTitleForItem(list[index - 1]?.item) : previousPageLastSection;
-    return renderStudentItem({ item, number, showSection: !plan.calculationSheet && (!previousSection || previousSection !== currentSection), subject, kind, suppressWritingSpace, calculationSheet: plan.calculationSheet });
+    const showSection = !plan.calculationSheet && (!previousSection || previousSection !== currentSection);
+    let sectionTitle = currentSection;
+    if (showSection && plan.purpose !== "multi_day") {
+      sectionNumber += 1;
+      const ordinal = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"][sectionNumber - 1] || String(sectionNumber);
+      sectionTitle = `${ordinal}、${currentSection.replace(/^(?:[一二三四五六七八九十]+|\d+)[、.．]\s*/, "")}`;
+    }
+    return renderStudentItem({ item, number, showSection, sectionTitle, subject, kind, suppressWritingSpace, calculationSheet: plan.calculationSheet });
   }).join("") : '<div class="blank-page-inner">本页留白，便于双面打印。</div>'}</div>
   ${footText ? "" : ""}
 </section>`;
