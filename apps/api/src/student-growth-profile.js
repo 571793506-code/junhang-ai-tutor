@@ -22,6 +22,9 @@ export function buildProfileEvidencePack(student, options = {}) {
   const behaviorEvents = filterByPeriod(student.behaviorEvents || [], period, (item) => item.occurredAt);
   const qaSessions = filterByPeriod(student.qaSessions || [], period, (item) => item.createdAt);
   const voiceInteractions = filterByPeriod(student.voiceInteractions || [], period, (item) => item.occurredAt);
+  const learningTrends = period.type === "monthly"
+    ? buildLearningTrends(student.submissions || [], period)
+    : [];
   const gradingEvidence = [];
   const blockedEvidence = (student.teachingArchiveIssues || []).map((item) => ({
     id: item.id, type: "grading", confidence: "blocked", reason: "归档版本、确认内容或替代关系未通过校验，需教师核查。"
@@ -98,6 +101,7 @@ export function buildProfileEvidencePack(student, options = {}) {
     qaEvidence,
     classroomEvidence,
     teacherObservationEvidence,
+    learningTrends,
     reportEvidence: reports.map((report) => ({
       id: report.id,
       type: "report",
@@ -222,6 +226,25 @@ export function mergeStudentProfileAiDraft(baseSnapshot, aiDraft) {
     teacherReview: mergeTeacherReview(base.teacherReview, draft.teacherReview),
     narrative: rejectedPublicView ? base.narrative : mergeNarrative(base, draft)
   };
+  const aiLearningTrends = Array.isArray(draft.publishedView?.learningTrends)
+    ? draft.publishedView.learningTrends
+    : null;
+  if (base.profileEvidencePack) {
+    merged.publishedView = {
+      ...merged.publishedView,
+      learningTrends: Array.isArray(base.publishedView?.learningTrends) ? base.publishedView.learningTrends : []
+    };
+    merged.teacherReview = {
+      ...merged.teacherReview,
+      learningTrends: Array.isArray(base.teacherReview?.learningTrends) ? base.teacherReview.learningTrends : []
+    };
+    if (aiLearningTrends) {
+      merged.teacherReview.internalRisks = [
+        ...(merged.teacherReview.internalRisks || []),
+        "AI提供的近期表现变化已忽略，趋势只采用服务端依据教师确认批改计算的结果。"
+      ];
+    }
+  }
   if (rejectedPublicView) {
     merged.teacherReview = {
       ...merged.teacherReview,
@@ -260,7 +283,10 @@ function hasInadmissibleProfileEvidence(view, pack) {
     }
     return Object.values(value).some(invalid);
   };
-  return invalid(view);
+  // Trends are rebuilt from server evidence; their prior-month refs do not
+  // authorize prior-month evidence elsewhere in the current-period prose.
+  const { learningTrends, ...currentPeriodView } = view;
+  return invalid(currentPeriodView);
 }
 
 export function renderStudentGrowthProfilePrintHtml(student, snapshot) {
@@ -279,6 +305,7 @@ export function renderStudentGrowthProfilePrintHtml(student, snapshot) {
   const commonCauseAnalysis = Array.isArray(sections.commonCauseAnalysis) ? sections.commonCauseAnalysis : [];
   const learningProcess = Array.isArray(sections.learningProcess) ? sections.learningProcess : [];
   const homeSchoolCollaboration = Array.isArray(sections.homeSchoolCollaboration) ? sections.homeSchoolCollaboration : [];
+  const learningTrends = Array.isArray(sections.learningTrends) ? sections.learningTrends : [];
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -327,9 +354,10 @@ li { margin: 2px 0; }
   ${sectionList(evidenceCoverage.length ? "八、课堂与作业过程" : "七、课堂与作业过程", learningProcess)}
   ${sectionList(evidenceCoverage.length ? "九、稳定表现" : "八、稳定表现", stableGrowth)}
   ${sectionList(evidenceCoverage.length ? "十、下阶段辅导重点" : "九、下阶段辅导重点", tutoringPlan)}
-  ${sectionList(evidenceCoverage.length ? "十一、家校协同建议" : "十、家校协同建议", homeSchoolCollaboration)}
-  ${sectionList(evidenceCoverage.length ? "十二、家长下一步" : "十一、家长下一步", parentNextSteps)}
-  <h2>${evidenceCoverage.length ? "十三" : "十二"}、家长沟通摘要</h2>
+  ${sectionList(evidenceCoverage.length ? "十一、近期表现变化" : "十、近期表现变化", learningTrends)}
+  ${sectionList(evidenceCoverage.length ? "十二、家校协同建议" : "十一、家校协同建议", homeSchoolCollaboration)}
+  ${sectionList(evidenceCoverage.length ? "十三、家长下一步" : "十二、家长下一步", parentNextSteps)}
+  <h2>${evidenceCoverage.length ? "十四" : "十三"}、家长沟通摘要</h2>
   ${detailCard(sections.parentCommunicationSummary)}
   <div class="foot">本档案由教师确认后生成，可打印、保存或由老师人工发送给家长。</div>
 </section>
@@ -367,6 +395,7 @@ function buildPublishedView(pack) {
       );
     }),
     focusSubjects,
+    learningTrends: (pack.learningTrends || []).map(({ teacherNextCheck, ...trend }) => trend),
     correctionLoop: buildCorrectionLoop(pack),
     stableGrowth: buildStableGrowth(pack),
     tutoringFocus: buildTutoringFocus(pack, focusSubjects),
@@ -413,6 +442,14 @@ function buildPrintView(pack, publishedView) {
 
   sections.evidenceCoverage = buildEvidenceCoverageForPrint(pack);
   if (!weekly) {
+    sections.learningTrends = (publishedView.learningTrends || []).map((item) => ({
+      title: `${item.subject}｜${item.knowledgePoint}`,
+      text: item.comparisonText,
+      evidence: `前期 ${formatTrendRate(item.previous.scoreRate)}（${item.previous.submissionCount} 份批改）→ 本期 ${formatTrendRate(item.current.scoreRate)}（${item.current.submissionCount} 份批改）`,
+      nextStep: item.parentAssist,
+      evidenceRefs: item.evidenceRefs,
+      confidence: item.status === "insufficient" ? "weak" : "supported"
+    }));
     sections.subjectAbilityMap = buildSubjectAbilityMapForPrint(pack, publishedView);
     sections.commonCauseAnalysis = buildCommonCauseAnalysisForPrint(publishedView);
     sections.learningProcess = buildLearningProcessForPrint(pack, publishedView);
@@ -443,12 +480,25 @@ function buildTeacherReview(pack) {
       ...pack.mistakeEvidence,
       ...pack.qaEvidence,
       ...pack.classroomEvidence,
-      ...pack.teacherObservationEvidence
+      ...pack.teacherObservationEvidence,
+      ...(pack.learningTrends || []).flatMap((trend) => trend.evidenceRefs.map((id) => ({
+        id,
+        type: "grading_trend",
+        subject: trend.subject,
+        title: `${trend.subject}｜${trend.knowledgePoint}`,
+        at: trend.current.periodLabel,
+        summary: trend.comparisonText,
+        confidence: "confirmed"
+      })))
     ],
     sampleLimitNotes: buildSampleLimitNotes(pack),
     conflictNotes,
     pendingConfirmations: pack.blockedEvidence,
     internalRisks: pack.blockedEvidence.map((item) => `${item.type}:${item.id}:${item.reason}`),
+    learningTrends: (pack.learningTrends || []).map((item) => ({
+      ...item,
+      teacherNextCheck: item.teacherNextCheck
+    })),
     publishChecklist: [
       withEvidence("已剔除低置信或未复核来源。", pack.blockedEvidence.map((item) => item.id), pack.blockedEvidence.length ? "supported" : "confirmed"),
       withEvidence("发布前请确认周/月档案措辞适合学生和家长查看。", [], "supported")
@@ -808,6 +858,205 @@ function filterByPeriod(items, period, getDate) {
     const date = toDate(getDate(item));
     return !date || (date >= start && date <= end);
   });
+}
+
+function buildLearningTrends(submissions, period) {
+  const currentRange = monthRangeFromPeriod(period);
+  const previousRange = monthRange(currentRange.year, currentRange.month - 1);
+  const groups = new Map();
+  const subjectGroups = new Map();
+  const seenSubmissionIds = new Set();
+
+  for (const submission of Array.isArray(submissions) ? submissions : []) {
+    const submissionId = typeof submission.id === "string" ? submission.id.trim() : "";
+    if (!submissionId || seenSubmissionIds.has(submissionId)) continue;
+    const submittedAt = toDate(submission.submittedAt);
+    if (!submittedAt) continue;
+    const bucket = inRange(submittedAt, currentRange) ? "current" : inRange(submittedAt, previousRange) ? "previous" : "";
+    if (!bucket) continue;
+
+    const result = safeObject(submission.grading?.result);
+    if (
+      !["GRADED", "REVIEWED"].includes(submission.status)
+      || result.needsTeacherReview === true
+      || result.archiveEligible !== true
+      || result.provisionalScore != null
+      || String(result.confidence || "").toLowerCase() === "low"
+    ) continue;
+
+    const subject = subjectFromValue(submission.assignment?.subject?.name || submission.assignment?.metadata?.subject);
+    if (!subject) continue;
+    seenSubmissionIds.add(submissionId);
+    const questions = Array.isArray(result.questionResults)
+      ? result.questionResults
+      : Array.isArray(result.questions) ? result.questions : [];
+    for (const question of questions) {
+      if (question?.reviewedByTeacher !== true) continue;
+      const knowledgePoint = normalizeTrendKnowledgePoint(question?.knowledgePoint || question?.point);
+      const score = finiteNumber(question?.score);
+      const maxScore = finiteNumber(question?.maxScore);
+      if (!knowledgePoint || score == null || maxScore == null || maxScore <= 0 || score < 0 || score > maxScore) continue;
+      const key = `${subject}\u0000${knowledgePoint}`;
+      addTrendObservation(groups, key, {
+        subject,
+        knowledgePoint,
+        scope: "knowledge_point",
+        current: createTrendBucket(currentRange),
+        previous: createTrendBucket(previousRange)
+      }, bucket, submissionId, score, maxScore);
+      addTrendObservation(subjectGroups, subject, {
+        subject,
+        knowledgePoint: "学科整体",
+        scope: "subject",
+        current: createTrendBucket(currentRange),
+        previous: createTrendBucket(previousRange)
+      }, bucket, submissionId, score, maxScore);
+    }
+  }
+
+  const detailedTrends = [...groups.values()].map((group) => finalizeLearningTrend(group));
+  const subjectTrends = [...subjectGroups.values()].map((group) => finalizeLearningTrend(group));
+  const trends = [];
+  for (const subjectTrend of subjectTrends) {
+    const subjectDetails = detailedTrends.filter((item) => item.subject === subjectTrend.subject);
+    const hasComparableKnowledgePoint = subjectDetails.some((item) => item.status !== "insufficient");
+    if (subjectTrend.status !== "insufficient" && !hasComparableKnowledgePoint) {
+      trends.push(subjectTrend);
+    } else {
+      trends.push(...subjectDetails);
+    }
+  }
+  return trends
+    .sort((a, b) => (
+      a.subject.localeCompare(b.subject, "zh-CN")
+      || a.knowledgePoint.localeCompare(b.knowledgePoint, "zh-CN")
+    ));
+}
+
+function addTrendObservation(groups, key, template, bucket, submissionId, score, maxScore) {
+  const group = groups.get(key) || template;
+  const bucketData = group[bucket];
+  bucketData.earnedScore += score;
+  bucketData.maxScore += maxScore;
+  bucketData.questionCount += 1;
+  if (!bucketData.submissionIds.has(submissionId)) {
+    bucketData.submissionIds.add(submissionId);
+    bucketData.submissionRefs.push(submissionId);
+  }
+  groups.set(key, group);
+}
+
+function monthRangeFromPeriod(period) {
+  const [year, month] = String(period.start || "").split("-").map(Number);
+  return monthRange(Number.isFinite(year) ? year : new Date().getUTCFullYear(), Number.isFinite(month) ? month - 1 : new Date().getUTCMonth());
+}
+
+function monthRange(year, month) {
+  const normalizedYear = year + Math.floor(month / 12);
+  const normalizedMonth = ((month % 12) + 12) % 12;
+  const start = new Date(Date.UTC(normalizedYear, normalizedMonth, 1));
+  const end = new Date(Date.UTC(normalizedYear, normalizedMonth + 1, 0));
+  return {
+    year: normalizedYear,
+    month: normalizedMonth,
+    start: `${normalizedYear}-${String(normalizedMonth + 1).padStart(2, "0")}-01`,
+    end: `${normalizedYear}-${String(normalizedMonth + 1).padStart(2, "0")}-${String(end.getUTCDate()).padStart(2, "0")}`,
+    periodLabel: `${normalizedYear}年${normalizedMonth + 1}月`
+  };
+}
+
+function inRange(date, range) {
+  const start = new Date(`${range.start}T00:00:00.000${PROJECT_TIME_ZONE_OFFSET}`);
+  const end = new Date(`${range.end}T23:59:59.999${PROJECT_TIME_ZONE_OFFSET}`);
+  return date >= start && date <= end;
+}
+
+function createTrendBucket(range) {
+  return {
+    periodLabel: range.periodLabel,
+    earnedScore: 0,
+    maxScore: 0,
+    questionCount: 0,
+    submissionIds: new Set(),
+    submissionRefs: []
+  };
+}
+
+function finalizeLearningTrend(group) {
+  const current = finalizeTrendBucket(group.current);
+  const previous = finalizeTrendBucket(group.previous);
+  const enoughSamples = current.submissionCount >= 2 && previous.submissionCount >= 2;
+  const deltaPercentagePoints = enoughSamples
+    ? roundTrendNumber(current.scoreRate - previous.scoreRate)
+    : null;
+  const status = !enoughSamples
+    ? "insufficient"
+    : deltaPercentagePoints > 5
+      ? "improving"
+      : deltaPercentagePoints < -5 ? "declining" : "stable";
+  const directionText = status === "improving" ? "提升" : status === "declining" ? "下降" : "基本稳定";
+  const subjectLevel = group.scope === "subject";
+  const sampleLimit = subjectLevel
+    ? "前后批改的知识点范围和难度可能不同，以上只反映已确认样本的得分表现，不能直接判断整体能力进步或退步。"
+    : "以上只反映该知识点已确认样本的得分表现，题目难度可能不同，仍需老师结合后续练习确认。";
+  const comparisonText = enoughSamples
+    ? `本期得分率${current.scoreRate}%（${current.submissionCount} 份批改）较前期${previous.scoreRate}%（${previous.submissionCount} 份批改）${directionText} ${Math.abs(deltaPercentagePoints)} 个百分点。${sampleLimit}`
+    : `${current.periodLabel}与${previous.periodLabel}暂不能判断近期变化，至少需要每期 2 份独立批改（本期 ${current.submissionCount} 份，前期 ${previous.submissionCount} 份）。`;
+  const topic = subjectLevel ? `${group.subject}近期练习中一道题` : group.knowledgePoint;
+  const parentAssist = !current.submissionCount
+    ? "本期暂无可用批改记录，暂不安排具体家长任务，待老师补充记录后再沟通。"
+    : status === "improving"
+    ? `家长可以请孩子说说${topic}是怎样做对的，把孩子的说法反馈给老师。`
+    : status === "declining"
+      ? `家长可以请孩子说说${topic}卡在哪一步，把具体问题反馈给老师。`
+      : status === "stable"
+        ? `家长可以关注孩子能否说清${topic}的作答依据和步骤。`
+        : `样本还不足，家长先关注孩子能否说清${topic}的作答依据，暂不据此安排固定任务。`;
+  return {
+    subject: group.subject,
+    knowledgePoint: group.knowledgePoint,
+    scope: group.scope || "knowledge_point",
+    current,
+    previous,
+    deltaPercentagePoints,
+    status,
+    comparisonText,
+    parentAssist,
+    teacherNextCheck: subjectLevel
+      ? `下次由老师选取范围和难度相近的${group.subject}练习，核对具体知识点后再判断表现变化。`
+      : `下次由老师用同一知识点、难度相近的练习继续确认${group.knowledgePoint}的表现变化。`,
+    evidenceRefs: [...current.evidenceRefs, ...previous.evidenceRefs]
+  };
+}
+
+function finalizeTrendBucket(bucket) {
+  return {
+    periodLabel: bucket.periodLabel,
+    earnedScore: roundTrendNumber(bucket.earnedScore),
+    maxScore: roundTrendNumber(bucket.maxScore),
+    scoreRate: bucket.maxScore > 0 ? roundTrendNumber((bucket.earnedScore / bucket.maxScore) * 100) : null,
+    questionCount: bucket.questionCount,
+    submissionCount: bucket.submissionIds.size,
+    evidenceRefs: bucket.submissionRefs
+  };
+}
+
+function normalizeTrendKnowledgePoint(value) {
+  return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+}
+
+function finiteNumber(value) {
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return null;
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function roundTrendNumber(value) {
+  return Math.round(value * 10) / 10;
+}
+
+function formatTrendRate(value) {
+  return typeof value === "number" && Number.isFinite(value) ? `${value}%` : "暂无";
 }
 
 function buildFocusSubjects(pack) {

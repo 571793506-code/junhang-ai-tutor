@@ -68,10 +68,11 @@ Web 只提交学生、周期、阶段标签和教师编辑文本。服务端派�
 - `periodType`：`weekly` 或 `monthly`。
 - `profileType`：`weekly_growth` 或 `monthly_comprehensive_growth`。
 - `period`：周期类型、展示标签、开始日期和结束日期。
-- `publishedView`：学生/家长可见摘要，包含 `overview`、`subjectOverview`、`focusSubjects`、`correctionLoop`、`stableGrowth`、`tutoringFocus`、`parentNextSteps`、`timelinePreview`。
+- `publishedView`：学生/家长可见摘要，包含 `overview`、`subjectOverview`、`focusSubjects`、`correctionLoop`、`stableGrowth`、`tutoringFocus`、`parentNextSteps`、`timelinePreview` 和月度 `learningTrends`。
+- `learningTrends`：月度近期表现变化，只由服务端按教师确认批改计算本月与前月。优先按 `subject + knowledgePoint` 比较；同一学科没有任何知识点形成可比趋势、但学科整体每期至少有 2 份独立批改时，使用 `scope=subject`、`knowledgePoint=学科整体` 作为兜底。每项保留 `current`、`previous`、`deltaPercentagePoints`、`status`、`comparisonText`、`parentAssist`、`evidenceRefs`；每期不足 2 份独立批改时为 `status=insufficient`，变化值为 `null`，不得输出提升或下降结论。
 - `printView`：周/月综合成长档案打印模板，`templateType` 固定为 `comprehensive_growth_archive`，包含 `archiveInfo`、`comprehensiveSummary`、`subjectOverview`、`focusDirections`、`correctionLoop`、`stableGrowth`、`tutoringPlan`、`parentNextSteps`；月度综合档案额外包含 `evidenceCoverage`、`subjectAbilityMap`、`commonCauseAnalysis`、`learningProcess`、`homeSchoolCollaboration`、`parentCommunicationSummary`。
 - `printView.renderingPolicy.pdfTextSource` 固定为 `html_template`，`imagePreviewUsage` 固定为 `visual_reference_only`；正式打印或 PDF 正文必须由 HTML/PDF 模板渲染。
-- `teacherReview`：教师复核材料，包含样本不足说明、待确认来源、内部风险和发布清单。
+- `teacherReview`：教师复核材料，包含样本不足说明、待确认来源、内部风险和发布清单；月度 `learningTrends` 还保留仅教师可见的 `teacherNextCheck`。打印版 `printView.sections.learningTrends` 使用公开趋势的比例、样本数、比较说明和家长协助建议。
 - `profileEvidencePack`：证据包，包含任务、已复核批改、错题、问答、课堂互动、阶段报告、行为记录和 `blockedEvidence`。
 
 期中/期末阶段报告复用 `StudentReport.metadata.termReport`：
@@ -123,6 +124,9 @@ Web 只提交学生、周期、阶段标签和教师编辑文本。服务端派�
 - `blockedEvidence` 可给教师看，用于复核提示；不得进入学生/家长端 `publishedView`。
 - 合并 AI 正文时，递归核对 `evidenceRefs`：仅允许当前证据包已准入条目的 ID 或 `sourceRefs`，不得引用 `blockedEvidence`、未知 ID 或非数组引用，正文也不得使用 `confidence=blocked`。任一嵌套条目违规时，整份 AI 正文及公开摘要退回服务端基础草稿，并由基础正文重建 `printView`；不能只删违规条目，避免其错误前提残留在总览。仅在教师复核区说明回退，不追加模型调用，也不代替教师内容确认。
 - 同份批改及其错题条数不等于多次独立学习活动。真实草稿回退、引用校验通过与教学内容可用须分别记录；基础稿措辞仍需教师评价，缺少连续记录不得推断长期成长趋势。
+- 趋势得分率为有效逐题得分总和除以对应满分总和；独立提交份数只是样本门槛，不是得分率分母。提交状态须为 `REVIEWED/GRADED`、`archiveEligible=true`，且非低置信、无待复核或暂定分；逐题须 `reviewedByTeacher=true`、知识点有效且 `0≤score≤maxScore`、满分大于 0。缺失/空评分和重复提交不得增加统计。
+- 知识点趋势优先，学科整体兜底只用于知识点不重复但学科样本足够的月度档案；前后周期任何一方不足 2 份独立批改时，只展示“暂不能判断”和样本数。得分率差值大于 5 个百分点为 `improving`、小于 -5 为 `declining`，其余为 `stable`。只描述已确认样本表现，说明范围或难度差异，不能据此推断长期能力变化；本期没有可用批改时不安排具体家长任务。
+- AI 草稿合并不得覆盖服务端 `publishedView.learningTrends` 或教师趋势；前月证据引用允许用于趋势溯源，不自动扩大其他正文的证据范围。周档案不展示月度趋势；缺失比例使用“暂无/待定”，不能渲染 `null%`。
 - 问答只接受精确匹配 `schemaVersion=qa-learning-signal-v1` 的记录；模型 `safetyStatus` 必须经服务端校验和规范化，服务端计算的最终 actor、身份、可用性、结构和 `profileEligibility` 任一不满足，或来源日期无效，均不得进入公开证据。
 - 教师测试、匿名或身份未确认的课堂问答、不可用、不安全、结构异常、日期无效和 legacy 记录只进入教师侧最小 `blockedEvidence`，不得包含完整问题、回答、学习信号或模型运行数据。
 - 单条来源问答只能形成 `weak` 辅助观察，不能提高 `mastery`、`weeklyScore` 或形成强结论；同一知识点至少两条合格信号可形成 `supported`，但仍不得替代教师确认的正式证据。

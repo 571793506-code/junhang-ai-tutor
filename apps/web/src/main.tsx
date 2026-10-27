@@ -3695,6 +3695,8 @@ function ProfileDraftStructuredReview({ snapshot }: { snapshot: Record<string, u
   const focusSubjects = recordList(publishedView.focusSubjects);
   const stableGrowth = recordList(publishedView.stableGrowth);
   const tutoringFocus = recordList(publishedView.tutoringFocus);
+  const learningTrends = recordList(publishedView.learningTrends);
+  const teacherLearningTrends = recordList(teacherReview.learningTrends);
   const checklist = recordList(teacherReview.publishChecklist);
   const pending = recordList(teacherReview.pendingConfirmations);
   const sampleLimitNotes = stringList(teacherReview.sampleLimitNotes);
@@ -3722,6 +3724,8 @@ function ProfileDraftStructuredReview({ snapshot }: { snapshot: Record<string, u
         <ul>{tutoringFocus.length ? tutoringFocus.slice(0, 3).map((item, index) => <li key={index}>{evidenceText(item)}</li>) : <li>下次课先复盘本周期记录中的关键问题。</li>}</ul>
       </article>
     </div>
+    {learningTrends.length ? <div className="profile-trends-review"><div className="profile-trends-title"><strong>近期学习变化</strong><span>按教师确认批改计算</span></div><LearningTrendList items={learningTrends} /></div> : null}
+    {teacherLearningTrends.length ? <div className="profile-trends-review teacher-only"><div className="profile-trends-title"><strong>教师核验提示</strong><span>仅教师可见</span></div><LearningTrendList items={teacherLearningTrends} teacher /></div> : null}
     <div className="profile-review-checklist">
       {[...checklist.map(evidenceText), ...sampleLimitNotes, ...pending.map((item) => `${stringValue(item.title, "待确认来源")}：${stringValue(item.reason, "请老师复核。")}`)]
         .filter(Boolean)
@@ -3740,6 +3744,7 @@ function GrowthArchivePublishedView({ snapshot }: { snapshot?: Record<string, un
   const stableGrowth = recordList(publishedView.stableGrowth);
   const tutoringFocus = recordList(publishedView.tutoringFocus);
   const parentNextSteps = recordList(publishedView.parentNextSteps);
+  const learningTrends = recordList(publishedView.learningTrends);
   const timelinePreview = recordList(publishedView.timelinePreview);
   if (!Object.keys(publishedView).length) return null;
   return <div className="growth-archive-view">
@@ -3754,6 +3759,7 @@ function GrowthArchivePublishedView({ snapshot }: { snapshot?: Record<string, un
     <div className="growth-subject-grid">
       {subjectOverview.length ? subjectOverview.map((item, index) => <div key={index}><b>{stringValue(item.subject, "学习")}</b><span>{evidenceText(item)}</span></div>) : subjects.map((subject) => <div key={subject}><b>{subject}</b><span>本周期该科记录不足，继续观察。</span></div>)}
     </div>
+    {learningTrends.length ? <section className="growth-trends-panel"><div className="profile-trends-title"><strong>近期学习变化</strong><span>根据已确认批改记录</span></div><LearningTrendList items={learningTrends} /></section> : null}
     <div className="growth-module-grid">
       <ArchiveModule title="重点科目" items={focusSubjects.map((item) => `${stringValue(item.subject, "学习")}：${stringValue(item.whyFocus) || evidenceText(item)}`)} fallback="继续观察重点科目变化。" />
       <ArchiveModule title="错题与订正" items={correctionLoop.map(evidenceText)} fallback="本周期暂无可发布的订正闭环记录。" />
@@ -3771,6 +3777,32 @@ function ArchiveModule({ fallback, items, title }: { fallback: string; items: st
     <span>{title}</span>
     <ul>{visible.length ? visible.map((item, index) => <li key={index}>{item}</li>) : <li>{fallback}</li>}</ul>
   </article>;
+}
+
+function LearningTrendList({ items, teacher = false }: { items: Record<string, unknown>[]; teacher?: boolean }) {
+  return <div className="learning-trend-list">
+    {items.slice(0, 8).map((item, index) => {
+      const current = recordValue(item.current);
+      const previous = recordValue(item.previous);
+      const status = stringValue(item.status, "insufficient");
+      const statusLabel = status === "improving" ? "提升" : status === "declining" ? "下降" : status === "stable" ? "基本稳定" : "暂不能判断";
+      return <article className={`learning-trend-item trend-${status}`} key={`${stringValue(item.subject)}-${stringValue(item.knowledgePoint)}-${index}`}>
+        <div className="learning-trend-head"><strong>{stringValue(item.subject, "学习")} · {stringValue(item.knowledgePoint, "知识点")}</strong><span>{statusLabel}</span></div>
+        <p>{stringValue(item.comparisonText, "近期批改样本仍在积累，暂不能判断变化。")}</p>
+        <div className="learning-trend-metrics"><span>前期 {formatTrendRate(previous.scoreRate)}</span><span>本期 {formatTrendRate(current.scoreRate)}</span><span>{trendDeltaText(item.deltaPercentagePoints)}</span></div>
+        {teacher ? <p className="learning-trend-next">{stringValue(item.teacherNextCheck, "下次用同一知识点继续核验。")}</p> : <p className="learning-trend-assist">{stringValue(item.parentAssist, "家长先关注孩子能否说清作答依据，暂不据此安排固定任务。")}</p>}
+      </article>;
+    })}
+  </div>;
+}
+
+function formatTrendRate(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? `${value}%` : "待定";
+}
+
+function trendDeltaText(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "变化幅度待补充";
+  return `变化 ${value > 0 ? "+" : ""}${value} 个百分点`;
 }
 
 function TeacherStudentArchivePanel({ assignments, audit, corrections, logs, reports, student, tasks }: { assignments: AssignmentCard[]; audit: AdminAudit | null; corrections: CorrectionRecord[]; logs: LearningLog[]; reports: StudentReportCard[]; student: StudentProfile; tasks: LearningTaskCard[] }) {

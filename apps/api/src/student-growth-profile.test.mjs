@@ -674,6 +674,280 @@ test("monthly activity totals count a reviewed submission and its linked mistake
   );
 });
 
+function trendSubmission({ id, submittedAt, score, maxScore = 5, reviewedByTeacher = true, status = "REVIEWED" }) {
+  return {
+    id,
+    status,
+    submittedAt: new Date(submittedAt),
+    assignment: { title: "小数专项练习", subject: { name: "数学" }, metadata: {} },
+    grading: {
+      score,
+      result: {
+        score,
+        archiveEligible: status === "REVIEWED" || status === "GRADED",
+        needsTeacherReview: false,
+        confidence: "high",
+        questionResults: [{
+          id: `${id}-question`,
+          questionNo: "1",
+          knowledgePoint: "小数意义",
+          score,
+          maxScore,
+          reviewedByTeacher
+        }]
+      }
+    }
+  };
+}
+
+test("monthly profile compares teacher-confirmed score rates for the same knowledge point and retains parent guidance", () => {
+  const student = {
+    id: "trend-student",
+    displayName: "趋势学生",
+    submissions: [
+      trendSubmission({ id: "june-1", submittedAt: "2026-06-03T09:00:00+08:00", score: 3 }),
+      trendSubmission({ id: "june-2", submittedAt: "2026-06-17T09:00:00+08:00", score: 4 }),
+      trendSubmission({ id: "july-1", submittedAt: "2026-07-02T09:00:00+08:00", score: 4 }),
+      trendSubmission({ id: "july-2", submittedAt: "2026-07-04T09:00:00+08:00", score: 5 })
+    ]
+  };
+
+  const snapshot = buildStudentGrowthSnapshot(student, { periodType: "monthly", now });
+  const trend = snapshot.publishedView.learningTrends[0];
+
+  assert.equal(trend.subject, "数学");
+  assert.equal(trend.knowledgePoint, "小数意义");
+  assert.equal(trend.current.scoreRate, 90);
+  assert.equal(trend.current.questionCount, 2);
+  assert.equal(trend.current.submissionCount, 2);
+  assert.equal(trend.previous.scoreRate, 70);
+  assert.equal(trend.previous.questionCount, 2);
+  assert.equal(trend.previous.submissionCount, 2);
+  assert.equal(trend.deltaPercentagePoints, 20);
+  assert.equal(trend.status, "improving");
+  assert.deepEqual(trend.evidenceRefs, ["july-1", "july-2", "june-1", "june-2"]);
+  assert.match(trend.comparisonText, /90%.*70%.*20 个百分点/);
+  assert.ok(trend.parentAssist);
+  assert.equal(trend.teacherNextCheck, undefined);
+  assert.ok(snapshot.teacherReview.learningTrends[0].teacherNextCheck);
+  assert.ok(snapshot.teacherReview.evidenceItems.some((item) => item.id === "june-1"));
+  assert.ok(snapshot.printView.sections.learningTrends.some((item) => item.evidenceRefs.includes("june-1")));
+  assert.match(renderStudentGrowthProfilePrintHtml(student, snapshot), /近期表现变化/);
+});
+
+test("AI profile drafts cannot replace server-calculated learning trends", () => {
+  const student = {
+    id: "protected-trend-student",
+    displayName: "趋势保护学生",
+    submissions: [
+      trendSubmission({ id: "protected-june-1", submittedAt: "2026-06-03T09:00:00+08:00", score: 3 }),
+      trendSubmission({ id: "protected-june-2", submittedAt: "2026-06-17T09:00:00+08:00", score: 4 }),
+      trendSubmission({ id: "protected-july-1", submittedAt: "2026-07-02T09:00:00+08:00", score: 4 }),
+      trendSubmission({ id: "protected-july-2", submittedAt: "2026-07-04T09:00:00+08:00", score: 5 })
+    ]
+  };
+  const base = buildStudentGrowthSnapshot(student, { periodType: "monthly", now });
+  assert.ok(base.publishedView.learningTrends.length);
+  const merged = mergeStudentProfileAiDraft(base, {
+    publishedView: {
+      learningTrends: [{ subject: "数学", knowledgePoint: "小数意义", status: "improving", deltaPercentagePoints: 99, evidenceRefs: base.publishedView.learningTrends[0].evidenceRefs }]
+    }
+  });
+
+  assert.deepEqual(merged.publishedView.learningTrends, base.publishedView.learningTrends);
+  assert.match(merged.teacherReview.internalRisks.join("；"), /趋势.*服务端|服务端.*趋势/);
+});
+
+test("AI monthly prose cannot reuse previous-month trend sources as current evidence", () => {
+  const base = buildStudentGrowthSnapshot({
+    id: "period-boundary-student",
+    submissions: [
+      trendSubmission({ id: "boundary-june", submittedAt: "2026-06-17T09:00:00+08:00", score: 3 }),
+      trendSubmission({ id: "boundary-july", submittedAt: "2026-07-04T09:00:00+08:00", score: 5 })
+    ]
+  }, { periodType: "monthly", now });
+  const invalid = mergeStudentProfileAiDraft(base, { publishedView: { overview: {
+    text: "本月依据前月记录得出结论。", evidenceRefs: ["boundary-june"], confidence: "supported"
+  } } });
+  assert.deepEqual(invalid.publishedView.overview, base.publishedView.overview);
+  assert.match(invalid.teacherReview.internalRisks.join("；"), /来源引用.*未准入/);
+
+  const valid = mergeStudentProfileAiDraft(base, { publishedView: {
+    ...base.publishedView,
+    overview: { text: "本月仅根据当前已确认样本继续观察。", evidenceRefs: ["boundary-july"], confidence: "supported" }
+  } });
+  assert.equal(valid.publishedView.overview.text, "本月仅根据当前已确认样本继续观察。");
+  assert.deepEqual(valid.publishedView.learningTrends, base.publishedView.learningTrends);
+});
+
+test("previous-month-only trends do not assign parent tasks for an empty current month", () => {
+  const snapshot = buildStudentGrowthSnapshot({
+    id: "empty-current-month-student",
+    submissions: [trendSubmission({ id: "previous-only", submittedAt: "2026-06-17T09:00:00+08:00", score: 4 })]
+  }, { periodType: "monthly", now });
+  const trend = snapshot.publishedView.learningTrends[0];
+  assert.equal(trend.current.submissionCount, 0);
+  assert.equal(trend.current.scoreRate, null);
+  assert.equal(trend.status, "insufficient");
+  assert.match(trend.parentAssist, /暂不安排具体家长任务/);
+  assert.deepEqual(snapshot.publishedView.parentNextSteps, []);
+  assert.doesNotMatch(renderStudentGrowthProfilePrintHtml({}, snapshot), /null%/);
+});
+
+test("monthly profile marks a ten-point decline and treats an exact five-point change as stable", () => {
+  const decline = buildStudentGrowthSnapshot({
+    id: "decline-student",
+    displayName: "近期变化学生",
+    submissions: [
+      trendSubmission({ id: "decline-june-1", submittedAt: "2026-06-03T09:00:00+08:00", score: 16, maxScore: 20 }),
+      trendSubmission({ id: "decline-june-2", submittedAt: "2026-06-17T09:00:00+08:00", score: 16, maxScore: 20 }),
+      trendSubmission({ id: "decline-july-1", submittedAt: "2026-07-02T09:00:00+08:00", score: 14, maxScore: 20 }),
+      trendSubmission({ id: "decline-july-2", submittedAt: "2026-07-04T09:00:00+08:00", score: 14, maxScore: 20 })
+    ]
+  }, { periodType: "monthly", now });
+  const stable = buildStudentGrowthSnapshot({
+    id: "stable-student",
+    displayName: "基本稳定学生",
+    submissions: [
+      trendSubmission({ id: "stable-june-1", submittedAt: "2026-06-03T09:00:00+08:00", score: 16, maxScore: 20 }),
+      trendSubmission({ id: "stable-june-2", submittedAt: "2026-06-17T09:00:00+08:00", score: 16, maxScore: 20 }),
+      trendSubmission({ id: "stable-july-1", submittedAt: "2026-07-02T09:00:00+08:00", score: 15, maxScore: 20 }),
+      trendSubmission({ id: "stable-july-2", submittedAt: "2026-07-04T09:00:00+08:00", score: 15, maxScore: 20 })
+    ]
+  }, { periodType: "monthly", now });
+
+  assert.equal(decline.publishedView.learningTrends[0].status, "declining");
+  assert.equal(decline.publishedView.learningTrends[0].deltaPercentagePoints, -10);
+  assert.equal(stable.publishedView.learningTrends[0].status, "stable");
+  assert.equal(stable.publishedView.learningTrends[0].deltaPercentagePoints, -5);
+});
+
+test("monthly profile does not infer a trend from only one independent grading in either period", () => {
+  const student = {
+    id: "thin-trend-student",
+    displayName: "样本不足学生",
+    submissions: [
+      trendSubmission({ id: "june-only", submittedAt: "2026-06-17T09:00:00+08:00", score: 4 }),
+      trendSubmission({ id: "july-only", submittedAt: "2026-07-04T09:00:00+08:00", score: 5 })
+    ]
+  };
+
+  const snapshot = buildStudentGrowthSnapshot(student, { periodType: "monthly", now });
+  const trend = snapshot.publishedView.learningTrends[0];
+
+  assert.equal(trend.status, "insufficient");
+  assert.equal(trend.deltaPercentagePoints, null);
+  assert.match(trend.comparisonText, /至少需要每期 2 份独立批改/);
+  assert.match(snapshot.printView.sections.learningTrends[0].text, /暂不能判断/);
+});
+
+test("monthly trend aggregation excludes question results that were not teacher-reviewed", () => {
+  const student = {
+    id: "unreviewed-trend-student",
+    displayName: "待复核趋势学生",
+    submissions: [
+      trendSubmission({ id: "june-reviewed-1", submittedAt: "2026-06-03T09:00:00+08:00", score: 3 }),
+      trendSubmission({ id: "june-unreviewed", submittedAt: "2026-06-17T09:00:00+08:00", score: 5, reviewedByTeacher: false }),
+      trendSubmission({ id: "july-reviewed-1", submittedAt: "2026-07-02T09:00:00+08:00", score: 4 }),
+      trendSubmission({ id: "july-reviewed-2", submittedAt: "2026-07-04T09:00:00+08:00", score: 5 })
+    ]
+  };
+
+  const snapshot = buildStudentGrowthSnapshot(student, { periodType: "monthly", now });
+  const trend = snapshot.publishedView.learningTrends[0];
+
+  assert.equal(trend.status, "insufficient");
+  assert.equal(trend.previous.submissionCount, 1);
+  assert.equal(trend.evidenceRefs.includes("june-unreviewed"), false);
+  assert.equal(snapshot.teacherReview.evidenceItems.some((item) => item.id === "june-unreviewed" && item.type === "grading_trend"), false);
+});
+
+test("monthly trend falls back to subject-level comparison when knowledge points are not repeated", () => {
+  const submissionWithPoint = ({ id, submittedAt, score, knowledgePoint }) => {
+    const submission = trendSubmission({ id, submittedAt, score });
+    submission.grading.result.questionResults[0].knowledgePoint = knowledgePoint;
+    return submission;
+  };
+  const snapshot = buildStudentGrowthSnapshot({
+    id: "subject-fallback-student",
+    displayName: "学科趋势兜底学生",
+    submissions: [
+      submissionWithPoint({ id: "fallback-june-1", submittedAt: "2026-06-03T09:00:00+08:00", score: 3, knowledgePoint: "小数意义" }),
+      submissionWithPoint({ id: "fallback-june-2", submittedAt: "2026-06-17T09:00:00+08:00", score: 3, knowledgePoint: "小数比较" }),
+      submissionWithPoint({ id: "fallback-july-1", submittedAt: "2026-07-02T09:00:00+08:00", score: 5, knowledgePoint: "小数加法" }),
+      submissionWithPoint({ id: "fallback-july-2", submittedAt: "2026-07-04T09:00:00+08:00", score: 5, knowledgePoint: "小数减法" })
+    ]
+  }, { periodType: "monthly", now });
+
+  assert.equal(snapshot.publishedView.learningTrends.length, 1);
+  const trend = snapshot.publishedView.learningTrends[0];
+  assert.equal(trend.scope, "subject");
+  assert.equal(trend.knowledgePoint, "学科整体");
+  assert.equal(trend.previous.scoreRate, 60);
+  assert.equal(trend.current.scoreRate, 100);
+  assert.equal(trend.status, "improving");
+  assert.deepEqual(trend.evidenceRefs, ["fallback-july-1", "fallback-july-2", "fallback-june-1", "fallback-june-2"]);
+  assert.match(snapshot.printView.sections.learningTrends[0].evidence, /60%.*100%/);
+  assert.match(trend.comparisonText, /范围.*难度.*不.*能力/);
+  assert.doesNotMatch(trend.parentAssist, /学科整体.*步骤/);
+  assert.match(snapshot.teacherReview.learningTrends[0].teacherNextCheck, /范围.*难度/);
+});
+
+test("monthly trends exclude missing malformed and out-of-range question scores", () => {
+  for (const score of [null, undefined, "", "  ", false, [], {}, -1, 6, Infinity]) {
+    const snapshot = buildStudentGrowthSnapshot({
+      id: "invalid-score-student",
+      submissions: [
+        trendSubmission({ id: "valid-june", submittedAt: "2026-06-03T09:00:00+08:00", score: 3 }),
+        trendSubmission({ id: "invalid-june", submittedAt: "2026-06-17T09:00:00+08:00", score }),
+        trendSubmission({ id: "valid-july-1", submittedAt: "2026-07-02T09:00:00+08:00", score: 4 }),
+        trendSubmission({ id: "valid-july-2", submittedAt: "2026-07-04T09:00:00+08:00", score: 5 })
+      ]
+    }, { periodType: "monthly", now });
+    const trend = snapshot.publishedView.learningTrends[0];
+    assert.equal(trend.previous.submissionCount, 1, `invalid score: ${String(score)}`);
+    assert.equal(trend.previous.scoreRate, 60);
+    assert.equal(trend.status, "insufficient");
+  }
+});
+
+test("duplicate submission IDs cannot inflate monthly trend scores or counts", () => {
+  const previous = trendSubmission({ id: "duplicate-june", submittedAt: "2026-06-03T09:00:00+08:00", score: 3 });
+  const snapshot = buildStudentGrowthSnapshot({
+    id: "duplicate-trend-student",
+    submissions: [previous, structuredClone(previous),
+      trendSubmission({ id: "other-june", submittedAt: "2026-06-17T09:00:00+08:00", score: 5 }),
+      trendSubmission({ id: "duplicate-july-1", submittedAt: "2026-07-02T09:00:00+08:00", score: 4 }),
+      trendSubmission({ id: "duplicate-july-2", submittedAt: "2026-07-04T09:00:00+08:00", score: 5 })
+    ]
+  }, { periodType: "monthly", now });
+  const trend = snapshot.publishedView.learningTrends[0];
+  assert.equal(trend.previous.earnedScore, 8);
+  assert.equal(trend.previous.maxScore, 10);
+  assert.equal(trend.previous.questionCount, 2);
+  assert.equal(trend.previous.submissionCount, 2);
+  assert.equal(trend.previous.scoreRate, 80);
+});
+
+test("insufficient trend print evidence uses text instead of null percent", () => {
+  const snapshot = buildStudentGrowthSnapshot({
+    id: "null-rate-student",
+    displayName: "无比例趋势学生",
+    submissions: [trendSubmission({ id: "null-rate-current", submittedAt: "2026-07-04T09:00:00+08:00", score: 5 })]
+  }, { periodType: "monthly", now });
+
+  assert.equal(snapshot.publishedView.learningTrends.length, 1);
+  assert.match(snapshot.printView.sections.learningTrends[0].evidence, /前期 暂无.*本期 100%/);
+  assert.doesNotMatch(renderStudentGrowthProfilePrintHtml({}, snapshot), /null%/);
+});
+
+test("weekly profiles omit monthly score trends", () => {
+  const snapshot = buildStudentGrowthSnapshot(studentFixture(), { periodType: "weekly", now });
+
+  assert.deepEqual(snapshot.publishedView.learningTrends, []);
+  assert.equal(snapshot.printView.sections.learningTrends, undefined);
+});
+
 test("monthly focus summarizes multiple linked mistake causes and retains each mistake reference", () => {
   const snapshot = buildStudentGrowthSnapshot(
     monthlyProfileWithOneGradingAndLinkedMistakes(),

@@ -107,7 +107,10 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 教师端生成待复核档案草稿。
   - 请求字段：`periodType`，可选值为 `weekly` 或 `monthly`；默认 `weekly`。
   - 周档案对应 `profileType=weekly_growth`，月度综合档案对应 `profileType=monthly_comprehensive_growth`。
-  - 返回教师可见结构：`period`, `publishedView`, `teacherReview`, `profileEvidencePack`, `sourceCounts`, `timeline`, `narrative`。
+  - 返回教师可见结构：`period`, `publishedView`, `teacherReview`, `profileEvidencePack`, `sourceCounts`, `timeline`, `narrative`。月度 `publishedView.learningTrends` 由服务端按教师确认批改计算近期提升、下降或基本稳定，不能由 AI 草稿覆盖。
+  - `learningTrends` 优先按相同 `subject + knowledgePoint` 比较；若知识点没有形成可比趋势，但同一学科前后周期各有至少 2 份独立的教师确认批改，则返回 `scope=subject`、`knowledgePoint=学科整体` 的学科整体兜底。每项包含 `current`、`previous`、`deltaPercentagePoints`、`status`、`comparisonText`、`parentAssist`、`evidenceRefs`；样本不足时 `status=insufficient`、变化值为 `null`，展示层使用“暂无/待定”，不得拼接为 `null%`。
+  - `current/previous` 包含 `periodLabel/earnedScore/maxScore/scoreRate/questionCount/submissionCount/evidenceRefs`；得分率按有效题目总得分/总满分计算，本月与前月各至少 2 份独立批改才判断变化，差值大于 5 个百分点为 `improving`、小于 -5 为 `declining`，其余为 `stable`。仅纳入 `REVIEWED/GRADED`、`archiveEligible=true`、无待复核/暂定分且非低置信的批改，以及教师逐题确认的有效评分；缺失、越界评分和重复提交不计入。
+  - 趋势说明必须保留样本范围/难度限制，不等同于长期能力变化。`teacherReview.learningTrends` 额外包含仅教师可见的 `teacherNextCheck`；月度 `printView.sections.learningTrends` 复用公开趋势。本期没有可用批改时不安排具体家长任务；周档案的公开趋势为空、打印不含该节。AI合并不能覆盖服务端趋势，发布和正式打印仍须教师确认。
   - 周/月档案统一使用综合成长档案模板，不提供单科独立模板入口。
   - 返回 `printView` 打印模板结构，用于教师端审查后打印、保存或后续生成 PDF。`printView.templateType=comprehensive_growth_archive`，`printView.renderingPolicy.pdfTextSource=html_template`，`printView.renderingPolicy.imagePreviewUsage=visual_reference_only`。
   - `profileEvidencePack` 由任务、已复核批改、错题、阶段报告、课堂互动、AI 问答、语音互动和 `teacherObservationEvidence` 组成。通用 `BehaviorEvent` 仅作为审计与原始日志，不直接进入档案；课堂互动以受控的 `VoiceInteraction` 链路进入。`teacherObservationEvidence` 只接收 `teacher-observation-v1` 的教师确认每日观察，保留分科表现与下次辅导动作；它进入教师侧草稿、重点科目、时间线及周/月打印证据覆盖，但单条观察不得提高掌握度或分数，也不自动发布给学生或家长。问答只接受服务端计算合格且精确匹配 `qa-learning-signal-v1` 的记录；教师测试、匿名或身份未确认课堂、不可用、不安全、结构异常、日期无效和 legacy 问答排除在公开证据外，并仅以最小原因摘要进入教师侧 `blockedEvidence`。
@@ -184,6 +187,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
     "stableGrowth": [],
     "tutoringFocus": [],
     "parentNextSteps": [],
+    "learningTrends": [],
     "timelinePreview": []
   },
   "printView": {
@@ -212,6 +216,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
     "sampleLimitNotes": [],
     "pendingConfirmations": [],
     "internalRisks": [],
+    "learningTrends": [],
     "publishChecklist": []
   },
   "profileEvidencePack": {
