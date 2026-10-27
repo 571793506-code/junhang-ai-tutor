@@ -120,6 +120,8 @@ Web 只提交学生、周期、阶段标签和教师编辑文本。服务端派�
 - 缺少某学科记录时，只写“记录不足，继续观察”，不要补编表现。
 - `REVIEWED` 以外的批改、`needsTeacherReview=true`、`archiveEligible=false`、低置信 OCR、仅有 `provisionalScore` 的结果进入 `blockedEvidence`。
 - `blockedEvidence` 可给教师看，用于复核提示；不得进入学生/家长端 `publishedView`。
+- 合并 AI 正文时，递归核对 `evidenceRefs`：仅允许当前证据包已准入条目的 ID 或 `sourceRefs`，不得引用 `blockedEvidence`、未知 ID 或非数组引用，正文也不得使用 `confidence=blocked`。任一嵌套条目违规时，整份 AI 正文及公开摘要退回服务端基础草稿，并由基础正文重建 `printView`；不能只删违规条目，避免其错误前提残留在总览。仅在教师复核区说明回退，不追加模型调用，也不代替教师内容确认。
+- 同份批改及其错题条数不等于多次独立学习活动。真实草稿回退、引用校验通过与教学内容可用须分别记录；基础稿措辞仍需教师评价，缺少连续记录不得推断长期成长趋势。
 - 问答只接受精确匹配 `schemaVersion=qa-learning-signal-v1` 的记录；模型 `safetyStatus` 必须经服务端校验和规范化，服务端计算的最终 actor、身份、可用性、结构和 `profileEligibility` 任一不满足，或来源日期无效，均不得进入公开证据。
 - 教师测试、匿名或身份未确认的课堂问答、不可用、不安全、结构异常、日期无效和 legacy 记录只进入教师侧最小 `blockedEvidence`，不得包含完整问题、回答、学习信号或模型运行数据。
 - 单条来源问答只能形成 `weak` 辅助观察，不能提高 `mastery`、`weeklyScore` 或形成强结论；同一知识点至少两条合格信号可形成 `supported`，但仍不得替代教师确认的正式证据。

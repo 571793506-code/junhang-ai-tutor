@@ -1153,6 +1153,52 @@ test("mergeStudentProfileAiDraft only merges safe structured AI fields", () => {
   assert.equal(studentView.publishedView.focusSubjects[0].modelRunId, undefined);
 });
 
+test("profile draft rejects the entire AI public narrative when any nested claim uses inadmissible evidence", () => {
+  const base = buildStudentGrowthSnapshot(studentFixture(), { periodType: "weekly", now });
+  for (const claim of [
+    { text: "UNSAFE_PENDING_CLAIM", evidenceRefs: ["sub_blocked"], confidence: "supported" },
+    { text: "UNSAFE_UNKNOWN_CLAIM", evidenceRefs: ["invented-source"], confidence: "confirmed" },
+    { text: "UNSAFE_BLOCKED_CLAIM", evidenceRefs: ["sub_ok"], confidence: "blocked" },
+    { text: "UNSAFE_MALFORMED_REFS", evidenceRefs: "sub_ok", confidence: "confirmed" }
+  ]) {
+    const input = structuredClone(base);
+    const merged = mergeStudentProfileAiDraft(input, {
+      publishedView: {
+        overview: { text: "UNSAFE_OVERVIEW_PENDING", evidenceRefs: ["sub_ok"], confidence: "supported" },
+        tutoringFocus: [claim]
+      },
+      teacherReview: { internalRisks: ["Teacher-only model suggestion"] }
+    });
+    assert.deepEqual(merged.publishedView, base.publishedView);
+    assert.deepEqual(merged.narrative, base.narrative);
+    assert.deepEqual(merged.printView, base.printView);
+    assert.ok(merged.teacherReview.internalRisks.some((item) => typeof item === "string" && item.includes("来源引用")));
+    assert.equal(JSON.stringify(filterStudentProfileSnapshot(merged, "parent")).includes("UNSAFE_"), false);
+    assert.deepEqual(input, base);
+  }
+});
+
+test("profile draft preserves admitted evidence IDs and grouped source references", () => {
+  const student = studentFixture();
+  student.reports = [{ id: "report_ok", title: "Teacher report", content: "Reviewed report", createdAt: now }];
+  const base = buildStudentGrowthSnapshot(student, { periodType: "weekly", now });
+  const pack = base.profileEvidencePack;
+  const refs = [
+    ...pack.taskEvidence, ...pack.gradingEvidence, ...pack.mistakeEvidence,
+    ...pack.qaEvidence, ...pack.classroomEvidence, ...pack.teacherObservationEvidence,
+    ...pack.reportEvidence
+  ].flatMap((item) => [item.id, ...(item.sourceRefs || [])]).filter(Boolean);
+  assert.ok(refs.includes("report_ok"));
+  assert.ok(refs.includes("qa_eligible_1"));
+  for (const ref of refs) {
+    const merged = mergeStudentProfileAiDraft(base, {
+      publishedView: { overview: { text: "Admitted source summary", evidenceRefs: [ref], confidence: "supported" } }
+    });
+    assert.equal(merged.publishedView.overview.text, "Admitted source summary", ref);
+    assert.equal(merged.teacherReview.internalRisks.some((item) => typeof item === "string" && item.includes("来源引用")), false);
+  }
+});
+
 test("student profile AI prompt requires structured growth archive JSON", () => {
   const runtime = fs.readFileSync(new URL("../../../packages/ai/src/runtime.js", import.meta.url), "utf8");
 

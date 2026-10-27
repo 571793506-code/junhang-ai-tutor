@@ -204,18 +204,51 @@ export function buildInteractionEvidence(qaSessions = [], voiceInteractions = []
 
 export function mergeStudentProfileAiDraft(baseSnapshot, aiDraft) {
   const base = safeObject(baseSnapshot);
-  const draft = safeObject(aiDraft);
+  const incoming = safeObject(aiDraft);
+  const rejectedPublicView = hasInadmissibleProfileEvidence(incoming.publishedView, base.profileEvidencePack);
+  const draft = rejectedPublicView ? { ...incoming, publishedView: undefined } : incoming;
   let merged = {
     ...base,
     publishedView: mergePublishedView(base.publishedView, draft.publishedView),
     teacherReview: mergeTeacherReview(base.teacherReview, draft.teacherReview),
-    narrative: mergeNarrative(base, draft)
+    narrative: rejectedPublicView ? base.narrative : mergeNarrative(base, draft)
   };
+  if (rejectedPublicView) {
+    merged.teacherReview = {
+      ...merged.teacherReview,
+      internalRisks: [
+        ...(merged.teacherReview.internalRisks || []),
+        "AI正文的来源引用包含未准入、未知或格式异常的证据，已保留服务端基础草稿，请教师核对。"
+      ]
+    };
+  }
 
   if (draft.profileType === base.profileType) merged.profileType = draft.profileType;
   if (isMatchingPeriod(base.period, draft.period)) merged.period = base.period;
   if (base.profileEvidencePack) merged = { ...merged, printView: buildPrintView(base.profileEvidencePack, merged.publishedView) };
   return removeInternalFields(merged);
+}
+
+function hasInadmissibleProfileEvidence(view, pack) {
+  if (!pack || !view || typeof view !== "object") return false;
+  const evidence = [
+    ...pack.taskEvidence, ...pack.gradingEvidence, ...pack.mistakeEvidence,
+    ...pack.qaEvidence, ...pack.classroomEvidence, ...pack.teacherObservationEvidence,
+    ...pack.reportEvidence
+  ];
+  const allowed = new Set(evidence.flatMap((item) => [item.id, ...(item.sourceRefs || [])]).filter(Boolean));
+  const blocked = new Set((pack.blockedEvidence || []).map((item) => item.id));
+  const invalid = (value) => {
+    if (!value || typeof value !== "object") return false;
+    if (Array.isArray(value)) return value.some(invalid);
+    if (value.confidence === "blocked") return true;
+    if (Object.hasOwn(value, "evidenceRefs")) {
+      if (!Array.isArray(value.evidenceRefs)) return true;
+      if (value.evidenceRefs.some((ref) => typeof ref !== "string" || blocked.has(ref) || !allowed.has(ref))) return true;
+    }
+    return Object.values(value).some(invalid);
+  };
+  return invalid(view);
 }
 
 export function renderStudentGrowthProfilePrintHtml(student, snapshot) {
