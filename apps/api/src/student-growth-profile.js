@@ -225,6 +225,9 @@ export function mergeStudentProfileAiDraft(baseSnapshot, aiDraft) {
 
   if (draft.profileType === base.profileType) merged.profileType = draft.profileType;
   if (isMatchingPeriod(base.period, draft.period)) merged.period = base.period;
+  if (base.profileEvidencePack && !hasProfileEvidence(base.profileEvidencePack)) {
+    merged.publishedView = { ...merged.publishedView, parentNextSteps: [] };
+  }
   if (base.profileEvidencePack) merged = { ...merged, printView: buildPrintView(base.profileEvidencePack, merged.publishedView) };
   return removeInternalFields(merged);
 }
@@ -401,7 +404,7 @@ function buildPrintView(pack, publishedView) {
     sections.subjectAbilityMap = buildSubjectAbilityMapForPrint(pack, publishedView);
     sections.commonCauseAnalysis = buildCommonCauseAnalysisForPrint(publishedView);
     sections.learningProcess = buildLearningProcessForPrint(pack, publishedView);
-    sections.homeSchoolCollaboration = buildHomeSchoolCollaborationForPrint(publishedView);
+    sections.homeSchoolCollaboration = hasProfileEvidence(pack) ? buildHomeSchoolCollaborationForPrint(publishedView) : [];
   }
 
   return {
@@ -450,6 +453,7 @@ function buildPrintSummaryText(pack, publishedView) {
 }
 
 function buildParentCommunicationSummary(pack, publishedView) {
+  if (!hasProfileEvidence(pack)) return "本周期可用学习记录不足，暂无具体家庭配合任务，待教师补充记录后再沟通。";
   const periodName = pack.period.type === "weekly" ? "本周" : "本月";
   const focus = publishedView.focusSubjects?.[0];
   const parentStep = publishedView.parentNextSteps?.[0]?.text || "在家短时间复述错因和订正步骤。";
@@ -883,6 +887,7 @@ function buildTutoringFocus(pack, focusSubjects) {
 }
 
 function buildParentNextSteps(pack, focusSubjects) {
+  if (!hasProfileEvidence(pack)) return [];
   const focus = focusSubjects[0];
   if (!focus) return [withEvidence("每周看一次订正记录，只问错在哪里、下次怎么避免。", [], "weak")];
   return [withEvidence(
@@ -970,6 +975,11 @@ function buildMastery(pack) {
 function computeScore(pack) {
   const total = pack.taskEvidence.length + pack.gradingEvidence.length + pack.mistakeEvidence.length;
   return Math.min(95, 65 + total * 4);
+}
+
+function hasProfileEvidence(pack) {
+  return ["taskEvidence", "gradingEvidence", "mistakeEvidence", "qaEvidence", "classroomEvidence", "teacherObservationEvidence", "reportEvidence"]
+    .some((key) => pack[key]?.length > 0);
 }
 
 function collectRefs(pack) {

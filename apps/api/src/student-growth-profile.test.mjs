@@ -1144,6 +1144,7 @@ test("mergeStudentProfileAiDraft only merges safe structured AI fields", () => {
   const studentView = filterStudentProfileSnapshot(merged, "student");
 
   assert.equal(merged.publishedView.overview.text, "本周能主动复述题意。");
+  assert.equal(merged.publishedView.parentNextSteps[0].text, "每天 5 分钟复述题意。");
   assert.equal(merged.teacherReview.internalRisks[0], "仅教师可见");
   assert.equal(studentView.teacherReview, undefined);
   assert.equal(studentView.profileEvidencePack, undefined);
@@ -1199,6 +1200,31 @@ test("profile draft preserves admitted evidence IDs and grouped source reference
   }
 });
 
+test("empty-period profiles keep light feedback without parent tasks in public or print content", () => {
+  for (const periodType of ["weekly", "monthly"]) {
+    const student = { id: "empty", displayName: "Test student", submissions: studentFixture().submissions.slice(1) };
+    const base = buildStudentGrowthSnapshot(student, { periodType, now });
+    assert.equal(base.profileEvidencePack.blockedEvidence.length, 1);
+    assert.deepEqual(base.publishedView.parentNextSteps, []);
+    const merged = mergeStudentProfileAiDraft(base, {
+      publishedView: {
+        overview: { text: "本周期记录不足，继续观察。", evidenceRefs: [], confidence: "weak" },
+        parentNextSteps: [{ text: "每天5分钟复述数学解题步骤。", evidenceRefs: [], confidence: "weak" }]
+      }
+    });
+    assert.equal(merged.publishedView.overview.text, "本周期记录不足，继续观察。");
+    assert.deepEqual(merged.publishedView.parentNextSteps, []);
+    for (const snapshot of [base, merged]) {
+      assert.deepEqual(snapshot.printView.sections.parentNextSteps, []);
+      assert.deepEqual(snapshot.printView.sections.homeSchoolCollaboration || [], []);
+      assert.equal(snapshot.printView.sections.parentCommunicationSummary.text, "本周期可用学习记录不足，暂无具体家庭配合任务，待教师补充记录后再沟通。");
+      const html = renderStudentGrowthProfilePrintHtml(student, snapshot);
+      assert.equal(html.includes("在家短时间复述"), false);
+      assert.equal(html.includes("每天5分钟"), false);
+    }
+  }
+});
+
 test("student profile AI prompt requires structured growth archive JSON", () => {
   const runtime = fs.readFileSync(new URL("../../../packages/ai/src/runtime.js", import.meta.url), "utf8");
 
@@ -1208,6 +1234,7 @@ test("student profile AI prompt requires structured growth archive JSON", () => 
   assert.match(runtime, /evidenceRefs/);
   assert.match(runtime, /confidence/);
   assert.match(runtime, /不要提及任何模型或供应商/);
+  assert.match(runtime, /无可准入学习记录时.*parentNextSteps.*空数组/);
 });
 
 test("weekly snapshot includes comprehensive-only print template", () => {
