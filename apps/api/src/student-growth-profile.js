@@ -62,17 +62,24 @@ export function buildProfileEvidencePack(student, options = {}) {
     summary: task.description || task.metadata?.draftText || "",
     confidence: task.status === "COMPLETED" || task.status === "REVIEWED" ? "supported" : "weak"
   }));
-  const mistakeEvidence = mistakes.map((mistake) => ({
-    id: mistake.id,
-    type: "mistake",
-    subject: subjectFromValue(mistake.subject),
-    title: mistake.knowledgePoint?.name || mistake.metadata?.point || mistake.prompt || "错题记录",
-    at: isoDate(mistake.createdAt),
-    cause: mistake.cause || "",
-    resolved: Boolean(mistake.masteryResolved),
-    nextPractice: mistake.metadata?.nextPractice || mistake.metadata?.suggestedPractice || "",
-    confidence: "confirmed"
-  }));
+  const mistakeEvidence = mistakes.map((mistake) => {
+    const metadata = safeObject(mistake.metadata);
+    const sourceSubmissionId = typeof metadata.sourceSubmissionId === "string"
+      ? metadata.sourceSubmissionId.trim()
+      : "";
+    return {
+      id: mistake.id,
+      type: "mistake",
+      subject: subjectFromValue(mistake.subject),
+      title: mistake.knowledgePoint?.name || metadata.point || mistake.prompt || "错题记录",
+      at: isoDate(mistake.createdAt),
+      cause: mistake.cause || "",
+      resolved: Boolean(mistake.masteryResolved),
+      nextPractice: metadata.nextPractice || metadata.suggestedPractice || "",
+      ...(sourceSubmissionId ? { sourceSubmissionId } : {}),
+      confidence: "confirmed"
+    };
+  });
   const { qaEvidence, classroomEvidence } = buildInteractionEvidence(qaSessions, voiceInteractions, { blockedEvidence });
   const teacherObservationEvidence = buildTeacherObservationEvidence(behaviorEvents);
 
@@ -109,7 +116,9 @@ export function buildProfileEvidencePack(student, options = {}) {
       classroomCount: classroomEvidence.length,
       teacherObservationCount: teacherObservationSourceCount(teacherObservationEvidence),
       hasBlockedEvidence: blockedEvidence.length > 0,
-      hasSparseEvidence: taskEvidence.length + gradingEvidence.length + mistakeEvidence.length + qaSessionCount({ qaEvidence }) + classroomEvidence.length + teacherObservationSourceCount(teacherObservationEvidence) < 3,
+      hasSparseEvidence: countProfileActivities([
+        ...taskEvidence, ...gradingEvidence, ...mistakeEvidence, ...classroomEvidence, ...teacherObservationEvidence
+      ]) + qaSessionCount({ qaEvidence }) < 3,
       missingSubjects: SUBJECTS.filter((subject) => !hasSubjectEvidence(subject, { taskEvidence, gradingEvidence, mistakeEvidence, qaEvidence, classroomEvidence, teacherObservationEvidence }))
     }
   };
@@ -331,13 +340,16 @@ li { margin: 2px 0; }
 function buildPublishedView(pack) {
   const periodName = pack.period.type === "weekly" ? "本周" : "本月";
   const focusSubjects = buildFocusSubjects(pack);
-  const evidenceTotal = pack.taskEvidence.length + pack.gradingEvidence.length + pack.mistakeEvidence.length + qaSessionCount(pack) + pack.classroomEvidence.length + teacherObservationSourceCount(pack.teacherObservationEvidence);
+  const evidenceTotal = countProfileActivities([
+    ...pack.taskEvidence, ...pack.gradingEvidence, ...pack.mistakeEvidence,
+    ...pack.classroomEvidence, ...pack.teacherObservationEvidence
+  ]) + qaSessionCount(pack);
   const sparse = evidenceTotal < 3;
   return {
     periodType: pack.period.type,
     periodLabel: pack.period.label,
     overview: withEvidence(
-      sparse
+      evidenceTotal === 0
         ? `${periodName}记录还在积累，先观察完成情况、订正过程和主动提问。`
         : `${periodName}已形成 ${evidenceTotal} 条可追踪学习记录，重点关注${focusSubjects[0]?.subject || "学习节奏"}的后续巩固。`,
       collectRefs(pack).slice(0, 3),
@@ -801,7 +813,9 @@ function filterByPeriod(items, period, getDate) {
 function buildFocusSubjects(pack) {
   const nonQaCounts = new Map();
   [...pack.gradingEvidence, ...pack.mistakeEvidence, ...pack.taskEvidence, ...pack.classroomEvidence, ...pack.teacherObservationEvidence].forEach((item) => {
-    nonQaCounts.set(item.subject, (nonQaCounts.get(item.subject) || 0) + 1);
+    const subjectKeys = nonQaCounts.get(item.subject) || new Set();
+    subjectKeys.add(profileActivityKey(item));
+    nonQaCounts.set(item.subject, subjectKeys);
   });
   const qaSourcesBySubject = new Map();
   pack.qaEvidence.forEach((item) => {
@@ -811,23 +825,32 @@ function buildFocusSubjects(pack) {
   });
   const rankSubjects = (entries) => [...entries]
     .filter(([subject]) => subject)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-CN"))
+    .sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0], "zh-CN"))
     .map(([subject]) => subject);
   const maxSubjects = pack.period.type === "weekly" ? 1 : 2;
   const selected = rankSubjects(nonQaCounts.entries()).slice(0, maxSubjects);
   if (selected.length < maxSubjects) {
-    const qaOnlySubjects = rankSubjects(
-      [...qaSourcesBySubject.entries()].map(([subject, sources]) => [subject, sources.size])
-    ).filter((subject) => !selected.includes(subject));
+    const qaOnlySubjects = rankSubjects(qaSourcesBySubject.entries())
+      .filter((subject) => !selected.includes(subject));
     selected.push(...qaOnlySubjects.slice(0, maxSubjects - selected.length));
   }
   if (!selected.length) selected.push("数学");
   return selected.map((subject) => {
     const refs = subjectRefs(pack, subject);
     const nonQaRefs = nonQaSubjectRefs(pack, subject);
-    const mistake = pack.mistakeEvidence.find((item) => item.subject === subject);
+    const mistakes = pack.mistakeEvidence.filter((item) => item.subject === subject);
+    const mistake = mistakes[0];
     const grading = pack.gradingEvidence.find((item) => item.subject === subject);
     const observation = pack.teacherObservationEvidence.find((item) => item.subject === subject);
+    const activityCount = nonQaSubjectActivityCount(pack, subject);
+    const mistakeTitles = uniqueText(mistakes.map((item) => item.title));
+    const mistakeSummary = summarizeMistakeCauses(mistakes);
+    const mistakeFocus = mistakeTitles.length > 1
+      ? `本周期多条错题涉及${joinWithinLimit(mistakeTitles, "、", 150)}`
+      : mistakeTitles[0] || "";
+    const mistakeNextStep = mistakes.length
+      ? summarizeMistakePractices(mistakes)
+      : "";
     if (!nonQaRefs.length) {
       return {
         subject,
@@ -841,12 +864,14 @@ function buildFocusSubjects(pack) {
     }
     return {
       subject,
-      whyFocus: observation?.title || mistake?.title || grading?.knowledgePoints?.[0] || `${subject}学习记录需要继续跟进`,
-      evidenceSummary: observation?.summary || grading?.summary || mistake?.cause || "结合本周期学习记录继续观察。",
-      abilityObservation: observation?.summary || mistake?.cause || grading?.summary || "先看完成过程和订正质量。",
-      nextClassAction: observation?.nextFocus || mistake?.nextPractice || "下次课先复盘本周期记录中的关键问题。",
+      whyFocus: mistakeFocus || observation?.title || grading?.knowledgePoints?.[0] || `${subject}学习记录需要继续跟进`,
+      evidenceSummary: uniqueText([observation?.summary, grading?.summary, mistakeSummary]).join("；") || "结合本周期学习记录继续观察。",
+      abilityObservation: mistakes.length > 1
+        ? `错题记录呈现多个具体失误点，掌握情况与订正后的稳定性仍需结合后续同类练习继续观察。`
+        : observation?.summary || mistakeSummary || grading?.summary || "先看完成过程和订正质量。",
+      nextClassAction: observation?.nextFocus || mistakeNextStep || "下次课先复盘本周期记录中的关键问题。",
       evidenceRefs: refs,
-      confidence: observation ? "confirmed" : nonQaRefs.length >= 2 ? "supported" : "weak"
+      confidence: observation ? "confirmed" : activityCount >= 2 ? "supported" : "weak"
     };
   });
 }
@@ -910,7 +935,9 @@ function buildTimelinePreview(pack) {
       title: item.title,
       subject: item.subject,
       at: item.at || item.date,
-      text: item.summary || item.cause || item.title,
+      text: item.type === "mistake"
+        ? summarizeMistakeCauses([item])
+        : item.summary || item.cause || item.title,
       evidenceRefs: [item.id],
       confidence: item.confidence || "supported"
     }));
@@ -973,7 +1000,9 @@ function buildMastery(pack) {
 }
 
 function computeScore(pack) {
-  const total = pack.taskEvidence.length + pack.gradingEvidence.length + pack.mistakeEvidence.length;
+  const total = countProfileActivities([
+    ...pack.taskEvidence, ...pack.gradingEvidence, ...pack.mistakeEvidence
+  ]);
   return Math.min(95, 65 + total * 4);
 }
 
@@ -1011,20 +1040,89 @@ function nonQaSubjectRefs(pack, subject) {
 }
 
 function masterySubjectRefs(pack, subject) {
-  return [...pack.taskEvidence, ...pack.gradingEvidence, ...pack.mistakeEvidence, ...pack.classroomEvidence]
+  return [...new Set([...pack.taskEvidence, ...pack.gradingEvidence, ...pack.mistakeEvidence, ...pack.classroomEvidence]
     .filter((item) => item.subject === subject)
-    .map((item) => item.id);
+    .map(profileActivityKey))];
 }
 
 function subjectEvidenceConfidence(pack, subject) {
   if (pack.teacherObservationEvidence.some((item) => item.subject === subject)) return "confirmed";
-  if (nonQaSubjectRefs(pack, subject).length) return "supported";
+  if (nonQaSubjectActivityCount(pack, subject)) return "supported";
   return pack.qaEvidence.some((item) => item.subject === subject && item.sessionCount >= 2) ? "supported" : "weak";
 }
 
 function subjectEvidenceCount(pack, subject) {
-  return nonQaSubjectRefs(pack, subject).length
+  return nonQaSubjectActivityCount(pack, subject)
     + uniqueQaSourceRefs(pack.qaEvidence.filter((item) => item.subject === subject)).length;
+}
+
+function nonQaSubjectActivityCount(pack, subject) {
+  return countProfileActivities([
+    ...pack.taskEvidence, ...pack.gradingEvidence, ...pack.mistakeEvidence,
+    ...pack.classroomEvidence, ...pack.teacherObservationEvidence
+  ].filter((item) => item.subject === subject));
+}
+
+function countProfileActivities(evidence) {
+  return new Set(evidence.map(profileActivityKey)).size;
+}
+
+function profileActivityKey(item) {
+  if (item.type === "grading") return `submission:${item.id}`;
+  if (item.type === "mistake" && item.sourceSubmissionId) return `submission:${item.sourceSubmissionId}`;
+  if (item.type === "teacher_observation" && item.sourceEventId) return `teacher_observation:${item.sourceEventId}`;
+  return `${item.type || "evidence"}:${item.id}`;
+}
+
+function uniqueText(values) {
+  return [...new Set(values.filter((value) => typeof value === "string").map((value) => value.trim()).filter(Boolean))];
+}
+
+function joinWithinLimit(values, separator, maxLength) {
+  const selected = [];
+  let length = 0;
+  for (const value of values) {
+    const nextLength = length === 0 ? value.length : length + separator.length + value.length;
+    if (nextLength > maxLength) break;
+    selected.push(value);
+    length = nextLength;
+  }
+  if (selected.length < values.length && selected.length) selected.push("等");
+  return selected.join(separator);
+}
+
+function summarizeMistakeCauses(mistakes) {
+  const labels = uniqueText(mistakes.flatMap((item) => {
+    const cause = item.cause || "";
+    const result = [];
+    if (/填空/.test(cause)) result.push("填空结果");
+    if (/合并算式|应用题/.test(cause)) result.push("应用题分步验算");
+    if (/改写|拆分|因数/.test(cause)) result.push("算式改写");
+    if (/漏掉|漏写|漏项/.test(cause)) result.push("漏项");
+    if (/负号|减号/.test(cause)) result.push("负号分配");
+    if (/答案与|结果不一致|结果核对/.test(cause)) result.push("结果核对");
+    if (/提取公因数|括号内|逆用/.test(cause)) result.push("逆用核对");
+    return result;
+  }));
+  if (!labels.length) return mistakes.length ? "错题记录需结合原题与作答继续核对。" : "";
+  const prefix = mistakes.length > 1 ? "多条错题主要涉及：" : "错题主要涉及：";
+  return `${prefix}${joinWithinLimit(labels, "、", 150)}。`;
+}
+
+function summarizeMistakePractices(mistakes) {
+  const actions = uniqueText(mistakes.flatMap((item) => {
+    const practice = `${item.cause || ""} ${item.nextPractice || ""}`;
+    const result = [];
+    if (/改写|拆分|因数|原式/.test(practice)) result.push("先核对算式改写");
+    if (/逐项|四格|每一项|漏/.test(practice)) result.push("逐项核对是否漏项");
+    if (/负号|减号/.test(practice)) result.push("检查负号分配");
+    if (/验算|求和|合计|减法/.test(practice)) result.push("完成后做结果核对");
+    if (/填空|括号内|提取公因数/.test(practice)) result.push("检查逆用和填空结果");
+    return result;
+  }));
+  return actions.length
+    ? `安排分步练习：${joinWithinLimit(actions, "，", 170)}。`
+    : "下次课先复盘本周期记录中的关键问题。";
 }
 
 function uniqueQaSourceRefs(qaEvidence) {

@@ -587,6 +587,139 @@ test("one eligible qa signal remains weak and cannot raise mastery or weeklyScor
   assert.deepEqual(oneQaSnapshot.mastery, noQaSnapshot.mastery);
 });
 
+function monthlyProfileWithOneGradingAndLinkedMistakes() {
+  const fixture = studentFixture();
+  fixture.tasks = [];
+  fixture.submissions = [{
+    id: "grading_shared",
+    status: "REVIEWED",
+    submittedAt: now,
+    assignment: { title: "乘法分配律专项练习", subject: { name: "数学" }, metadata: {} },
+    grading: {
+      score: 88,
+      result: { archiveEligible: true, needsTeacherReview: false, confidence: "high", summary: "" }
+    }
+  }];
+  fixture.qaSessions = [];
+  fixture.voiceInteractions = [];
+  fixture.behaviorEvents = [];
+  fixture.mistakes = [
+    { id: "mistake_generic_1", title: "填空结果", cause: "填空结果" },
+    { id: "mistake_application", title: "多步应用题", cause: "合并算式结果需逐步验算。", nextPractice: "先验算各项和，再检查减法。" },
+    { id: "mistake_factor", title: "乘法分配律综合运算", cause: "将398×5+196×25改写为196×5+398×25。" },
+    { id: "mistake_expand", title: "乘法分配律（含减法）", cause: "展开时漏掉60×4，并多写了+2×30。" },
+    { id: "mistake_sign", title: "乘法分配律综合计算", cause: "负号未分配到200×25。" },
+    { id: "mistake_answer", title: "乘法分配律与凑整", cause: "学生答案与明确答案不一致。" },
+    { id: "mistake_generic_2", title: "两个填空结果", cause: "两个填空结果" },
+    { id: "mistake_inverse", title: "乘法分配律逆用", cause: "提取公因数后还需核对括号内各项。" }
+  ].map((item, index) => ({
+    id: item.id,
+    subject: "数学",
+    prompt: item.title,
+    cause: item.cause,
+    masteryResolved: false,
+    createdAt: now,
+    knowledgePoint: { name: item.title },
+    metadata: {
+      sourceSubmissionId: "grading_shared",
+      nextPractice: item.nextPractice || "核对算式改写与运算步骤。"
+    }
+  }));
+  return fixture;
+}
+
+test("monthly activity totals count a reviewed submission and its linked mistakes as one source", () => {
+  const fixture = monthlyProfileWithOneGradingAndLinkedMistakes();
+  const oneActivity = buildStudentGrowthSnapshot(fixture, { periodType: "monthly", now });
+
+  assert.equal(oneActivity.profileEvidencePack.gradingEvidence.length, 1);
+  assert.equal(oneActivity.profileEvidencePack.mistakeEvidence.length, 8);
+  assert.equal(oneActivity.sourceCounts.mistakes, 8);
+  assert.equal(oneActivity.profileEvidencePack.mistakeEvidence[0].sourceSubmissionId, "grading_shared");
+  assert.equal(oneActivity.weeklyScore, 69);
+  assert.equal(oneActivity.mastery.数学, 70);
+  assert.equal(oneActivity.profileEvidencePack.sourceQuality.hasSparseEvidence, true);
+  assert.match(oneActivity.publishedView.overview.text, /1 条可追踪学习记录/);
+  assert.match(
+    oneActivity.publishedView.subjectOverview.find((item) => item.subject === "数学").text,
+    /数学已有 1 条记录/
+  );
+
+  fixture.tasks = [{
+    id: "task_independent",
+    title: "独立完成的数学练习",
+    status: "COMPLETED",
+    createdAt: now,
+    subject: { name: "数学" }
+  }];
+  fixture.submissions.push({
+    id: "grading_independent",
+    status: "REVIEWED",
+    submittedAt: now,
+    assignment: { title: "另一份练习", subject: { name: "数学" }, metadata: {} },
+    grading: {
+      score: 90,
+      result: { archiveEligible: true, needsTeacherReview: false, confidence: "high", summary: "" }
+    }
+  });
+  const threeActivities = buildStudentGrowthSnapshot(fixture, { periodType: "monthly", now });
+
+  assert.equal(threeActivities.weeklyScore, 77);
+  assert.equal(threeActivities.mastery.数学, 86);
+  assert.equal(threeActivities.profileEvidencePack.sourceQuality.hasSparseEvidence, false);
+  assert.match(threeActivities.publishedView.overview.text, /3 条可追踪学习记录/);
+  assert.match(
+    threeActivities.publishedView.subjectOverview.find((item) => item.subject === "数学").text,
+    /数学已有 3 条记录/
+  );
+});
+
+test("monthly focus summarizes multiple linked mistake causes and retains each mistake reference", () => {
+  const snapshot = buildStudentGrowthSnapshot(
+    monthlyProfileWithOneGradingAndLinkedMistakes(),
+    { periodType: "monthly", now }
+  );
+  const focus = snapshot.publishedView.focusSubjects.find((item) => item.subject === "数学");
+  const mistakeIds = snapshot.profileEvidencePack.mistakeEvidence.map((item) => item.id);
+
+  assert.match(focus.whyFocus, /乘法分配律/);
+  assert.ok(focus.whyFocus.length <= 180);
+  assert.match(focus.evidenceSummary, /改写/);
+  assert.match(focus.evidenceSummary, /漏项/);
+  assert.match(focus.evidenceSummary, /负号/);
+  assert.match(focus.evidenceSummary, /结果核对/);
+  assert.ok(focus.evidenceSummary.length <= 220);
+  assert.doesNotMatch(focus.evidenceSummary, /398×5\+196×25/);
+  assert.doesNotMatch(focus.evidenceSummary, /展开时漏掉60×4/);
+  assert.ok(focus.nextClassAction.length <= 220);
+  assert.match(focus.nextClassAction, /逐项核对/);
+  assert.doesNotMatch(focus.nextClassAction, /核对算式改写与运算步骤/);
+  assert.match(focus.abilityObservation, /掌握情况.*继续观察/);
+  assert.equal(snapshot.profileEvidencePack.mistakeEvidence.length, 8);
+  assert.match(snapshot.profileEvidencePack.mistakeEvidence[2].cause, /398×5\+196×25/);
+  assert.doesNotMatch(JSON.stringify(snapshot.publishedView), /398×5\+196×25|展开时漏掉60×4/);
+  assert.deepEqual(
+    mistakeIds.filter((id) => focus.evidenceRefs.includes(id)).sort(),
+    mistakeIds.slice().sort()
+  );
+});
+
+test("single long mistake details remain in teacher evidence but public summaries stay concise", () => {
+  const fixture = monthlyProfileWithOneGradingAndLinkedMistakes();
+  fixture.mistakes = fixture.mistakes.filter((item) => item.id === "mistake_factor");
+  fixture.mistakes[0].cause = "本题学生把398×5+196×25改写成196×5+398×25，导致两个乘数和对应因数交换错位。";
+  fixture.mistakes[0].metadata.nextPractice = "请将原式逐项拆开，再逐一对应因数计算并核对最终结果是否一致。";
+  const snapshot = buildStudentGrowthSnapshot(fixture, { periodType: "monthly", now });
+  const focus = snapshot.publishedView.focusSubjects.find((item) => item.subject === "数学");
+
+  assert.match(snapshot.profileEvidencePack.mistakeEvidence[0].cause, /导致两个乘数和对应因数交换错位/);
+  assert.ok(focus.evidenceRefs.includes("mistake_factor"));
+  assert.doesNotMatch(JSON.stringify(snapshot.publishedView), /导致两个乘数和对应因数交换错位|请将原式逐项拆开/);
+  assert.ok(focus.evidenceSummary.length <= 220);
+  assert.ok(focus.nextClassAction.length <= 220);
+  assert.match(focus.nextClassAction, /算式改写/);
+});
+
 test("non-qa subjects outrank qa-only subjects in weekly and monthly focus", () => {
   const fixture = studentFixture();
   fixture.tasks = [];
@@ -623,6 +756,34 @@ test("qa-only focus remains an auxiliary continue-observing subject", () => {
   assert.equal(snapshot.publishedView.focusSubjects[0].subject, "英语");
   assert.match(snapshot.publishedView.focusSubjects[0].whyFocus, /继续观察/);
   assert.equal(snapshot.publishedView.focusSubjects[0].confidence, "weak");
+});
+
+test("monthly qa-only focus ranks subjects by distinct source count", () => {
+  const fixture = studentFixture();
+  fixture.tasks = [];
+  fixture.submissions = [];
+  fixture.mistakes = [];
+  fixture.voiceInteractions = [];
+  fixture.behaviorEvents = [];
+  fixture.qaSessions = [
+    ["语文", 1],
+    ["英语", 3],
+    ["数学", 2]
+  ].flatMap(([subject, count]) => Array.from({ length: count }, (_, index) => ({
+    id: `qa_${subject}_${index + 1}`,
+    createdAt: new Date(Date.UTC(2026, 6, 5, 8 + index)),
+    subject,
+    metadata: qaMetadata({
+      learningSignal: {
+        ...qaLearningSignal,
+        knowledgePoints: [`${subject}知识点`]
+      }
+    })
+  })));
+
+  const snapshot = buildStudentGrowthSnapshot(fixture, { periodType: "monthly", now });
+
+  assert.deepEqual(snapshot.publishedView.focusSubjects.map((item) => item.subject), ["英语", "数学"]);
 });
 
 test("two normalized subject and knowledge point records aggregate to one supported signal", () => {
