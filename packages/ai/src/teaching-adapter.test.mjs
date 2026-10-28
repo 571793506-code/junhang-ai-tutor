@@ -30,7 +30,7 @@ test("teaching adapter sends independent model parameters and never retries HTTP
     assert.equal(result.usage.completion_tokens, 8);
     assert.equal(Object.hasOwn(result, "raw"), false);
     assert.equal(payloads[0].model, "gpt-6.1-sol");
-    assert.equal(payloads[0].reasoning_effort, "high");
+    assert.equal(payloads[0].reasoning_effort, "medium");
     assert.equal(payloads[0].max_completion_tokens, 100);
     assert.equal(Object.hasOwn(payloads[0], "temperature"), false);
     await callTeachingModel(config, resolveTeachingTaskPolicy("extract-material").primary, messages, options);

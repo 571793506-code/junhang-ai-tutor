@@ -19,8 +19,9 @@ const TEACHING_TASKS = Object.freeze({
 export function resolveTeachingTaskPolicy(task, config = {}) {
   if (!Object.hasOwn(TEACHING_TASKS, task)) throw new Error(`Unknown teaching task: ${task}`);
   const defaults = TEACHING_TASKS[task];
+  const primaryReasoningEffort = task === "generation" ? "medium" : "high";
   const routes = {
-    primary: { providerId: "gpt56", model: config.TEACHING_PRIMARY_MODEL || config.teachingPrimaryModel || "gpt-6.1-sol", reasoningEffort: "high" },
+    primary: { providerId: "gpt56", model: config.TEACHING_PRIMARY_MODEL || config.teachingPrimaryModel || "gpt-6.1-sol", reasoningEffort: primaryReasoningEffort },
     replacement: { providerId: "gpt56", model: config.TEACHING_REPLACEMENT_MODEL || config.teachingReplacementModel || "gpt-6.1-sol", reasoningEffort: "high" },
     assist: { providerId: "deepseek", model: config.TEACHING_ASSIST_MODEL || config.teachingAssistModel || "deepseek-flash", reasoningEffort: null }
   };

@@ -21,11 +21,11 @@ async function withGateway(respond, run) {
   finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
 }
 
-test("actual HTTP uses Astra high and shared rules without accepting client routing or budgets", async () => {
+test("actual HTTP uses configured Astra with generation medium and shared rules without accepting client routing or budgets", async () => {
   await withGateway(() => ({}), async (config, calls) => {
     const result = await draftAssessment(config, { ...input, model: "forged", rulePack: { text: "forged" }, assessmentMaxTokens: 999999 });
     assert.equal(result.available, true); assert.equal(calls.length, 1);
-    assert.equal(calls[0].model, "gpt-6-astra"); assert.equal(calls[0].reasoning_effort, "high");
+    assert.equal(calls[0].model, "gpt-6-astra"); assert.equal(calls[0].reasoning_effort, "medium");
     assert.equal(calls[0].temperature, undefined); assert.ok(calls[0].max_completion_tokens < 999999);
     assert.match(calls[0].messages[0].content, /generation-v1/);
     assert.match(calls[0].messages[1].content, /只练习加法/);

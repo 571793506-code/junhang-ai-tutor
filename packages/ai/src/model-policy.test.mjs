@@ -24,14 +24,19 @@ test("grading and reference cap the first call while preserving the operation bu
   assert.equal(resolveTeachingTaskPolicy("generation").primaryTimeoutMs, undefined);
 });
 
-test("teaching policies use Sol high without a duplicate availability replacement and isolate QA", () => {
-  for (const task of ["generation", "grading", "reference"]) {
+test("teaching policies use Sol with task-specific reasoning, no duplicate availability replacement and isolated QA", () => {
+  for (const task of ["grading", "reference"]) {
     const policy = resolveTeachingTaskPolicy(task, { GPT56_MODEL: "legacy-model" });
     assert.equal(policy.primary.model, "gpt-6.1-sol");
     assert.equal(policy.primary.reasoningEffort, "high");
     assert.equal(policy.replacement, null);
     assert.equal(policy.maxAdditionalAttempts, 1);
   }
+  const generation = resolveTeachingTaskPolicy("generation", { GPT56_MODEL: "legacy-model" });
+  assert.equal(generation.primary.model, "gpt-6.1-sol");
+  assert.equal(generation.primary.reasoningEffort, "medium");
+  assert.equal(generation.replacement, null);
+  assert.equal(generation.maxAdditionalAttempts, 1);
   for (const task of ["extract-requirement", "extract-material"]) {
     const policy = resolveTeachingTaskPolicy(task);
     assert.equal(policy.primary.model, "deepseek-flash");
