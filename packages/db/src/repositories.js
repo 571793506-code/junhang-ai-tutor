@@ -533,7 +533,7 @@ export async function createAssignmentDraft(
   if (!gradingSourcePackageRequested) return prisma.assignment.create({ data, include: { items: true } });
 
   return prisma.$transaction(async (tx) => {
-    const assignment = await tx.assignment.create({ data, include: { items: true } });
+    const assignment = await tx.assignment.create({ data, include: { items: { orderBy: { orderIndex: "asc" } } } });
     const sourceResult = buildGradingSourcePackage(assignment);
     if (!sourceResult.ok) {
       const error = new Error("GRADING_SOURCE_PACKAGE_INVALID");
@@ -550,7 +550,7 @@ export async function createAssignmentDraft(
           gradingSourcePackage: sourceResult.package
         }
       },
-      include: { items: true }
+      include: { items: { orderBy: { orderIndex: "asc" } } }
     });
   });
 }

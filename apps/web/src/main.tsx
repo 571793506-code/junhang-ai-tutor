@@ -448,7 +448,7 @@ const idleSync: SyncState = { busy: false, ok: null, message: "请登录后同�
 function App() {
   const [role, setRole] = useState<Role>("teacher");
   const [activeModule, setActiveModule] = useState<Record<Role, string>>({
-    teacher: "工作台",
+    teacher: new URLSearchParams(window.location.search).has("gradingAssignment") ? "批改复核" : "工作台",
     student: "主页",
     classroom: "课堂主页"
   });
@@ -1646,6 +1646,20 @@ function TeacherWorkspace({
       setSelectedGeneratedAssignmentId(generatedAssessmentAssignments[0]?.id || "");
     }
   }, [generatedAssessmentAssignments, selectedGeneratedAssignmentId]);
+  const dialogueEntryApplied = useRef(false);
+  useEffect(() => {
+    if (dialogueEntryApplied.current) return;
+    const id = new URLSearchParams(window.location.search).get("gradingAssignment");
+    const source = assignments.find(assignment => assignment.id === id);
+    if (!source?.gradingSource || !selectableStudents.some(student => student.id === source.studentId)) return;
+    dialogueEntryApplied.current = true;
+    setSelectedStudentId(source.studentId!);
+    setUploadSubject(source.subject as SubjectLabel);
+    setUploadKind(source.kind);
+    setUploadMaterialType("generated_assessment");
+    setSelectedGeneratedAssignmentId(source.id);
+    setUploadTitle(`${source.title}批改`);
+  }, [assignments, selectableStudents]);
   const selectedArchiveStudent = useMemo(() => students.find((item) => item.id === selectedStudentId) || activeArchiveStudents[0], [activeArchiveStudents, selectedStudentId, students]);
   const selectedTermReport = termReportDraft?.report.studentId === selectedStudentId ? termReportDraft.report : reports.find((item) => item.studentId === selectedStudentId && item.reportType);
   const selectedTermReportText = termReportText || selectedTermReport?.teacherEditedText || selectedTermReport?.summary || "";

@@ -338,8 +338,11 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 - `POST /api/grading/source-packages/dialogue`
   - 教师端将对话生成的结构化答案包登记为数据库中的统一 `Assignment` 来源；服务端按 `junhang-grading-source-v1` 规范化并重新生成仓库指纹。
-  - 返回 `assignment.id`、`gradingSource`（来源 ID、版本、指纹）和导入摘要。后续 Web、小程序和课堂平板批改只提交该 `assignmentId`，统一从 `Assignment.metadata.gradingSourcePackage` 读取题干、答案、分值和解析。
+  - 新建返回 HTTP 201、`assignment.id`、`gradingSource`（来源 ID、版本、指纹）、实际存储的 `gradingSourcePackage` 和导入摘要。后续 Web、小程序和课堂平板批改只提交该 `assignmentId`，统一从 `Assignment.metadata.gradingSourcePackage` 读取题干、答案、分值和解析。
+  - 显式 `assignmentId` 已存在时，仅同教师、同目标学生、来源完整且按题号对齐的全部内容一致可 HTTP 200 重放，返回 `replayed:true` 及原来源包/指纹，不新增或重写记录；其他冲突返回 409 `GRADING_SOURCE_ALREADY_EXISTS`。导入数据不能授予教师确认。
+  - 对话交付 CLI：`node scripts/dialogue-material.mjs --input <source.json> --deliver-to <folder> --sync --student <studentId>`，使用 `TEACHING_API_BASE_URL` 与 `TEACHING_SESSION_FILE`，可配置 `TEACHING_WEB_BASE_URL`。输出双 PDF、标准 JSON 及登记回执；只有回执 `ok=true`、`syncStatus=registered` 表示同步成功。Web `?gradingAssignment=<id>` 登录后带入对应来源，不自动上传、评分或归档。接口和标准答案包供其他端复用，URL 仅是 Web 导航。
   - 对话原始 `sourceId`、指纹和 payload 仅保存在来源审计元数据中；该接口不会创建学生提交，也不会绕过教师逐题复核和归档门禁。
+  - 对话登记来源仅供登记教师查看、关联上传及评审/导出；指定学生时仍须匹配该学生。登记不向学生或课堂端发布材料；上传 JSON 中的复核字段不能授予教师确认。
 
 - `PATCH /api/grading/workbench/:submissionId/questions/:questionId`
   - 教师端逐题修正批改结果，小程序和 Web 共用。

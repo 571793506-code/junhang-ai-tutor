@@ -1,5 +1,6 @@
 ﻿import cors from "cors";
 import express from "express";
+import { canReplayDialogueSource } from "./dialogue-source-registration.js";
 import { execFile } from "node:child_process";
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
@@ -710,8 +711,14 @@ async function assertTeacherStudentScope(req, res, studentId) {
 }
 
 async function assertAssignmentStudentScope(req, res, assignment, studentId) {
-  if (!assignment || !studentId) return true;
+  if (!assignment) return true;
   const metadata = safeJson(assignment.metadata, {});
+  if (metadata.source === "dialogue-import" &&
+      (req.session?.role !== "teacher" || metadata.teacherId !== req.session.teacherId)) {
+    res.status(403).json({ ok: false, error: "ASSIGNMENT_TEACHER_SCOPE_MISMATCH", message: "此材料仅供登记教师关联批改。" });
+    return false;
+  }
+  if (!studentId) return true;
   const targetStudentId = optionalText(metadata.targetStudentId);
   if (targetStudentId) {
     if (targetStudentId === studentId) return true;
@@ -3680,6 +3687,12 @@ app.get("/api/bootstrap", requireDatabase, requireSession(config, ["student", "t
   const visibleAssignments = assignments.filter((assignment) => {
     const metadata = safeJson(assignment.metadata, {});
     if (req.session.role === "teacher" && metadata.teacherId && metadata.teacherId !== req.session.teacherId) return false;
+    // A dialogue source is registered for teacher grading; registration is not publication.
+    if (metadata.source === "dialogue-import") {
+      if (req.session.role !== "teacher" || metadata.teacherId !== req.session.teacherId) return false;
+      if (metadata.targetStudentId) return visibleStudentIds.has(metadata.targetStudentId);
+      return true;
+    }
     if (metadata.workflowPublication) {
       if (req.session.role !== "teacher" && metadata.draftReviewStatus !== "accepted") return false;
       if (metadata.targetStudentId) return visibleStudentIds.has(metadata.targetStudentId);
@@ -4975,10 +4988,6 @@ app.post("/api/grading/source-packages/dialogue", requireDatabase, requireSessio
     }
   }
   const assignmentId = optionalText(body.assignmentId) || `dialogue-${randomUUID()}`;
-  if (body.assignmentId) {
-    const existing = await prisma.assignment.findUnique({ where: { id: assignmentId }, select: { id: true } });
-    if (existing) return res.status(409).json({ ok: false, error: "GRADING_SOURCE_ALREADY_EXISTS", message: "该统一答案来源已经存在，请直接在原批改记录中导入更新。" });
-  }
   const normalized = normalizeImportedGradingSourcePackage(imported, { sourceId: assignmentId });
   if (!normalized.ok) {
     return res.status(422).json({ ok: false, error: "ANSWER_PACKAGE_INVALID", message: normalized.issues.join("；"), issues: normalized.issues });
@@ -4987,6 +4996,23 @@ app.post("/api/grading/source-packages/dialogue", requireDatabase, requireSessio
   if (studentId) {
     if (!(await assertTeacherStudentScope(req, res, studentId))) return;
     if (!(await assertTeacherActiveStudentTarget(req, res, studentId))) return;
+  }
+  if (body.assignmentId) {
+    const existing = await prisma.assignment.findUnique({ where: { id: assignmentId },
+      include: { subject: true, items: { orderBy: { orderIndex: "asc" } } } });
+    if (existing) {
+      const metadata = safeJson(existing.metadata, {});
+      const stored = gradingSourcePackageForAssignment(existing);
+      // Older drafts may have received unordered INSERT results. Compare by
+      // explicit question number, but return the original immutable package.
+      if (!canReplayDialogueSource({ metadata, stored, requested: normalized.package,
+        teacherId: req.session.teacherId, studentId })) {
+        return res.status(409).json({ ok: false, error: "GRADING_SOURCE_ALREADY_EXISTS", message: "来源标识已存在且内容或所属对象不一致，请使用新的材料标识。" });
+      }
+      return res.status(200).json({ ok: true, replayed: true,
+        assignment: mapAssignment({ ...existing, submissions: [] }),
+        gradingSource: gradingSourceReference(stored), gradingSourcePackage: stored });
+    }
   }
   const targetGrade = optionalText(body.targetGrade || body.grade || normalized.package.grade);
   const sourceMetadata = {
@@ -5033,6 +5059,7 @@ app.post("/api/grading/source-packages/dialogue", requireDatabase, requireSessio
     ok: true,
     assignment: mapAssignment({ ...assignment, subject: assignment.subject || null, submissions: [] }),
     gradingSource: gradingSourceReference(registeredSource),
+    gradingSourcePackage: registeredSource,
     imported: {
       originalSourceId: normalized.originalSourceId || null,
       originalFingerprint: normalized.originalFingerprint || null,

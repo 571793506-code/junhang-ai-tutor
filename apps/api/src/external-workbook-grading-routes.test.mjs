@@ -70,7 +70,9 @@ test("dialogue answer package has a database registration route for shared Assig
 
 test("submission regrading prefers the canonical Assignment source package", () => {
   const helper = source.slice(source.indexOf("async function buildSubmissionGradeInputFromRecord"), source.indexOf("function queuedSubmissionResult"));
-  assert.match(helper, /const authoritativeSourcePackage = gradingSourcePackage \|\| importedSourcePackage/);
+  assert.match(helper, /return buildSubmissionGradeInput\(submission, recognition/);
+  const sharedHelper = fs.readFileSync(new URL("./submission-grade-input.js", import.meta.url), "utf8");
+  assert.match(sharedHelper, /const authoritativeSourcePackage = gradingSourcePackage \|\| importedSourcePackage/);
 });
 
 test("dialogue grading result import is normalized into teacher-review questions", () => {

@@ -18,7 +18,7 @@ const launch = () => chromium.launch({ headless: true,
   ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}) });
 const pageSvg = (n) => `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800"><rect width="600" height="800" fill="white"/><g font-family="sans-serif" font-size="24" fill="#163b45"><text x="50" y="65">合成作业 · 第 ${n} 页</text><text x="60" y="155">${n === 1 ? "1. 说明交换加数为什么和不变" : "2. 24 + 18 = 42"}</text><text x="60" y="205">${n === 1 ? "交换两堆小棒，总数一样。" : "个位相加满十，向十位进一。"}</text></g></svg>`;
 
-test("actual teacher page preserves multipart upload, source management and disabled workflow fallback", { timeout: 40000 }, async (t) => {
+test("actual teacher page prefills dialogue entry and preserves multipart upload, source management and disabled workflow fallback", { timeout: 40000 }, async (t) => {
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }); page.setDefaultTimeout(10000);
   const errors = []; page.on("pageerror", (e) => errors.push(e.message));
@@ -28,13 +28,17 @@ test("actual teacher page preserves multipart upload, source management and disa
   const student = { id: "s1", displayName: "测试学生", grade: "四年级", canReceiveNewWork: true, enrollmentStatus: "在读", responsibleTeacherId: "t1",
     focus: "加法", weeklyScore: 0, streak: 0, mastery: {}, strengths: [], risks: [], tone: "待观察" };
   const disabled = { ...student, id: "disabled", displayName: "停用学生", canReceiveNewWork: false, enrollmentStatus: "已退课" };
+  const dialogueStudent = { ...student, id: "s2", displayName: "对话材料学生", grade: "三年级" };
+  const dialogueAssignment = { id: "dialogue-paper", title: "对话生成试卷", studentId: "s2", subject: "数学", kind: "试卷", status: "待完成",
+    gradingSource: { sourceId: "dialogue-paper", version: 1, fingerprint: "synthetic" }, gradingSourceQuestionCount: 1,
+    items: [{ id: "q1", orderIndex: 1, prompt: "1+1", itemType: "fill" }] };
   let uploaded = false, workflowStatus = 404, multipart = "";
   const workbench = { id: "submission1", submissionId: "submission1", assignmentId: "paper1", title: "测试上传", studentId: "s1", studentName: "测试学生",
     subject: "数学", kind: "作业", materialType: "external_workbook", status: "待复核", workflowState: "review_required", needsTeacherReview: true,
     archiveEligible: false, archiveBlockers: ["ANSWER_SOURCE_NOT_CONFIRMED"], questions: [],
     pages: [{ id: "page1", pageNumber: 1, imageUrl: "http://127.0.0.1:8787/uploads/qa-page.png", qualityStatus: "ready" }], questionCount: 0, pendingQuestionCount: 0,
     ocrStatusLabel: "待核对", summary: "合成上传记录", uploadedBy: "teacher", submittedAt: "2026-09-17T10:00:00Z" };
-  const base = { ok: true, teacher, teachers: [teacher], sessionToken: "synthetic-intercept-only", students: [student, disabled], tasks: [], assignments: [],
+  const base = { ok: true, teacher, teachers: [teacher], sessionToken: "synthetic-intercept-only", students: [student, dialogueStudent, disabled], tasks: [], assignments: [dialogueAssignment],
     classroomDevices: [], classroomBroadcasts: [], dictationTasks: [], readingTasks: [], corrections: [], logs: [], reports: [], submissions: [], jobs: [], assets: [],
     sources: [], events: [], modelRuns: [], index: null, database: { ok: true }, ai: { features: [], mode: "test" } };
   // No request reaches the real API; this checks upload/entry integration, not OCR or source registration quality.
@@ -46,15 +50,26 @@ test("actual teacher page preserves multipart upload, source management and disa
     return route.fulfill({ json: { ...base, workbenches: uploaded ? [workbench] : [] } });
   });
   await page.route("**/uploads/qa-page.png", (route) => route.fulfill({ contentType: "image/svg+xml", body: pageSvg(1) }));
-  await page.goto(process.env.WEB_BASE_URL || "http://127.0.0.1:5173/");
+  const entry = new URL(process.env.WEB_BASE_URL || "http://127.0.0.1:5173/");
+  entry.searchParams.set("gradingAssignment", dialogueAssignment.id);
+  await page.goto(entry.href);
   await page.getByRole("button", { name: "登录同步真实数据", exact: true }).click();
   await page.getByText("教师端已登录：测试教师", { exact: true }).waitFor();
-  await page.getByRole("button", { name: "批改复核", exact: true }).click();
+  const upload = page.locator("section").filter({ has: page.getByRole("heading", { name: "拍照上传批改", exact: true }) });
+  await upload.locator("select").nth(4).waitFor();
+  assert.equal(await upload.locator("select").nth(0).inputValue(), "s2");
+  assert.equal(await upload.locator("select").nth(1).inputValue(), "generated_assessment");
+  assert.equal(await upload.locator("select").nth(2).inputValue(), "试卷");
+  assert.equal(await upload.locator("select").nth(4).inputValue(), "dialogue-paper");
+  assert.equal(await upload.getByRole("button", { name: "上传并批改", exact: true }).isDisabled(), true);
+  // Explicit teacher changes remain effective after the one-time prefill.
+  await upload.locator("select").nth(0).selectOption("s1");
+  await upload.locator("select").nth(1).selectOption("external_workbook");
+  await upload.locator("select").nth(2).selectOption("作业");
   const continuous = page.getByRole("region", { name: "持续批改工作台", exact: true });
   await continuous.getByText("服务暂未启用", { exact: true }).waitFor();
   await page.getByTestId("teacher-grading-image-picker-library-input").setInputFiles([{ name: "page1.png", mimeType: "image/png", buffer: png }, { name: "page2.png", mimeType: "image/png", buffer: png }]);
   await page.getByTestId("teacher-grading-image-picker").getByText("已加入 2 张图片", { exact: true }).waitFor();
-  const upload = page.locator("section").filter({ has: page.getByTestId("teacher-grading-image-picker") });
   assert.equal(await upload.locator("option[value='disabled']").count(), 0);
   await upload.getByRole("button", { name: "上传并批改", exact: true }).click();
   await continuous.getByLabel("已上传批次", { exact: true }).locator("option[value='submission1']").waitFor({ state: "attached" });

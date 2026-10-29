@@ -30,7 +30,10 @@ test("legacy image grading carries registered material through the actual shared
   } } });
   assert.equal(result.available, true);
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].gradingSourcePackage.questions[0].context, expected.questions[0].context);
+  // The model receives the verified projection; the full package stays in the service input.
+  assert.equal(calls[0].gradingSourcePackage, undefined);
+  assert.deepEqual(calls[0].referenceAnswers[0].context, expected.questions[0].context);
+  assert.equal(calls[0].referenceAnswers[0].rubric, expected.questions[0].rubric);
   assert.equal(calls[0].ocrQuestions[0].studentAnswer, "他想帮助别人。");
 });
 

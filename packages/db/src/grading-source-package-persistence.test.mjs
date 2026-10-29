@@ -12,7 +12,8 @@ test("generated assessment drafts persist a canonical grading source package", a
       }
     },
     assignment: {
-      async create({ data }) {
+      async create({ data, include }) {
+        assert.deepEqual(include.items, { orderBy: { orderIndex: "asc" } });
         writes.push({ type: "create", data });
         return {
           id: "assignment-source-2",
@@ -22,7 +23,8 @@ test("generated assessment drafts persist a canonical grading source package", a
           items: data.items.create.map((item) => ({ ...item, id: `item-${item.orderIndex}` }))
         };
       },
-      async update({ data }) {
+      async update({ data, include }) {
+        assert.deepEqual(include.items, { orderBy: { orderIndex: "asc" } });
         writes.push({ type: "update", data });
         return {
           id: "assignment-source-2",

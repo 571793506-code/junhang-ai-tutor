@@ -161,3 +161,52 @@ test("a student-specific published assignment is not listed for classmates of th
   });
   assert.equal(visible("s1"), 1); assert.equal(visible("s2"), 0); assert.equal(visible("s1", "rejected"), 0);
 });
+
+test("dialogue registration is visible only to its teacher and within the exact student scope", () => {
+  const source = fs.readFileSync(new URL("./server.js", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const start = source.indexOf("  const visibleAssignments = assignments.filter(");
+  const end = source.indexOf("\n  });", start);
+  assert.ok(start > 0 && end > start);
+  const visible = (session, ids, targetStudentId = "s1") => vm.runInNewContext(`${source.slice(start, end + 6)}\nvisibleAssignments.length`, {
+    assignments: [{ metadata: { source: "dialogue-import", teacherId: "t1", targetStudentId, targetGrade: "三年级", draftReviewStatus: "accepted" } }],
+    req: { session }, safeJson: v => v, visibleStudentIds: new Set(ids),
+    visibleStudents: ids.map(id => ({ id, grade: "三年级" }))
+  });
+  assert.equal(visible({ role: "student", studentId: "s1" }, ["s1"]), 0);
+  assert.equal(visible({ role: "student", studentId: "s2" }, ["s2"]), 0);
+  assert.equal(visible({ role: "classroom" }, ["s1", "s2"]), 0);
+  assert.equal(visible({ role: "teacher", teacherId: "t2" }, ["s1"]), 0);
+  assert.equal(visible({ role: "teacher", teacherId: "t1" }, ["s2"]), 0);
+  assert.equal(visible({ role: "teacher", teacherId: "t1" }, ["s1"]), 1);
+  assert.equal(visible({ role: "teacher", teacherId: "t1" }, ["s1"], null), 1);
+});
+
+test("a dialogue grading source cannot be selected by a student using its ID", async () => {
+  const source = fs.readFileSync(new URL("./server.js", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const start = source.indexOf("async function assertAssignmentStudentScope(");
+  const end = source.indexOf("\n}\n", start);
+  assert.ok(start > 0 && end > start);
+  const guard = vm.runInNewContext(`${source.slice(start, end + 2)}\nassertAssignmentStudentScope`, {
+    safeJson: v => v, optionalText: v => v,
+    prisma: { student: { findUnique: async () => ({ grade: "三年级" }) } }
+  });
+  let status; const res = { status(s) { status = s; return this; }, json() { return this; } };
+  const assignment = { metadata: { source: "dialogue-import", teacherId: "t1", targetStudentId: "s1" } };
+  assert.equal(await guard({ session: { role: "student", studentId: "s1" } }, res, assignment, "s1"), false);
+  assert.equal(status, 403);
+  assert.equal(await guard({ session: { role: "teacher", teacherId: "t2" } }, res, assignment, "s1"), false);
+  assert.equal(status, 403);
+  assert.equal(await guard({ session: { role: "teacher", teacherId: "t1" } }, res, assignment, "s2"), false);
+  assert.equal(status, 400);
+  assert.equal(await guard({ session: { role: "teacher", teacherId: "t1" } }, res, assignment, "s1"), true);
+});
+
+test("dialogue assessment exports and review require the registering teacher", async () => {
+  const assignment = { metadata: { source: "dialogue-import", teacherId: "t1" } };
+  let status; const res = { status(s) { status = s; return this; }, json() { return this; } };
+  for (const session of [{ role: "student", studentId: "s1" }, { role: "teacher", teacherId: "t2" }]) {
+    assert.equal(await checkTeachingAssignmentAccess({ session }, res, assignment), false);
+    assert.equal(status, 403);
+  }
+  assert.equal(await checkTeachingAssignmentAccess({ session: { role: "teacher", teacherId: "t1" } }, res, assignment), true);
+});

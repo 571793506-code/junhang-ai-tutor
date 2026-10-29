@@ -12,6 +12,11 @@ export function teachingAssignmentPreviewReview(metadata, layoutValidation, trus
 }
 
 export async function checkTeachingAssignmentAccess(req, res, assignment, service) {
+  if (assignment?.metadata?.source === "dialogue-import" &&
+      (req.session?.role !== "teacher" || assignment.metadata.teacherId !== req.session.teacherId)) {
+    res.status(403).json({ ok: false, error: "ASSIGNMENT_TEACHER_SCOPE_MISMATCH", message: "此材料仅供登记教师使用。" });
+    return false;
+  }
   try {
     await requireTeachingAssignmentAccess({ service, actor: { teacherId: req.session?.teacherId }, assignment });
     return true;
