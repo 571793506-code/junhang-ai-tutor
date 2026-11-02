@@ -329,6 +329,8 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 - `GET /api/grading/workbench/:submissionId`
   - 教师端打开单个批改工作台详情。
   - 关键字段：`pages[].imageUrl`, `pages[].markers`, `pages[].qualityStatus`, `pages[].qualityScore`, `pages[].qualityIssues`, `questions[].bbox`, `questions[].prompt`, `questions[].studentAnswer`, `questions[].correctAnswer`, `questions[].errorStep`, `questions[].confidence`。
+  - 列表及详情可返回 `scoreGroups: [{ id, label, score, maxScore, total, reviewed, pending }]`。分组仅来自服务端已验证来源包的 `questions[].context.scoreGroup=base|bonus`，按显式题号匹配当前逐题结果；不根据题序、OCR或教师补丁猜测附加题。来源缺失、重复题号、分值或声明总分不一致等情况返回 `null`，兼容既有无分组成绩。
+  - 基础和附加分独立汇总；组内任一题尚未通过教师逐题确认或分数无效时，该组 `score=null`，由 `pending` 提示待确认数。Web、小程序和平板教师端可共用此字段展示，不将基础79/100与附加0/10误呈现为79/110；该展示不改变既有归档动作或存储总分口径，也不授予归档或档案准入。
   - 参考答案、主批改或风险审查暂不可用时，接口仍必须保留 OCR 的题号、题干、学生作答、坐标和置信度，供教师逐题补充正确答案、判定、得分和错因；该状态不生成最终分，也不能跳过逐题确认归档。
 - `PATCH /api/grading/workbench/:submissionId/dialogue-answer-package`
   - 教师端将对话中随试卷、小测或练习生成的结构化答案包，或对话重新识别后得到的结构化批改结果，导入当前批改记录并重新进入批改复核。

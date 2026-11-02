@@ -3120,7 +3120,9 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onImportDialoguePackage,
   const questionConfirmDisabled = !active || !question || questionStatus === "uncertain" || !questionScoreWithinMax || !questionMistakeEvidenceReady;
   const archiveBlockers = active?.archiveBlockers || [];
   const archiveDisabled = !active || !allQuestionsReviewedForArchive || archiveBlockers.length > 0;
-  const archiveScoreLabel = reviewedScoreTotal != null
+  const archiveScoreLabel = active?.scoreGroups?.length
+    ? active.scoreGroups.map(group => `${group.label}${group.score != null ? `${group.score}/${group.maxScore} 分` : `待确认 ${group.pending} 题`}`).join("；")
+    : reviewedScoreTotal != null
     ? `${reviewedScoreTotal}${maxScoreTotal != null ? `/${maxScoreTotal}` : ""} 分`
     : `待逐题确认 ${unresolvedQuestions.length} 题`;
   const selectPage = (pageNumber: number) => {

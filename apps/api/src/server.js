@@ -84,7 +84,7 @@ import { normalizeAssessmentTargetScope } from "./assessment-target-scope.js";
 import { isNoMarkdownDocumentsError, summarizeContentIndexState } from "./content-index-state.js";
 import { createEncodingGuardMiddleware } from "./encoding-guard-middleware.js";
 import { loadRuntimeConfig, publicConfigSummary } from "./env.js";
-import { gradingQuestionReviewState, requireAllQuestionsReviewedForArchive } from "./grading-review-gates.js";
+import { gradingQuestionReviewState, gradingSourceScoreGroups, requireAllQuestionsReviewedForArchive } from "./grading-review-gates.js";
 import { filterNewReviewedMistakes, loadCurrentTeachingEvidence } from "./grading-mistake-archive.js";
 import { isImmutableTeachingArchive, rejectArchivedSubmissionMutation } from "./teaching-archive-guard.js";
 import { hydrateQuestionDraftsFromOcr } from "./grading-workbench-question-drafts.js";
@@ -3488,6 +3488,7 @@ function mapGradingWorkbench(submission) {
     questionReviewReady: questionReviewState.readyForArchive,
     workflowState: archiveBlockers.length ? "review_required" : review.needsReview ? "draft" : "archived",
     reviewedQuestionScore: questionReviewState.score,
+    scoreGroups: gradingSourceScoreGroups(questions, gradingSourcePackageForAssignment(submission.assignment)),
     uploadedBy: review.uploadedBy,
     submittedAt: review.submittedAt
   };

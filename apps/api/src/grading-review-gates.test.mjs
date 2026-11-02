@@ -2,10 +2,59 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  gradingSourceScoreGroups,
   gradingQuestionReviewState,
   requireAllQuestionsReviewedForArchive
 } from "./grading-review-gates.js";
 import { buildExternalGradingRecognitionPacket } from "./external-grading-recognition.js";
+
+const groupedSource = {
+  baseScore: 5, bonusScore: 10,
+  questions: [
+    { questionNo: "31", maxScore: 10, context: { scoreGroup: "bonus" } },
+    { questionNo: "1", maxScore: 5, context: { scoreGroup: "base" } }
+  ]
+};
+const groupedReviews = () => [
+  { questionNo: "1", maxScore: 5, score: 4, status: "partial", knowledgePoint: "计算", errorStep: "首步错误", reviewedByTeacher: true },
+  { questionNo: "31", maxScore: 10, score: 0, status: "wrong", knowledgePoint: "括号", errorStep: "未添括号", reviewedByTeacher: true }
+];
+
+test("source score groups align by explicit number and keep bonus separate", () => {
+  assert.deepEqual(gradingSourceScoreGroups(groupedReviews(), groupedSource), [
+    { id: "base", label: "基础", score: 4, maxScore: 5, total: 1, reviewed: 1, pending: 0 },
+    { id: "bonus", label: "附加", score: 0, maxScore: 10, total: 1, reviewed: 1, pending: 0 }
+  ]);
+});
+
+test("unreviewed, uncertain and out-of-range scores never become confirmed group totals", () => {
+  for (const patch of [{ reviewedByTeacher: false }, { status: "uncertain" }, { score: 11 }, { score: -1 }, { score: null }]) {
+    const questions = groupedReviews();
+    Object.assign(questions[1], patch);
+    const groups = gradingSourceScoreGroups(questions, groupedSource);
+    assert.equal(groups[0].score, 4);
+    assert.equal(groups[1].score, null);
+    assert.equal(groups[1].pending, 1);
+  }
+});
+
+test("untrusted group alignment falls back without inventing score groups", () => {
+  const reviews = groupedReviews();
+  const clone = () => structuredClone(groupedSource);
+  assert.equal(gradingSourceScoreGroups(reviews, null), null);
+  assert.equal(gradingSourceScoreGroups(reviews.slice(0, 1), groupedSource), null);
+  assert.equal(gradingSourceScoreGroups([reviews[0], reviews[0]], groupedSource), null);
+  for (const mutate of [
+    s => { s.questions[0].questionNo = "1"; },
+    s => { delete s.questions[0].context.scoreGroup; },
+    s => { s.questions[0].context.scoreGroup = "unknown"; },
+    s => { s.questions[0].maxScore = 9; },
+    s => { s.baseScore = 100; }
+  ]) {
+    const source = clone(); mutate(source);
+    assert.equal(gradingSourceScoreGroups(reviews, source), null);
+  }
+});
 
 test("grading archive gate blocks unreviewed question results", () => {
   const gate = requireAllQuestionsReviewedForArchive({

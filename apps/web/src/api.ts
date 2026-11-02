@@ -973,6 +973,15 @@ export type GradingWorkbench = {
   reviewedQuestionCount?: number;
   questionReviewReady?: boolean;
   reviewedQuestionScore?: number | null;
+  scoreGroups?: Array<{
+    id: "base" | "bonus";
+    label: string;
+    score: number | null;
+    maxScore: number;
+    total: number;
+    reviewed: number;
+    pending: number;
+  }> | null;
   uploadedBy: string;
   submittedAt: string;
 };

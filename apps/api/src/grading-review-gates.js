@@ -64,6 +64,47 @@ export function gradingQuestionReviewState(questions = []) {
   };
 }
 
+// The caller supplies a server-validated source package. Group membership must
+// come from that source, never from OCR, question order or a teacher score patch.
+export function gradingSourceScoreGroups(questions = [], sourcePackage = null) {
+  const source = sourcePackage?.questions;
+  if (!Array.isArray(source) || !source.length || !Array.isArray(questions) || questions.length !== source.length) return null;
+  const byNo = new Map();
+  for (const question of questions) {
+    const no = String(question?.questionNo ?? "").trim();
+    if (!no || byNo.has(no)) return null;
+    byNo.set(no, question);
+  }
+  const groups = new Map();
+  const seen = new Set();
+  for (const item of source) {
+    const no = String(item?.questionNo ?? "").trim();
+    const id = item?.context?.scoreGroup;
+    const question = byNo.get(no);
+    const maxScore = optionalNumber(item?.maxScore);
+    if (!no || seen.has(no) || !question || !["base", "bonus"].includes(id) || maxScore == null || maxScore <= 0 || optionalNumber(question.maxScore) !== maxScore) return null;
+    seen.add(no);
+    const group = groups.get(id) || { id, label: id === "base" ? "基础" : "附加", score: 0, maxScore: 0, total: 0, reviewed: 0, pending: 0 };
+    group.maxScore += maxScore;
+    group.total += 1;
+    if (isReviewedQuestion(question) && Number(question.score) <= maxScore) {
+      group.reviewed += 1;
+      group.score += Number(question.score);
+    } else {
+      group.pending += 1;
+    }
+    groups.set(id, group);
+  }
+  for (const id of ["base", "bonus"]) {
+    const declared = optionalNumber(sourcePackage[`${id}Score`]);
+    if (declared != null && Math.abs(declared - (groups.get(id)?.maxScore || 0)) > 0.001) return null;
+  }
+  return ["base", "bonus"].filter(id => groups.has(id)).map(id => {
+    const group = groups.get(id);
+    return { ...group, maxScore: Number(group.maxScore.toFixed(2)), score: group.pending ? null : Number(group.score.toFixed(2)) };
+  });
+}
+
 export function requireAllQuestionsReviewedForArchive(result = {}, externalPacket = null) {
   const state = gradingQuestionReviewState(result.questionResults);
   if (!state.readyForArchive) {
