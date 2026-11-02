@@ -15,6 +15,37 @@ import {
 
 const now = new Date("2026-07-05T12:00:00.000Z");
 
+test("profile grading summary reflects final teacher reviews without reusing the AI draft", () => {
+  const student = studentFixture();
+  const result = student.submissions[0].grading.result;
+  result.summary = "STALE_AI_Q8_WRONG_Q12_PENDING";
+  result.questionResults = [
+    { questionNo: "8", reviewedByTeacher: true, status: "correct", score: 2, maxScore: 2 },
+    { questionNo: "12", reviewedByTeacher: true, status: "wrong", score: 0, maxScore: 2, knowledgePoint: "运算顺序", errorStep: "首次选项错误" },
+    { questionNo: "1", reviewedByTeacher: true, status: "partial", score: 1, maxScore: 2, knowledgePoint: "运算顺序", explanation: "第一空正确" }
+  ];
+  const before = JSON.stringify(student);
+  const pack = buildProfileEvidencePack(student, { now });
+  const summary = pack.gradingEvidence.find(item => item.id === "sub_ok").summary;
+  assert.match(summary, /教师已逐题复核3题/);
+  assert.match(summary, /第12、1题/);
+  assert.doesNotMatch(summary, /STALE_AI|第8题/);
+  assert.equal(JSON.stringify(student), before);
+
+  result.questionResults = [result.questionResults[0]];
+  const allCorrect = buildProfileEvidencePack(student, { now }).gradingEvidence[0].summary;
+  assert.match(allCorrect, /均为正确/);
+  assert.doesNotMatch(allCorrect, /STALE_AI/);
+
+  result.questionResults[0].reviewedByTeacher = false;
+  assert.equal(buildProfileEvidencePack(student, { now }).gradingEvidence[0].summary, result.summary);
+  result.questionResults[0].reviewedByTeacher = true;
+  student.submissions[0].status = "SUBMITTED";
+  const blocked = buildProfileEvidencePack(student, { now });
+  assert.equal(blocked.gradingEvidence.length, 0);
+  assert.equal(blocked.blockedEvidence.find(item => item.id === "sub_ok").summary, result.summary);
+});
+
 test("archive replacement is selected before the profile period, including a zero-mistake correction", async () => {
   const source = buildGradingSourcePackage({ id: "paper", items: [{ prompt: "1+1", answer: "2", score: 5 }] }).package;
   const q = { id: "q1", questionNo: "1", printedPrompt: "1+1", studentAnswer: "3", correctAnswer: "2", status: "wrong", score: 0, maxScore: 5, explanation: "Add one and one.", knowledgePoint: "addition", reviewedByTeacher: true, confirmedBy: "t1" };

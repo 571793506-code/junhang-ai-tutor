@@ -1,4 +1,5 @@
 import { sanitizeQaText, selectCurrentTeachingEvidence } from "@junhang/services";
+import { gradingQuestionReviewState } from "./grading-review-gates.js";
 
 const SUBJECTS = ["语文", "数学", "英语"];
 const QA_SCHEMA_VERSION = "qa-learning-signal-v1";
@@ -44,7 +45,7 @@ export function buildProfileEvidencePack(student, options = {}) {
       title: submission.assignment?.title || "批改记录",
       at: isoDate(submission.submittedAt),
       score: submission.grading?.score ?? result.score ?? null,
-      summary: result.summary || result.gradingText || "",
+      summary: blocked ? result.summary || result.gradingText || "" : reviewedGradingSummary(result),
       knowledgePoints: extractKnowledgePoints(result),
       confidence: blocked ? "blocked" : "confirmed"
     };
@@ -1438,6 +1439,21 @@ function subjectFromValue(value) {
   if (text.includes("数学") || text.toLowerCase().includes("math")) return "数学";
   if (text.includes("英语") || text.toLowerCase().includes("english")) return "英语";
   return "";
+}
+
+function reviewedGradingSummary(result) {
+  const state = gradingQuestionReviewState(result.questionResults);
+  if (!state.readyForArchive || state.questions.some(question =>
+    !["correct", "partial", "wrong"].includes(question.status) || Number(question.score) > Number(question.maxScore)
+  )) return result.summary || result.gradingText || "";
+  const mistakes = state.questions.filter(question => ["wrong", "partial"].includes(question.status));
+  const questionNos = mistakes.map(question => String(question.questionNo ?? "").trim()).filter(Boolean);
+  const focus = mistakes.length === 0
+    ? "本次逐题评分均为正确。"
+    : questionNos.length === mistakes.length
+      ? `已确认错题或部分得分题：第${questionNos.join("、")}题。`
+      : `已确认${mistakes.length}道错题或部分得分题。`;
+  return `教师已逐题复核${state.total}题；${focus}`;
 }
 
 function extractKnowledgePoints(result) {

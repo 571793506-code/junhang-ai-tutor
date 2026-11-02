@@ -85,7 +85,7 @@ import { isNoMarkdownDocumentsError, summarizeContentIndexState } from "./conten
 import { createEncodingGuardMiddleware } from "./encoding-guard-middleware.js";
 import { loadRuntimeConfig, publicConfigSummary } from "./env.js";
 import { gradingQuestionReviewState, gradingSourceScoreGroups, requireAllQuestionsReviewedForArchive } from "./grading-review-gates.js";
-import { filterNewReviewedMistakes, loadCurrentTeachingEvidence } from "./grading-mistake-archive.js";
+import { filterNewReviewedMistakes, loadCurrentTeachingEvidence, reviewedMistakesFromResult } from "./grading-mistake-archive.js";
 import { isImmutableTeachingArchive, rejectArchivedSubmissionMutation } from "./teaching-archive-guard.js";
 import { hydrateQuestionDraftsFromOcr } from "./grading-workbench-question-drafts.js";
 import {
@@ -3492,45 +3492,6 @@ function mapGradingWorkbench(submission) {
     uploadedBy: review.uploadedBy,
     submittedAt: review.submittedAt
   };
-}
-
-function reviewedMistakesFromResult(result = {}, submission) {
-  const subject = submission.assignment?.subject?.name || safeJson(submission.assignment?.metadata, {}).subject || "unknown";
-  const sourceVersion = result.workflowRevision ?? result.sourceRevision ?? result.gradingSource?.version ?? null;
-  const explicitMistakes = Array.isArray(result.mistakes) ? result.mistakes : [];
-  const questionMistakes = Array.isArray(result.questionResults)
-    ? result.questionResults
-        .filter((item) => ["wrong", "partial"].includes(item.status))
-        .map((item) => ({
-          prompt: `第${item.questionNo || ""}题：${item.knowledgePoint || "错题"}`,
-          studentAnswer: item.studentAnswer || null,
-          correctAnswer: item.correctAnswer || null,
-          cause: item.errorStep || item.explanation || "教师复核确认后归档。",
-          point: item.knowledgePoint || subject,
-          severity: item.status === "partial" ? "partial" : "normal",
-          metadata: { questionNos: [String(item.questionNo || "").trim()].filter(Boolean), ...(sourceVersion == null ? {} : { sourceVersion }) }
-        }))
-    : [];
-  return (explicitMistakes.length ? explicitMistakes : questionMistakes)
-    .filter((mistake) => mistake.prompt || mistake.point || mistake.cause)
-    .map((mistake) => ({
-      studentId: submission.studentId,
-      subject: mistake.subject || subject,
-      prompt: mistake.prompt || mistake.point || "错题记录",
-      studentAnswer: mistake.studentAnswer || null,
-      correctAnswer: mistake.correctAnswer || null,
-      cause: mistake.cause || mistake.reason || mistake.errorStep || null,
-      metadata: {
-        ...(mistake.metadata || {}),
-        source: "submission-review",
-        submissionId: submission.id,
-        sourceSubmissionId: submission.id,
-        assignmentId: submission.assignmentId,
-        ...(sourceVersion == null ? {} : { sourceVersion }),
-        reviewStatus: "teacher_reviewed",
-        severity: mistake.severity || "normal"
-      }
-    }));
 }
 
 app.get("/health", asyncRoute(async (_req, res) => {

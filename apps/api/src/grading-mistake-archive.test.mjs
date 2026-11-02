@@ -3,7 +3,24 @@ import test from "node:test";
 import { buildGradingSourcePackage } from "@junhang/core";
 import { buildTeachingWorkflowArchive } from "@junhang/services";
 
-import { filterNewReviewedMistakes, loadCurrentTeachingEvidence } from "./grading-mistake-archive.js";
+import { filterNewReviewedMistakes, loadCurrentTeachingEvidence, reviewedMistakesFromResult } from "./grading-mistake-archive.js";
+
+test("archive uses final question reviews instead of stale AI mistake summaries", () => {
+  const result = { mistakes: [{ prompt: "stale Q8" }], questionResults: [
+    { questionNo: "8", status: "correct", reviewedByTeacher: true, score: 2, maxScore: 2 },
+    { questionNo: "12", status: "wrong", reviewedByTeacher: true, score: 0, maxScore: 2, prompt: "Choose A", studentAnswer: "D", correctAnswer: "A", knowledgePoint: "order", errorStep: "Wrong option", teacherNote: "First attempt D; correction A." },
+    { questionNo: "1", status: "partial", reviewedByTeacher: true, score: 1, maxScore: 2, knowledgePoint: "order", explanation: "First blank accepted" }
+  ] };
+  const records = reviewedMistakesFromResult(result, { id: "s1", studentId: "student", assignmentId: "paper", assignment: { metadata: { subject: "math" } } });
+  assert.deepEqual(records.map(m => m.metadata.questionNos), [["12"], ["1"]]);
+  assert.equal(records[0].studentAnswer, "D");
+  assert.equal(records[0].prompt, "Choose A");
+  assert.equal(records[0].metadata.teacherNote, "First attempt D; correction A.");
+  assert.equal(records[0].metadata.sourceSubmissionId, "s1");
+  assert.equal(records[1].metadata.severity, "partial");
+  assert.deepEqual(reviewedMistakesFromResult({ ...result, questionResults: [result.questionResults[0]] }, {}), []);
+});
+
 
 test("profile source loading fetches archive versions beyond the recent submission limit with student scope", async () => {
   const calls = [];

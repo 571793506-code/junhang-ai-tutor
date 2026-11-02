@@ -1,5 +1,47 @@
 import { selectCurrentTeachingEvidence } from "@junhang/services";
 
+export function reviewedMistakesFromResult(result = {}, submission = {}) {
+  const subject = submission.assignment?.subject?.name || submission.assignment?.metadata?.subject || "unknown";
+  const sourceVersion = result.workflowRevision ?? result.sourceRevision ?? result.gradingSource?.version ?? null;
+  const questionMistakes = Array.isArray(result.questionResults)
+    ? result.questionResults
+        .filter((item) => ["wrong", "partial"].includes(item?.status) && item?.reviewedByTeacher === true)
+        .map((item) => ({
+          prompt: item.prompt || `第${item.questionNo || ""}题：${item.knowledgePoint || "错题"}`,
+          studentAnswer: item.studentAnswer || null,
+          correctAnswer: item.correctAnswer || null,
+          cause: item.teacherNote || item.errorStep || item.explanation || "教师复核确认后归档。",
+          point: item.knowledgePoint || subject,
+          severity: item.status === "partial" ? "partial" : "normal",
+          metadata: {
+            questionNos: [String(item.questionNo || "").trim()].filter(Boolean),
+            ...(item.teacherNote ? { teacherNote: item.teacherNote } : {}),
+            ...(sourceVersion == null ? {} : { sourceVersion })
+          }
+        }))
+    : [];
+  return questionMistakes
+    .filter((mistake) => mistake.prompt || mistake.point || mistake.cause)
+    .map((mistake) => ({
+      studentId: submission.studentId,
+      subject: mistake.subject || subject,
+      prompt: mistake.prompt || mistake.point || "错题记录",
+      studentAnswer: mistake.studentAnswer || null,
+      correctAnswer: mistake.correctAnswer || null,
+      cause: mistake.cause || mistake.reason || mistake.errorStep || null,
+      metadata: {
+        ...(mistake.metadata || {}),
+        source: "submission-review",
+        submissionId: submission.id,
+        sourceSubmissionId: submission.id,
+        assignmentId: submission.assignmentId,
+        ...(sourceVersion == null ? {} : { sourceVersion }),
+        reviewStatus: "teacher_reviewed",
+        severity: mistake.severity || "normal"
+      }
+    }));
+}
+
 export async function loadCurrentTeachingEvidence(prisma, student) {
   if (!student) return null;
   // The recent-80 window is not an archive authority: a zero-mistake correction
