@@ -6,6 +6,7 @@ const matches = (where, row) => Object.entries(where).every(([field, expected]) 
   if (expected && typeof expected === "object") {
     if ("in" in expected) return expected.in.includes(row[field]);
     if ("not" in expected) return row[field] !== expected.not;
+    if ("startsWith" in expected) return typeof row[field] === "string" && row[field].startsWith(expected.startsWith);
   }
   return row[field] === expected;
 });
@@ -18,7 +19,14 @@ export function fakeWorkflowPrisma({ workflows = [], revisions = [] } = {}) {
       const compound = where.workflowId_revision || where.workflowId_operationKey;
       return compound && matches(compound, row);
     }) || null),
-    findFirst: async ({ where }) => copy(rows.find((row) => matches(where, row)) || null),
+    findFirst: async ({ where, orderBy = [] }) => {
+      const selected = rows.filter((row) => matches(where, row));
+      for (const order of [...(Array.isArray(orderBy) ? orderBy : [orderBy])].reverse()) {
+        const [field, direction] = Object.entries(order)[0];
+        selected.sort((a, b) => a[field] < b[field] ? (direction === "asc" ? -1 : 1) : a[field] > b[field] ? (direction === "asc" ? 1 : -1) : 0);
+      }
+      return copy(selected[0] || null);
+    },
     findMany: async ({ where }) => copy(rows.filter((row) => matches(where, row))),
     count: async ({ where }) => rows.filter((row) => matches(where, row)).length,
     create: async ({ data }) => {

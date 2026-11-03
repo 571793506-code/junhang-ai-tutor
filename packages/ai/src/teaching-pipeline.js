@@ -1,4 +1,6 @@
-import { normalizeTeachingPurpose, assessmentScoreIssues, normalizeAssessmentOptions, assessmentChoiceOptionsValid, validateGradingSourcePackage } from "@junhang/core";
+import { normalizeTeachingPurpose, assessmentScoreIssues, normalizeAssessmentOptions, assessmentChoiceOptionsValid, validateGradingSourcePackage, inspectEncodingPayload } from "@junhang/core";
+import { createHash } from "node:crypto";
+import { loadTeachingRulePack } from "./teaching-rules.js";
 import { buildAssessmentPartitions, mapWithConcurrency } from "./assessment-partitions.js";
 import { resolveTeachingTaskPolicy } from "./model-policy.js";
 import { validateAssessmentPartition, assessmentReadingRequirements } from "./model-escalation.js";
@@ -44,6 +46,7 @@ function runtimeResult(task, input, units, text, extra = {}) {
         teachingPipelineVersion: "teaching-pipeline-v1", attempts,
         rules: units.map((unit) => ({ unitId: unit.id, ...unit.result.internal.rules })),
         partialGeneration: units.some((unit) => unit.result.status !== "success"),
+        checkpointReusedUnits: units.filter(unit => unit.result.internal.checkpointReused).map(unit => unit.id),
         primaryModel: attempts[0]?.model || policy.primary.model,
         solAttempted: replacementAttempts.length > 0, escalationTriggered: replacementAttempts.length > 0,
         usedModelEscalation: replacementAttempts.some((attempt) => attempt.status === "SUCCESS"),
@@ -210,7 +213,57 @@ function compactVerifiedGradingContext(input) {
   return projected;
 }
 
-async function runGroupedGrading(config, input, safeInput, execution, runTask, pool, contract) {
+function canonical(value) {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).filter(key => value[key] !== undefined).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+
+// Only the server supplies this interface. A checkpoint is a validated unit,
+// never a whole-paper draft or a teacher confirmation.
+async function gradingCheckpointRunner(config, input, execution, contract) {
+  const direct = (_id, _targets, _validate, run) => run();
+  const checkpoint = execution.checkpoint;
+  if (typeof checkpoint?.save !== "function") return direct;
+  let rules;
+  try { rules = await loadTeachingRulePack("grading", { root: execution.ruleRoot }); } catch { return direct; }
+  const version = "grading-checkpoint-v1";
+  // The service rebuilds this manifest on each execution. Its creation time
+  // changes without changing any teaching evidence; retain all geometry/data.
+  const boundInput = { ...input };
+  if (input.questionLayoutManifest && typeof input.questionLayoutManifest === "object") {
+    const { generatedAt: _generatedAt, ...layout } = input.questionLayoutManifest;
+    boundInput.questionLayoutManifest = layout;
+  }
+  const base = { version, input: boundInput, policy: resolveTeachingTaskPolicy("grading", config), ruleHash: rules.hash, contract,
+    evidence: checkpoint.binding ?? null, evidenceSufficient: execution.evidenceSufficient !== false,
+    disableSolEscalation: execution.disableSolEscalation === true };
+  const checkSignal = () => { if (execution.signal?.aborted) throw execution.signal.reason || new Error("TEACHING_CANCELLED"); };
+  return async (id, targets, validate, run) => {
+    checkSignal();
+    const binding = createHash("sha256").update(canonical({ ...base, targets })).digest("hex");
+    const saved = checkpoint.units?.[id];
+    let result;
+    if (saved?.version === version && saved.binding === binding && saved.candidate && typeof saved.candidate === "object" && !Array.isArray(saved.candidate)) {
+      const candidate = structuredClone(saved.candidate);
+      if (inspectEncodingPayload(candidate).ok && !/gpt-\d|deepseek|minimax|openai|reasoning_effort|api[_-]?key/i.test(JSON.stringify(candidate)) && validate(candidate).length === 0) {
+        result = { status: "success", candidate, issueCodes: [], internal: { attempts: [],
+          rules: pick(rules, ["module", "version", "hash"]), checkpointReused: true } };
+      }
+    }
+    result ||= await run();
+    checkSignal();
+    // A rule edit while a call is in flight cannot label its output with the
+    // earlier hash. The full operation must still pass normal snapshot gates.
+    if (result.status === "success" && result.internal.rules?.hash === rules.hash) {
+      await checkpoint.save(id, { version, binding, candidate: structuredClone(result.candidate) });
+      checkSignal();
+    }
+    return result;
+  };
+}
+
+async function runGroupedGrading(config, input, safeInput, execution, runTask, pool, contract, checkpointUnit) {
   const policy = resolveTeachingTaskPolicy("grading", config);
   const questionNos = safeInput.ocrQuestions.map(q => String(q.questionNo));
   const middle = Math.ceil(questionNos.length / 2);
@@ -225,13 +278,14 @@ async function runGroupedGrading(config, input, safeInput, execution, runTask, p
     units = await mapWithConcurrency(groups, policy.maxConcurrency, async (targets, index) => {
       const expected = { ...safeInput, ocrQuestions: safeInput.ocrQuestions.filter(q => targets.includes(String(q.questionNo))) };
       const allowance = Math.floor(primaryTotal / 2) + (index === 0 ? primaryTotal % 2 : 0);
-      const result = await runTeachingPipelineUnit(runTask, config, "grading", {
+      const validate = candidate => gradingContentIssues(candidate, expected);
+      const result = await checkpointUnit(`grading-${index + 1}`, targets, validate, () => runTeachingPipelineUnit(runTask, config, "grading", {
         // Both groups retain ALL source and student evidence, including global
         // instructions and cross-question materials. Only output targets differ.
         ...safeInput, gradingQuestionNos: targets
       }, { ...execution, additionalAttemptBudget }, pool, allowance,
-      candidate => gradingContentIssues(candidate, expected),
-      contract + " 上下文保留全卷证据供交叉核对；本次只批改 gradingQuestionNos 指定题号，questionResults 必须且只能包含这些题号。不要输出其他题的评分或把本组当成整卷结论。");
+      validate,
+      contract + " 上下文保留全卷证据供交叉核对；本次只批改 gradingQuestionNos 指定题号，questionResults 必须且只能包含这些题号。不要输出其他题的评分或把本组当成整卷结论。"));
       return { id: `grading-${index + 1}`, result };
     });
   } finally {
@@ -282,12 +336,15 @@ export async function runSubmissionPipeline(config, task, input, execution, runT
     return [];
   };
   const policy = resolveTeachingTaskPolicy(task, config);
+  const checkpointUnit = task === "grading" ? await gradingCheckpointRunner(config, selected, { ...execution, evidenceSufficient }, contract)
+    : (_id, _targets, _validate, run) => run();
   // A verified projection establishes aligned references without modifying or
   // rehashing the original package. Unverified sources keep the original path.
   if (task === "grading" && safeInput !== selected && questions.length >= policy.questionGroupThreshold) {
-    return runGroupedGrading(config, input, safeInput, { ...execution, evidenceSufficient }, runTask, pool, contract);
+    return runGroupedGrading(config, input, safeInput, { ...execution, evidenceSufficient }, runTask, pool, contract, checkpointUnit);
   }
-  const result = await runTeachingPipelineUnit(runTask, config, task, safeInput, { ...execution, evidenceSufficient }, pool, policy.budget.maxTokens, validate, contract);
+  const result = await checkpointUnit(task, questions.map(q => String(q.questionNo)), validate,
+    () => runTeachingPipelineUnit(runTask, config, task, safeInput, { ...execution, evidenceSufficient }, pool, policy.budget.maxTokens, validate, contract));
   if (execution.signal?.aborted) throw execution.signal.reason || new Error("TEACHING_CANCELLED");
   return runtimeResult(task, input, [{ id: task, result }], result.candidate ? JSON.stringify(result.candidate) : "");
 }

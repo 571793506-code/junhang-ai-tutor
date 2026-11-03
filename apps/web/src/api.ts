@@ -558,6 +558,7 @@ export type GradingWorkflowQuestion = {
 };
 export type GradingWorkflowPage = { pageNumber: number; imageUrl: string | null; fileName: string; imageRefs: string[]; cropRef?: string | null; qualityStatus: string };
 export type GradingWorkflowView = TeachingWorkflowSummary & {
+  recoveryAllowed?: boolean;
   failure?: { code: string; phase: "execute" | "validate" | "persist"; elapsedMs: number } | null;
   content: { title?: string; questions: GradingWorkflowQuestion[]; pages?: GradingWorkflowPage[];
     gradingSummary?: { score: number | null; confirmedScore: number | null; totalScore: number | null; unresolvedCount: number; confirmedCount: number } };

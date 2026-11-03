@@ -83,6 +83,36 @@ function completionDiagnostics(value, outputTokens, maxTokens) {
   };
 }
 
+// Revalidate at the durable-workflow boundary, even for injected executors.
+// Keep observations only: no model configuration, prompts or exception text.
+export function sanitizeTeachingDiagnostics(value) {
+  if (!Array.isArray(value?.attempts)) return null;
+  const attempts = value.attempts.slice(0, 8).map(source => {
+    const item = source && typeof source === "object" ? source : {};
+    const result = { partitionId: /^(grading(?:-[12])?|reference|generation)$/.test(item.partitionId) ? item.partitionId : "unknown",
+      status: item.status === "SUCCESS" ? "SUCCESS" : "ERROR" };
+    for (const key of ["elapsedMs", "timeoutMs", "maxTokens"]) if (Number.isSafeInteger(item[key]) && item[key] >= 0) result[key] = item[key];
+    if (["primary", "quality-repair", "availability-replacement"].includes(item.role)) result.role = item.role;
+    if (["validation_failed", "invalid_json", "invalid_structure", "MODEL_TIMEOUT", "TEACHING_DEADLINE", "invalid_upstream_response", "http_error", "transport_error", "unknown_failure"].includes(item.failureCode)) result.failureCode = item.failureCode;
+    if (Number.isInteger(item.upstreamStatus) && item.upstreamStatus >= 100 && item.upstreamStatus <= 599) result.upstreamStatus = item.upstreamStatus;
+    if (item.upstreamCode != null) result.upstreamCode = UPSTREAM_CODES.has(item.upstreamCode) ? item.upstreamCode : "unknown";
+    if (["quality", "availability", "evidence", "configuration"].includes(item.triggerClass)) result.triggerClass = item.triggerClass;
+    if (Array.isArray(item.validationIssueCodes)) result.validationIssueCodes = [...new Set(item.validationIssueCodes.slice(0, 32).map(diagnosticIssue))];
+    const transport = sanitizeTransportDiagnostics(item.transportDiagnostics);
+    if (transport) result.transportDiagnostics = transport;
+    const stages = Object.values(item.transportStages || {}).map(sanitizeTransportDiagnostics).filter(Boolean).slice(0, 3);
+    if (stages.length) result.transportStages = stages;
+    const upstream = sanitizeUpstreamFailureDiagnostics(item.upstreamDiagnostics);
+    if (upstream) result.upstreamDiagnostics = upstream;
+    const usage = sanitizeUsage(item.usage);
+    if (usage) result.usage = usage;
+    if (item.completionDiagnostics) result.completionDiagnostics = completionDiagnostics(item.completionDiagnostics,
+      result.usage?.completion_tokens ?? result.usage?.output_tokens, result.maxTokens);
+    return result;
+  });
+  return { attempts };
+}
+
 // Defense in depth; business fields and actor permissions are validated by the service.
 function stripInternal(value, depth = 0) {
   if (Array.isArray(value)) return value.map((item) => stripInternal(item, depth + 1));

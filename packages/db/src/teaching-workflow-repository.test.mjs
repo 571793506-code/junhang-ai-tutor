@@ -10,10 +10,13 @@ import { createTeachingWorkflowExecution } from "../../../apps/api/src/teaching-
 import { workflowHttpFixture } from "../../../scripts/test-support/teaching-workflow-http.mjs";
 import { createTeachingWorkflowClient } from "../../../scripts/teaching-workflow-client.mjs";
 import { buildGradingSourcePackage } from "@junhang/core";
+import { exerciseGradingCheckpointRecovery } from "../../../scripts/test-support/teaching-workflow-grading-checkpoint.mjs";
 
 const schemaName = `jh_workflow_test_${randomUUID().replaceAll("-", "")}`;
 const testDir = path.resolve("tmp", schemaName);
 const integrationEnabled = process.env.RUN_WORKFLOW_POSTGRES_TESTS === "1";
+test("real PostgreSQL persists grouped model checkpoints through HTTP failure and cross-service recovery", { skip: !integrationEnabled },
+  (t) => exerciseGradingCheckpointRecovery(t, repo, createTeachingWorkflowRepository(prisma)));
 let admin; let prisma; let repo;
 before(async () => {
   if (!integrationEnabled) return;
@@ -186,6 +189,24 @@ test("failed creation recovery persists one independent draft across concurrent 
   assert.deepEqual(await repo.get(failed.id, "t1"), original);
   assert.equal(await prisma.teachingWorkflowRevision.count({ where: { workflowId: failed.id } }), 1);
   assert.equal(await prisma.teachingWorkflowRevision.count({ where: { workflowId: ready.id } }), 2);
+});
+
+test("legacy recovery successors replay after PostgreSQL repository reload without new model calls", { skip: !integrationEnabled }, async (t) => {
+  let calls = 0;
+  const request = { title: "隔离旧恢复键测试", requirement: "保留教师评分决定" };
+  const http = await workflowHttpFixture(t, { repository: repo, createDraft: async () => { calls++; throw new Error("PRIVATE"); } });
+  const client = createTeachingWorkflowClient({ baseUrl: http.baseUrl, session: { sessionToken: http.tokens.teacher } });
+  const original = await client.create({ module: "grading", requestKey: randomUUID(), request });
+  const legacy = await client.create({ module: "grading", requestKey: `recover:${original.id}:old-operation-key-hash`, request });
+  const before = await repo.get(original.id, "t1");
+  const reloadedRepo = createTeachingWorkflowRepository(prisma);
+  assert.equal(await reloadedRepo.getRecoveryCreation({ workflowId: original.id, ownerTeacherId: "other-teacher" }), null);
+  const second = await workflowHttpFixture(t, { repository: reloadedRepo });
+  const reloaded = createTeachingWorkflowClient({ baseUrl: second.baseUrl, session: { sessionToken: second.tokens.teacher } });
+  const recovered = await reloaded.recover(original.id, { expectedRevision: 1, operationKey: randomUUID() });
+  assert.equal(recovered.id, legacy.id); assert.equal(recovered.recoveryAllowed, false);
+  assert.equal(calls, 2); assert.deepEqual(await repo.get(original.id, "t1"), before);
+  await assert.rejects(reloaded.recover(legacy.id, { expectedRevision: 1, operationKey: randomUUID() }), { code: "WORKFLOW_RECOVERY_NOT_ALLOWED" });
 });
 
 test("HTTP and dialogue client share real persisted generation revisions across reload, replay and confirmation", { skip: !integrationEnabled }, async (t) => {

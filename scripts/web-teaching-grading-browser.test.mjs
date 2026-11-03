@@ -19,18 +19,18 @@ const launch = () => chromium.launch({ headless: true,
   ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}) });
 const pageSvg = (n) => `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800"><rect width="600" height="800" fill="white"/><g font-family="sans-serif" font-size="24" fill="#163b45"><text x="50" y="65">合成作业 · 第 ${n} 页</text><text x="60" y="155">${n === 1 ? "1. 说明交换加数为什么和不变" : "2. 24 + 18 = 42"}</text><text x="60" y="205">${n === 1 ? "交换两堆小棒，总数一样。" : "个位相加满十，向十位进一。"}</text></g></svg>`;
 
-test("failed grading recovery preserves the original requirement and safely replays a lost response", { timeout: 40000 }, async (t) => {
+for (const outcome of ["success", "failure"]) test(`failed grading recovery safely replays a lost response, successor ${outcome}`, { timeout: 40000 }, async (t) => {
   let calls = 0;
   const request = { studentId: "s1", submissionId: "submission1", title: "恢复测试", requirement: "首次作答评分，订正另记" };
   const f = await workflowHttpFixture(t, { createDraft: async ({ input }) => {
     calls++; assert.deepEqual(input.request, request);
-    if (calls === 1) throw new Error("PRIVATE");
+    if (calls === 1 || outcome === "failure") throw new Error("PRIVATE");
     return { snapshot: { questions: [{ id: "q1", questionNo: "1", prompt: "1+1", answer: "2", studentAnswer: "2", correctAnswer: "2", score: 2, maxScore: 2, status: "correct", explanation: "计算正确" }] } };
   } });
   const c = createTeachingWorkflowClient({ baseUrl: f.baseUrl, session: { sessionToken: f.tokens.teacher } });
   const failed = await c.create({ module: "grading", requestKey: "failed-browser", request });
   const original = structuredClone(await f.repo.get(failed.id, "t1"));
-  const vite = await createServer({ configFile: false, root: path.resolve("apps/web"), cacheDir: path.join(artifactDir, "recovery-vite-cache"), plugins: [react(), {
+  const vite = await createServer({ configFile: false, root: path.resolve("apps/web"), cacheDir: path.join(artifactDir, `recovery-${outcome}-vite-cache`), plugins: [react(), {
     name: "grading-recovery-fixture",
     configureServer(server) { server.middlewares.use(async (req, res, next) => {
       if (req.url !== "/__recovery") return next();
@@ -59,13 +59,17 @@ test("failed grading recovery preserves the original requirement and safely repl
   assert.equal(calls, 2);
   await page.reload();
   await recover.click();
-  await page.getByRole("heading", { name: "恢复测试 · 版本 2 · 待教师复核", exact: true }).waitFor();
+  const finalState = outcome === "success" ? page.getByRole("heading", { name: "恢复测试 · 版本 2 · 待教师复核", exact: true })
+    : page.getByText("恢复仍未完成，请保留本任务并排查来源、识别证据或服务状态后再处理。", { exact: true });
+  await finalState.waitFor();
+  assert.equal(await recover.count(), 0);
   assert.equal(calls, 2); assert.equal(keys.length, 2); assert.equal(keys[0], keys[1]);
   assert.deepEqual(await f.repo.get(failed.id, "t1"), original);
   assert.equal(await page.getByRole("button", { name: "归档当前确认版本", exact: true }).isDisabled(), true);
-  await mkdir(artifactDir, { recursive: true }); await page.screenshot({ path: path.join(artifactDir, "grading-recovery.png") });
+  await mkdir(artifactDir, { recursive: true }); await page.screenshot({ path: path.join(artifactDir, `grading-recovery-${outcome}.png`) });
   await page.reload();
-  await page.getByRole("heading", { name: "恢复测试 · 版本 2 · 待教师复核", exact: true }).waitFor();
+  await finalState.waitFor();
+  assert.equal(await recover.count(), 0);
   assert.equal(calls, 2); assert.deepEqual(errors, []);
 });
 

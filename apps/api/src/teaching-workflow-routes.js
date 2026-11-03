@@ -63,7 +63,7 @@ function workflowView(result) {
     ? [{ code: "WORKFLOW_CREATION_INCOMPLETE", message: result.status === "needs_input" ? "任务条件、来源证据或草稿结构尚不完整，请补齐后重新发起。" : "任务已登记，尚无可复核内容。请查看任务状态。" }] : [];
   const failure = result.failure && Object.hasOwn(ERRORS, result.failure.code) && ["execute", "validate", "persist"].includes(result.failure.phase) && Number.isSafeInteger(result.failure.elapsedMs) && result.failure.elapsedMs >= 0
     ? pick(result.failure, ["code", "phase", "elapsedMs"]) : null;
-  return { ...workflowSummary(result), content, issues, failure };
+  return { ...workflowSummary(result), content, issues, failure, recoveryAllowed: result.recoveryAllowed === true };
 }
 function workflowSummary(result) {
   return { id: result.workflowId, module: result.module, revision: result.revision, status: result.status, request: requestInput(result.request || {}),

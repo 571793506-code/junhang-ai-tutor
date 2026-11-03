@@ -28,6 +28,8 @@ test("creation persists a request before the executor and validates content into
   const completed = await f.create();
   assert.equal(completed.revision, 2); assert.equal(completed.status, "ready_for_review");
   assert.equal(completed.snapshot.creationPending, undefined);
+  assert.equal(completed.recoveryAllowed, false);
+  assert.equal((await f.service.get({ actor, workflowId: completed.workflowId, revision: 1 })).recoveryAllowed, false);
   assert.equal(completed.snapshot.questions[0].reviewedByTeacher, undefined);
   assert.deepEqual(completed.request, input.request);
   assert.deepEqual(completed.snapshot.resolvedRequest, draft().request);
@@ -228,4 +230,64 @@ test("failure diagnostics retain safe stage, code and timing without exception t
   const persisted = await persistence.create();
   assert.equal(persisted.failure.phase, "persist");
   assert.equal(persisted.failure.code, "WORKFLOW_EXECUTION_FAILED");
+});
+
+test("server-owned successful units persist on failure and survive recovery across service instances", async () => {
+  let calls = 0;
+  const unit = { version: "grading-checkpoint-v1", binding: "hash", candidate: { questionResults: [{ questionNo: "1", score: 2 }] } };
+  const f = fixture({ createDraft: async ({ checkpoint }) => {
+    if (++calls === 1) {
+      await checkpoint.save("grading-1", unit);
+      throw Object.assign(new Error("PRIVATE"), { teachingDiagnostics: { attempts: [{ partitionId: "grading-2", status: "ERROR", failureCode: "http_error", upstreamStatus: 503,
+        elapsedMs: 50, raw: "PRIVATE", transportDiagnostics: { phase: "response_headers", status: 503, elapsedMs: 25, url: "PRIVATE" } }] } });
+    }
+    assert.deepEqual(checkpoint.units, { "grading-1": unit });
+    await checkpoint.save("grading-1", unit);
+    return draft();
+  } });
+  const failed = await f.create();
+  const stored = await f.repository.get(failed.workflowId, actor.teacherId);
+  assert.deepEqual(stored.checkpoint.units, { "grading-1": unit });
+  assert.equal(stored.checkpoint.failure.diagnostics.attempts[0].upstreamStatus, 503);
+  assert.equal(stored.checkpoint.failure.diagnostics.attempts[0].transportDiagnostics.phase, "response_headers");
+  assert.doesNotMatch(JSON.stringify(stored.checkpoint.failure), /PRIVATE|raw|url/);
+  assert.deepEqual(Object.keys(failed.failure).sort(), ["code", "elapsedMs", "phase"]);
+  const restarted = createTeachingWorkflowService(f.config);
+  const args = { actor, workflowId: failed.workflowId, expectedRevision: 1, operationKey: "explicit" };
+  const recovered = await restarted.recover(args);
+  assert.equal(recovered.status, "ready_for_review");
+  assert.deepEqual((await f.repository.get(recovered.workflowId, actor.teacherId)).checkpoint.units, { "grading-1": unit });
+  assert.deepEqual(await f.repository.get(failed.workflowId, actor.teacherId), stored);
+  assert.equal((await restarted.recover({ ...args, operationKey: "different-key" })).workflowId, recovered.workflowId);
+  assert.equal(calls, 2);
+});
+
+test("a failed recovery cannot create an unbounded recovery chain", async () => {
+  let calls = 0;
+  const f = fixture({ createDraft: () => { calls++; throw new Error("failed"); } });
+  const first = await f.create();
+  assert.equal(first.recoveryAllowed, true);
+  assert.equal((await f.service.get({ actor, workflowId: first.workflowId, revision: 1 })).recoveryAllowed, true);
+  const args = { actor, workflowId: first.workflowId, expectedRevision: 1, operationKey: "explicit" };
+  const next = await f.service.recover(args);
+  assert.equal(next.recoveryAllowed, false);
+  assert.equal((await f.service.recover({ ...args, operationKey: "new-key" })).workflowId, next.workflowId);
+  await assert.rejects(f.service.recover({ ...args, workflowId: next.workflowId }), { code: "WORKFLOW_RECOVERY_NOT_ALLOWED" });
+  assert.equal(calls, 2);
+});
+
+test("legacy recovery keys replay the saved successor after upgrade without another execution", async () => {
+  let calls = 0;
+  const f = fixture({ createDraft: () => { calls++; throw new Error("failed"); } });
+  const first = await f.create();
+  const legacy = await f.create({ ...input, requestKey: `recover:${first.workflowId}:legacy-operation-hash` });
+  const original = structuredClone(await f.repository.get(first.workflowId, actor.teacherId));
+  const restarted = createTeachingWorkflowService({ repository: f.repository });
+  const replay = await restarted.recover({ actor, workflowId: first.workflowId, expectedRevision: 1, operationKey: "new-after-upgrade" });
+  assert.equal(replay.workflowId, legacy.workflowId);
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.recoveryAllowed, false);
+  assert.equal(calls, 2);
+  assert.deepEqual(await f.repository.get(first.workflowId, actor.teacherId), original);
+  assert.equal(await f.repository.getRecoveryCreation({ workflowId: first.workflowId, ownerTeacherId: "other-teacher" }), null);
 });

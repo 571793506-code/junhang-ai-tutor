@@ -140,7 +140,7 @@ export function createTeachingWorkflowExecution({ config = {}, resolveGeneration
   };
   return {
     validateSnapshot,
-    async createDraft({ actor, input, workflow, signal }) {
+    async createDraft({ actor, input, workflow, signal, checkpoint }) {
       checkSignal(signal);
       if (input.module === "generation") {
         const request = await resolveGeneration(actor, input.request);
@@ -155,9 +155,15 @@ export function createTeachingWorkflowExecution({ config = {}, resolveGeneration
       const archive = context.submission.content?.workflowArchive;
       if (archive) return { request: pick({ ...input.request, subject: archive.snapshot.subject, grade: archive.snapshot.grade }, REQUEST_KEYS), snapshot: structuredClone(archive.snapshot) };
       const prepared = gradeInput(context, input.request);
-      const result = await grade(config, prepared, { persist: false, signal, teachingExecution });
+      const result = await grade(config, prepared, { persist: false, signal,
+        teachingExecution: { ...teachingExecution, checkpoint: checkpoint ? { ...checkpoint,
+          binding: { teacherId: actor.teacherId, studentId: input.request.studentId, submissionId: input.request.submissionId,
+            archiveEvidence: context.archiveEvidence, sourceFingerprint: context.sourcePackage.fingerprint } } : undefined } });
       checkSignal(signal);
-      if (result.available !== true || !Array.isArray(result.structured?.questionResults)) fail("WORKFLOW_EXECUTION_FAILED");
+      if (result.available !== true || !Array.isArray(result.structured?.questionResults)) {
+        throw Object.assign(new Error("WORKFLOW_EXECUTION_FAILED"), { code: "WORKFLOW_EXECUTION_FAILED", status: 422,
+          teachingDiagnostics: result.modelRun?.metadata });
+      }
       const byNo = new Map(result.structured.questionResults.map((q) => [String(q.questionNo), q]));
       const snapshot = { title: prepared.title, subject: prepared.subject, grade: prepared.grade,
         gradingSourcePackage: structuredClone(context.sourcePackage), archiveEvidence: structuredClone(context.archiveEvidence),

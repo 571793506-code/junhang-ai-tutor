@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { buildGradingSourcePackage } from "@junhang/core";
 import { gradeSubmissionText, generateSubmissionReferenceAnswers } from "./runtime.js";
 
@@ -23,6 +26,92 @@ const response = (input, uncertain = false) => ({ text: JSON.stringify({
     explanation: uncertain ? "评分细则待确认。" : "方法及计算正确。"
   }))
 }) });
+
+test("completed grading groups survive a failed peer and recovery calls only the missing group", async () => {
+  const input = fixture(); const units = {}; const saved = [];
+  const checkpoint = { units, binding: { evidence: "original" }, save: async (id, value) => { units[id] = structuredClone(value); saved.push(id); } };
+  const first = await gradeSubmissionText({}, input, { checkpoint, call: async (_route, messages) => {
+    const sent = JSON.parse(messages[1].content);
+    if (!sent.gradingQuestionNos.includes("1")) throw Object.assign(new Error("unavailable"), { status: 403 });
+    return response(sent);
+  } });
+  assert.equal(first.available, false); assert.equal(first.gradingText, "");
+  assert.deepEqual(saved, ["grading-1"]);
+  const before = structuredClone(units); const calls = [];
+  const recovered = await gradeSubmissionText({}, input, { checkpoint, call: async (_route, messages) => {
+    const sent = JSON.parse(messages[1].content); calls.push(sent.gradingQuestionNos); return response(sent);
+  } });
+  assert.equal(recovered.available, true);
+  assert.deepEqual(calls, [input.ocrQuestions.slice(15).map(q => q.questionNo)]);
+  assert.equal(JSON.parse(recovered.gradingText).questionResults.length, 29);
+  assert.equal(JSON.parse(recovered.gradingText).needsTeacherReview, true);
+  assert.deepEqual(units["grading-1"], before["grading-1"]);
+  assert.deepEqual(recovered.modelRun.metadata.checkpointReusedUnits, ["grading-1"]);
+});
+
+test("changed teacher requirements, OCR, evidence binding or model policy invalidate grading checkpoints", async () => {
+  const input = fixture(); const units = {};
+  await gradeSubmissionText({}, input, { checkpoint: { units, binding: "original", save: async (id, value) => { units[id] = value; } },
+    call: async (_route, messages) => response(JSON.parse(messages[1].content)) });
+  assert.equal(Object.keys(units).length, 2);
+  for (const change of [
+    { input: { ...input, teacherContext: "教师改为只评分首次作答。" } },
+    { input: { ...input, ocrQuestions: input.ocrQuestions.map((q, i) => i ? q : { ...q, observedWork: "不同的学生过程" }) } },
+    { input: { ...input, questionLayoutManifest: { ...input.questionLayoutManifest, questionCount: 30 } } },
+    { binding: "different-original-image" },
+    { config: { teachingPrimaryModel: "different-test-model" } },
+    { corrupt: true }
+  ]) {
+    const cached = structuredClone(units); let calls = 0;
+    if (change.corrupt) cached["grading-1"].candidate.questionResults = [];
+    const result = await gradeSubmissionText(change.config || {}, change.input || input, {
+      checkpoint: { units: cached, binding: change.binding || "original", save: async () => {} },
+      call: async (_route, messages) => { calls++; return response(JSON.parse(messages[1].content)); }
+    });
+    assert.equal(result.available, true); assert.equal(calls, change.corrupt ? 1 : 2);
+  }
+});
+
+test("checkpoint identity ignores only the derived layout creation time on short and grouped grading", async () => {
+  for (const count of [4, 29]) {
+    const input = fixture(count); const units = {};
+    input.questionLayoutManifest.generatedAt = "2026-11-03T01:00:00Z";
+    const checkpoint = { units, save: async (id, value) => { units[id] = structuredClone(value); } };
+    await gradeSubmissionText({}, input, { checkpoint, call: async (_route, messages) => response(JSON.parse(messages[1].content)) });
+    input.questionLayoutManifest.generatedAt = "2026-11-03T01:01:00Z";
+    let calls = 0;
+    const recovered = await gradeSubmissionText({}, input, { checkpoint, call: async (_route, messages) => { calls++; return response(JSON.parse(messages[1].content)); } });
+    assert.equal(recovered.available, true); assert.equal(calls, 0);
+    assert.equal(recovered.modelRun.metadata.checkpointReusedUnits.length, count === 4 ? 1 : 2);
+  }
+});
+
+test("checkpoint persistence failure stops grading instead of reporting a complete draft", async () => {
+  await assert.rejects(gradeSubmissionText({}, fixture(), {
+    checkpoint: { units: {}, save: async () => { throw Object.assign(new Error("stale"), { code: "WORKFLOW_CHECKPOINT_STALE" }); } },
+    call: async (_route, messages) => response(JSON.parse(messages[1].content))
+  }), { code: "WORKFLOW_CHECKPOINT_STALE" });
+});
+
+test("a changed runtime rule hash invalidates completed grading groups", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "junhang-grading-rules-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = path.join(root, "skills/grading/references");
+  await mkdir(directory, { recursive: true });
+  const rules = path.join(directory, "runtime-rules.md");
+  await writeFile(rules, "# grading-v1\nRequire teacher review.\n", "utf8");
+  const units = {}; const input = fixture();
+  const checkpoint = { units, save: async (id, value) => { units[id] = structuredClone(value); } };
+  await gradeSubmissionText({}, input, { ruleRoot: root, checkpoint,
+    call: async (_route, messages) => response(JSON.parse(messages[1].content)) });
+  assert.equal(Object.keys(units).length, 2);
+  await writeFile(rules, "# grading-v1\nRequire teacher review and inspect original work.\n", "utf8");
+  let calls = 0;
+  const result = await gradeSubmissionText({}, input, { ruleRoot: root, checkpoint,
+    call: async (_route, messages) => { calls++; return response(JSON.parse(messages[1].content)); } });
+  assert.equal(result.available, true); assert.equal(calls, 2);
+  assert.deepEqual(result.modelRun.metadata.checkpointReusedUnits, []);
+});
 
 test("long grading runs two bounded primary groups with complete shared evidence and ordered merge", async () => {
   const input = fixture();

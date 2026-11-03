@@ -1,5 +1,6 @@
 import { applyWorkflowPatch, teachingExplanationContent } from "@junhang/core";
 import { createHash } from "node:crypto";
+import { sanitizeTeachingDiagnostics } from "../../ai/src/teaching-model-runner.js";
 import { reuseArchivedQuestionConfirmations, isTeachingWorkflowArchiveSubmission } from "./teaching-workflow-archive.js";
 
 function gradingReviewSummary(head, saved = head, revision = head.currentRevision) {
@@ -144,7 +145,7 @@ export function createTeachingWorkflowService({ repository, runner = null, valid
         return { workflowId: workflow.id, module: workflow.module, revision: workflow.currentRevision, status: workflow.status, request: clone(workflow.request), ...gradingReviewSummary(workflow) };
       });
     },
-    async create({ actor, input }) {
+    async create({ actor, input }, recoverySource = null) {
       assertActor(actor, { ownerTeacherId: actor?.teacherId });
       if (typeof input?.requestKey !== "string" || !input.requestKey.trim() || !["generation", "grading"].includes(input.module) ||
         (input.request !== undefined && (!input.request || typeof input.request !== "object" || Array.isArray(input.request)))) fail("WORKFLOW_INPUT_INVALID");
@@ -172,7 +173,12 @@ export function createTeachingWorkflowService({ repository, runner = null, valid
       try {
         const current = await repository.get(workflow.id, actor.teacherId);
         if (controller.signal.aborted || current?.status !== "running" || current?.activeOperationKey !== operationInput.operationKey) fail("WORKFLOW_VERSION_CONFLICT", 409);
-        const prepared = await createDraft({ actor: { ...actor }, input: clone(input), workflow: { id: workflow.id, module: workflow.module, revision: 1 }, signal: controller.signal });
+        const checkpoint = { units: clone(recoverySource?.checkpoint?.units),
+          save: async (unitId, candidate) => {
+            if (controller.signal.aborted) fail("WORKFLOW_CANCELLED", 409);
+            await repository.saveCheckpoint({ ...operationInput, unitId, candidate: clone(candidate) });
+          } };
+        const prepared = await createDraft({ actor: { ...actor }, input: clone(input), workflow: { id: workflow.id, module: workflow.module, revision: 1 }, signal: controller.signal, checkpoint });
         if (controller.signal.aborted) fail("WORKFLOW_CANCELLED", 409);
         if (!prepared?.snapshot || typeof prepared.snapshot !== "object" || Array.isArray(prepared.snapshot)) fail("WORKFLOW_SNAPSHOT_INVALID");
         const preparedSnapshot = clone(prepared.snapshot);
@@ -200,7 +206,10 @@ export function createTeachingWorkflowService({ repository, runner = null, valid
         await repository.commitRevision({ ...operationInput, operation: "create", snapshot, affectedQuestionIds: questionIds(snapshot),
           commandFingerprint: createHash("sha256").update(stable(input)).digest("hex"), subjectRef: prepared.subjectRef || null });
       } catch (error) {
+        controller.abort();
         const failure = { code: FAILURE_CODES.has(error.code) ? error.code : "WORKFLOW_EXECUTION_FAILED", phase, elapsedMs: Math.max(0, Date.now() - startedAt) };
+        const diagnostics = sanitizeTeachingDiagnostics(error.teachingDiagnostics);
+        if (diagnostics) failure.diagnostics = diagnostics;
         try { await repository.endOperation({ ...operationInput, failure, status: ["WORKFLOW_SNAPSHOT_INVALID", "WORKFLOW_REQUEST_INCOMPLETE", "WORKFLOW_CONTEXT_REQUIRED", "WORKFLOW_EVIDENCE_CHANGED", "WORKFLOW_INPUT_INVALID"].includes(error.code) ? "needs_input" : "failed" }); } catch (endError) {
           if (endError.code !== "WORKFLOW_CHECKPOINT_STALE") throw endError;
         }
@@ -218,10 +227,15 @@ export function createTeachingWorkflowService({ repository, runner = null, valid
       assertActor(actor, workflow);
       if (workflow.currentRevision !== expectedRevision) fail("WORKFLOW_VERSION_CONFLICT", 409);
       if (workflow.snapshot?.creationPending !== true || !["failed", "interrupted", "needs_input"].includes(workflow.status)) fail("WORKFLOW_RECOVERY_NOT_ALLOWED", 409);
+      // One explicit successor per creation. A new click/key cannot reset the
+      // budget again, and a failed successor is terminal for this lineage.
+      if (workflow.requestKey?.startsWith("recover:")) fail("WORKFLOW_RECOVERY_NOT_ALLOWED", 409);
       // A retry is a new draft, never a rewrite of a failed task or an archived score.
       // The original request and lineage come from the server, not a browser resubmission.
-      const key = createHash("sha256").update(stable({ workflowId, expectedRevision, operationKey })).digest("hex");
-      return this.create({ actor, input: { module: workflow.module, requestKey: `recover:${workflowId}:${key}`, request: clone(workflow.request) } });
+      if (typeof repository.getRecoveryCreation !== "function") fail("WORKFLOW_EXECUTION_UNAVAILABLE", 503);
+      const existing = await repository.getRecoveryCreation({ workflowId, ownerTeacherId: actor.teacherId });
+      const key = createHash("sha256").update(stable({ workflowId, expectedRevision, recoveryVersion: 1 })).digest("hex");
+      return this.create({ actor, input: { module: workflow.module, requestKey: existing?.requestKey ?? `recover:${workflowId}:${key}`, request: clone(workflow.request) } }, workflow);
     },
     async get({ actor, workflowId, revision = null }) {
       assertActor(actor, { ownerTeacherId: actor?.teacherId });
@@ -236,6 +250,8 @@ export function createTeachingWorkflowService({ repository, runner = null, valid
         workflowId: head.id, module: head.module, request: clone(head.request),
         revision: historical?.revision ?? head.currentRevision,
         snapshot: clone(historical?.snapshot ?? head.snapshot),
+        recoveryAllowed: (revision == null || revision === head.currentRevision) && head.snapshot?.creationPending === true &&
+          ["failed", "interrupted", "needs_input"].includes(head.status) && !head.requestKey?.startsWith("recover:"),
         failure: revision != null && revision !== head.currentRevision ? null : failureView(head.checkpoint?.failure),
         ...gradingReviewSummary(head, historical ?? head, historical?.revision ?? head.currentRevision)
       };

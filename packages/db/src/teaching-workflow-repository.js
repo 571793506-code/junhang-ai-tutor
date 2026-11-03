@@ -52,6 +52,13 @@ export function createTeachingWorkflowRepository(prisma = defaultPrisma) {
     async getCreation(input) {
       return findCreation(prisma, creationInput(input));
     },
+    async getRecoveryCreation(input) {
+      identity(input);
+      // Also finds operation-key-based successors created by earlier versions.
+      // Do not use the recent-task list, which is capped at 100 rows.
+      return prisma.teachingWorkflow.findFirst({ where: { ownerTeacherId: input.ownerTeacherId,
+        requestKey: { startsWith: `recover:${input.workflowId}:` } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    },
     async reserveCreation(input) {
       const request = creationInput(input);
       const reuse = async (db) => {

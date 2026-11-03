@@ -5,8 +5,10 @@ import { buildTeachingWorkflowArchive, draftAssessmentService } from "@junhang/s
 import { createTeachingWorkflowExecution } from "./teaching-workflow-execution.js";
 import { workflowHttpFixture } from "../../../scripts/test-support/teaching-workflow-http.mjs";
 import { createTeachingWorkflowClient } from "../../../scripts/teaching-workflow-client.mjs";
+import { exerciseGradingCheckpointRecovery } from "../../../scripts/test-support/teaching-workflow-grading-checkpoint.mjs";
 
 const actor = { teacherId: "t1" };
+test("HTTP grouped grading persists completed units and safe diagnostics then recovers only missing questions", (t) => exerciseGradingCheckpointRecovery(t));
 const request = { subject: "数学", grade: "四年级", kind: "练习", purpose: "focused", requirement: "只练进位加法", requestedItemCount: 1, requestedItemTypes: ["calculation"] };
 const item = () => ({ itemType: "calculation", prompt: "24+18", answer: "42", score: 5, rubric: "计算结果正确得5分", analysisSteps: ["先算24+10", "再加8"], knowledgePoint: "加法", commonMistake: "注意进位" });
 const resultFor = (q = item()) => ({ title: "加法专项", sections: [{ title: "计算", items: [q] }] });
