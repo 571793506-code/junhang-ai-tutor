@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { archiveTeachingGrading, createGradingWorkflow, executeGradingWorkflow, getGradingWorkflow, listTeachingWorkflows,
+import { archiveTeachingGrading, createGradingWorkflow, recoverGradingWorkflow, executeGradingWorkflow, getGradingWorkflow, listTeachingWorkflows,
   teachingImageUrl, type GradingWorkflowPage, type GradingWorkflowQuestion, type GradingWorkflowView, type TeachingWorkflowCommand, type TeachingWorkflowSummary } from "../api";
 
 type Source = { submissionId: string; studentId: string; assignmentId: string; title: string; studentName: string };
@@ -123,6 +123,18 @@ export function GradingWorkbench({ teacherId, active, sources, onLegacy, onArchi
         setMessage(input.action === "confirm" ? "已确认当前题目；归档仍需单独提交。" : "已保存新版本，请核对改动后的题目。"); }
     } catch (error) { fail(error); } finally { finish(); }
   };
+  const recover = async () => {
+    if (!view || !start("recover")) return;
+    const id = view.id;
+    try {
+      const result = await recoverGradingWorkflow(id, view.revision, `recover:${id}:${view.revision}`);
+      if (mounted.current && currentId.current === id) {
+        readSeq.current++; apply(result.workflow); setRegion("question");
+        setMessage("已按原要求另建恢复任务，原失败记录和已归档成绩保留。请核对新任务状态与内容。");
+      }
+      await refreshList();
+    } catch (error) { fail(error); } finally { finish(); }
+  };
   const cancel = async () => {
     if (!view || !running(view.status)) return;
     const id = view.id;
@@ -175,6 +187,8 @@ export function GradingWorkbench({ teacherId, active, sources, onLegacy, onArchi
     {!view ? <p className="tw-empty">选择已上传批次开始，或继续对话中已经保存的批改任务。</p> : <>
       <div className="tw-heading"><h3>{view.content.title || text(view.request.title) || "批改草稿"} · 版本 {view.revision} · {reviewLabel(view)}</h3><button className="secondary-button" disabled={!!busy && busy !== "create"} onClick={() => void load(view.id)}>刷新当前批改</button></div>
       {view.issues.map((i) => <p className="tw-notice" key={i.code}>{i.message}</p>)}
+      {view.failure && <p className="tw-notice">上次处理在{({ execute: "草稿处理", validate: "内容校验", persist: "保存版本" })[view.failure.phase]}阶段未完成，耗时约 {Math.ceil(view.failure.elapsedMs / 1000)} 秒。</p>}
+      {["failed", "interrupted", "needs_input"].includes(view.status) && view.issues.some((i) => i.code === "WORKFLOW_CREATION_INCOMPLETE") && <div className="tw-notice"><p>可在补齐来源或识别证据后，按原要求另建恢复任务。失败历史与已归档成绩保留，新内容仍需教师复核。</p><button className="primary-button" disabled={available !== true || !!busy || dirty} onClick={() => void recover()}>{busy === "recover" ? "正在恢复批改…" : "按原要求恢复批改"}</button></div>}
       {running(view.status) && <button onClick={() => void cancel()}>取消本次处理</button>}
       {head.status === "cancelled" && <p className="tw-notice">本任务已取消，保存版本可查看；继续请主动新建任务。</p>}
       <div className="gw-summary"><span>逐题暂计：{summary?.score ?? "待核对"}{summary?.score != null ? ` / ${summary.totalScore ?? "—"}` : ""}</span><span>已确认 {summary?.confirmedCount ?? 0} / {view.content.questions.length} 题</span><span>确认总分：{summary?.confirmedScore ?? "待逐题确认"}</span></div>

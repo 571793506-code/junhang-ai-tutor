@@ -195,9 +195,16 @@ export function createTeachingWorkflowRepository(prisma = defaultPrisma) {
     async endOperation(input) {
       command(input);
       if (!["failed", "needs_input", "interrupted"].includes(input.status)) fail("WORKFLOW_STATUS_INVALID", 422);
-      const result = await prisma.teachingWorkflow.updateMany({ where: { id: input.workflowId, ownerTeacherId: input.ownerTeacherId, currentRevision: input.expectedRevision, status: "running", activeOperationKey: input.operationKey }, data: { status: input.status, activeOperationKey: null } });
-      if (result.count !== 1) fail("WORKFLOW_CHECKPOINT_STALE");
-      return result;
+      return prisma.$transaction(async (tx) => {
+        // Fence and lock before merging diagnostics with any completed checkpoints.
+        const result = await tx.teachingWorkflow.updateMany({ where: { id: input.workflowId, ownerTeacherId: input.ownerTeacherId, currentRevision: input.expectedRevision, status: "running", activeOperationKey: input.operationKey }, data: { status: input.status, activeOperationKey: null } });
+        if (result.count !== 1) fail("WORKFLOW_CHECKPOINT_STALE");
+        if (input.failure) {
+          const head = await owned(tx, input.workflowId, input.ownerTeacherId);
+          await tx.teachingWorkflow.update({ where: { id: head.id }, data: { checkpoint: { ...head.checkpoint, failure: snapshotCopy(input.failure) } } });
+        }
+        return result;
+      });
     },
     async cancel({ workflowId, ownerTeacherId, expectedRevision }) {
       identity({ workflowId, ownerTeacherId });

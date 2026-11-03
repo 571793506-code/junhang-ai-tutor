@@ -473,15 +473,16 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 - `GET /api/teaching/workflows?module=generation|grading`：读取当前教师该模块最近至多 100 项任务，返回 `{ok:true,workflows:[{id,module,revision,status,request}]}`。不返回快照、内容、内部上下文或凭据；模块必须明确指定。未登录/非教师拒绝，服务未启用返回 503。Web 用它恢复对话已创建的任务，不能根据列表状态自动确认内容。
 - `GET /api/teaching/workflows/:id`：读取本教师当前版本。
 - `GET /api/teaching/workflows/:id/revisions/:revision`：读取正整数历史版本，返回原工作流 ID；历史内容不覆盖当前版本。
+- `POST /api/teaching/workflows/:id/recover`：教师主动恢复未完成创建的任务，接收 `{expectedRevision,operationKey}`。仅当前版本的 `failed`、`interrupted` 或 `needs_input` 请求占位可用；已有内容、取消任务、版本不符或其他教师任务均拒绝。服务端读取原 request，独立创建后继草稿，客户端不能替换要求、快照或评分。相同原任务、版本与 operationKey 跨并发和服务重启返回同一后继；进行中返回202，首次 ready_for_review 返回201，重放或失败状态返回200。此操作可调用模型，仍受原模型预算约束；不是历史版本 restore，也不自动确认、发布或归档。
 - `POST /api/teaching/workflows/:id/commands`：接收 `{action,operationKey,expectedRevision,targetQuestionIds?,targetExplanation?,instruction?,patch?,restoreRevision?}`。支持接口动作 revise、confirm、restore、cancel；resume 尚未接通。restoreRevision 映射为服务层 revision。人工 patch 的 type 为 replace_question、replace_shared_material、replace_day 或 replace_explanation。
 - `POST /api/teaching/workflows/:id/archive`：单独提交 `{expectedRevision}`，只归档已确认且证据有效的批改版本。教师身份取 session，版本快照、学生、答案来源和分数由服务端读取；请求中的额外字段不能授权发布。首次成功返回 201，已成功版本重放返回 200，响应为 `{ok:true,archive:{id,workflowId,revision,currentRevision,status:"archived",replayed}}`，不返回内部快照或来源包。
 - `POST /api/teaching/workflows/:id/assignment`：单独提交 `{expectedRevision}`，把已确认生成版本发布为独立 Assignment。教师、题目、范围和来源取服务端版本；额外输入不能覆盖。首次返回 201，同版本重放返回 200，响应为 `{ok:true,assignment:{id,workflowId,revision,currentRevision,status:"assignment_ready",replayed}}`。不调用模型、不导出 PDF；讲解暂不支持。
 
-除列表、独立归档及作业发布路由外，响应格式为 `{ok:true,workflow:{id,module,revision,status,request,content,issues}}`；ok 表示成功取得任务状态，不表示内容已生成或已确认。content 使用题目及共享材料白名单，模型原始输出、内部配置和教师凭据不返回。request 仅保留教学业务字段；不会把完整 generationContext 作为客户端可写字段。409 表示版本或请求键冲突，客户端必须保留尚未提交的编辑内容；不能替换 expectedRevision 后自动覆盖新版本。
+除列表、独立归档及作业发布路由外，响应格式为 `{ok:true,workflow:{id,module,revision,status,request,content,issues,failure}}`；ok 表示成功取得任务状态，不表示内容已生成或已确认。failure 仅返回当前版本已保存的白名单 `{code,phase,elapsedMs}`，phase 为 execute、validate 或 persist；旧任务未采集或读取其他历史版本时为null，不据耗时猜测HTTP状态或供应商根因。content 使用题目及共享材料白名单，模型原始输出、内部配置和教师凭据不返回。request 仅保留教学业务字段；不会把完整 generationContext 作为客户端可写字段。409 表示版本或请求键冲突，客户端必须保留尚未提交的编辑内容；不能替换 expectedRevision 后自动覆盖新版本。
 
 创建契约（2026-09-14）：调用模型前以教师身份和 requestKey 的唯一索引登记任务。版本 1 为不可变请求占位，状态从 queued 进入 running；只有插入占位的请求可取得执行权。另一请求即使来自其他服务实例，也只读取同一个任务；同 key 改模块或原始请求返回 409，失败、取消和中断后的重试也不会自动重新调用模型。服务保留原始 request；服务器解析的 resolvedRequest 随校验通过的内容存入内部快照，subjectRef 随版本提交更新。
 
-模型结果经校验后追加版本 2，进入 ready_for_review，首次完成返回 HTTP 201。重复请求读到 queued/running 返回 202；读到完成、failed、needs_input、interrupted 或 cancelled 返回 200 和真实状态。没有内容的占位会返回 `issues[].code=WORKFLOW_CREATION_INCOMPLETE`，不能因 2xx、ok=true 或 CLI 退出码为 0 把它称为生成成功。客户端继续操作时读取返回的 revision，不假定首个草稿是版本 1。占位不能确认、修订或恢复成内容版本；未接通 resume 前，处理失败原因后须由教师主动用新 requestKey 发起新任务，不能自动换 key 重试。
+模型结果经校验后追加版本 2，进入 ready_for_review，首次完成返回 HTTP 201。重复请求读到 queued/running 返回 202；读到完成、failed、needs_input、interrupted 或 cancelled 返回 200 和真实状态。没有内容的占位会返回 `issues[].code=WORKFLOW_CREATION_INCOMPLETE`，不能因 2xx、ok=true 或 CLI 退出码为 0 把它称为生成成功。客户端继续操作时读取返回的 revision，不假定首个草稿是版本 1。占位不能确认、修订或通过 restore 恢复成内容版本；2026-11-03新增显式 recover，处理失败原因后由教师主动按原要求创建独立后继。结果丢失时沿用同一 operationKey 读取原后继，不自动换 key 或连续恢复；Web使用 `recover:<原任务ID>:<版本>`，刷新后保持一致。
 
 原始请求占位只证明任务已登记，不表示目标学生/资料范围已获授权。createDraft 仍须在模型调用前校验教学目标、资料权限及证据，接收服务端 workflow 和 AbortSignal；validateSnapshot 必须明确通过。执行失败保留 failed；结构不合格保留 needs_input；取消或进程中断后的迟到结果不能追加版本。登记任务及草稿仍不代表正式发布或归档。
 
@@ -567,12 +568,15 @@ CLI 使用已有教师登录返回的 sessionToken，本地 JSON 为 `{ "session
 node scripts/teaching-workflow.mjs create --input request.json
 node scripts/teaching-workflow.mjs get --id WORKFLOW_ID
 node scripts/teaching-workflow.mjs get --id WORKFLOW_ID --revision 1
+node scripts/teaching-workflow.mjs recover --id WORKFLOW_ID --input recover.json
 node scripts/teaching-workflow.mjs command --id WORKFLOW_ID --input command.json
 node scripts/teaching-workflow.mjs archive --id WORKFLOW_ID --input archive.json
 node scripts/teaching-workflow.mjs assignment --id WORKFLOW_ID --input assignment.json
 ```
 
 仅在教师已明确确认所选题目时使用确认命令，例如 `{ "action":"confirm", "operationKey":"teacher-confirm-unique-id", "expectedRevision":2, "targetQuestionIds":["q1"] }`。同次操作保留 operationKey，新的操作使用新 key。对话新增的资料需先登记并审批，后续由服务端接入任务上下文，不得只写在聊天文本中作为已入库证据。
+
+`recover.json` 示例为 `{ "expectedRevision":1, "operationKey":"recover:WORKFLOW_ID:1" }`。先 GET 核对当前失败占位和原因；显式执行一次恢复后，后续 GET 使用返回的新任务ID。同一恢复响应丢失时保留原ID、版本和操作键重放，不能换键重复调用。恢复仍失败则保留诊断并停止，排查原因，不把空题目、HTTP200或CLI退出0记为批改通过；已有教师评分与独立归档保持。
 
 教师明确要求归档后，先 GET 确认可归档的当前版本，再以 `archive.json` 的 `{ "expectedRevision": 3 }` 提交独立 archive 命令。工作流 confirm 不自动触发 archive。归档幂等键由工作流/版本派生，不使用 operationKey；主动重放同次归档应保留原 expectedRevision。409 后先查看当前版本和未提交修改，不能自动改用新版本重发。CLI 只输出已校验的归档摘要，不打印来源证据、会话或内部错误。
 

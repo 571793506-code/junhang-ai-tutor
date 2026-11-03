@@ -3,6 +3,7 @@ for (const code of ["WORKFLOW_ARCHIVE_UNAVAILABLE", "WORKFLOW_ARCHIVE_EVIDENCE_R
 for (const code of ["WORKFLOW_REQUEST_INCOMPLETE", "WORKFLOW_CONTEXT_REQUIRED", "WORKFLOW_EVIDENCE_CHANGED", "WORKFLOW_EXECUTION_FAILED"]) SAFE_ERRORS.add(code);
 for (const code of ["WORKFLOW_ASSIGNMENT_UNAVAILABLE", "WORKFLOW_ASSIGNMENT_INVALID", "WORKFLOW_CONFIRMATION_REQUIRED"]) SAFE_ERRORS.add(code);
 for (const code of ["WORKFLOW_COMMAND_INVALID", "WORKFLOW_TARGET_SCOPE_INVALID", "WORKFLOW_EXPLANATION_PATCH_INVALID"]) SAFE_ERRORS.add(code);
+SAFE_ERRORS.add("WORKFLOW_RECOVERY_NOT_ALLOWED");
 function fail(code, status = 0) { throw Object.assign(new Error(code), { code, status }); }
 
 export function createTeachingWorkflowClient({ baseUrl, session, fetchImpl = fetch, timeoutMs = 300000 } = {}) {
@@ -47,6 +48,10 @@ export function createTeachingWorkflowClient({ baseUrl, session, fetchImpl = fet
       return request(`/${segment(id)}/revisions/${revision}`);
     },
     execute: (id, command) => request(`/${segment(id)}/commands`, command),
+    recover: (id, input) => {
+      if (!Number.isSafeInteger(input?.expectedRevision) || input.expectedRevision < 1 || typeof input.operationKey !== "string" || !input.operationKey.trim()) fail("WORKFLOW_INPUT_INVALID");
+      return request(`/${segment(id)}/recover`, { expectedRevision: input.expectedRevision, operationKey: input.operationKey });
+    },
     assignment: (id, input) => {
       if (!Number.isSafeInteger(input?.expectedRevision) || input.expectedRevision < 1) fail("WORKFLOW_INPUT_INVALID");
       return request(`/${segment(id)}/assignment`, { expectedRevision: input.expectedRevision }, id, "assignment");

@@ -42,6 +42,7 @@
 - 仅改评分或解析时，读取完整当前题后提交 `replace_question` patch；不改 studentAnswer、不携带 instruction 时不调用模型。按要求重判则用 instruction，只提交当前题目标。受影响题撤销确认，未变化题保留原确认。
 - confirm 只选教师已检查的题，不能把“已核对”扩展为所有题。全部确认后另行 archive，归档接口只接收 expectedRevision，由服务端再次检查来源、权限和证据。已有可信对话归档可复用未变化确认；上传 JSON 不能凭确认字段绕过检查。
 - 409 冲突保留本地编辑，重新读取并比较后再发起新操作，不直接改 expectedRevision 自动覆盖。历史版本只读；恢复追加新版本，不改旧归档。归档重放使用原版本；同版本不会重复写入。
+- 没有题目且提示 `WORKFLOW_CREATION_INCOMPLETE` 的 failed/interrupted/needs_input 任务，先检查当前状态、来源和识别证据；教师主动要求恢复时用 Web“按原要求恢复批改”，或 CLI `recover --id <原任务ID> --input <json>`。输入仅 `expectedRevision` 和稳定 `operationKey`，建议 `recover:<原任务ID>:<版本>`；服务端沿用原要求另建草稿，后续读取返回的新ID。响应丢失或刷新后重放须沿用原ID、版本和操作键，不能换键增加调用；一次恢复仍失败就保留诊断、停止并排查。failure只说明白名单阶段、错误码和耗时，不证明上游HTTP状态。已有教师评分与归档保留，新草稿仍须复核。此 recover 可能调用模型；历史版本 restore 不调用模型，两者不可混用。
 
 ## 输出契约
 

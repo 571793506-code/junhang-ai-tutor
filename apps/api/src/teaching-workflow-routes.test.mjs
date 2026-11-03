@@ -4,6 +4,34 @@ import { workflowHttpFixture } from "../../../scripts/test-support/teaching-work
 
 const input = { requestKey: "request-1", module: "generation", request: { subject: "math", grade: "4", requirement: "addition" } };
 
+test("HTTP explicit recovery is teacher scoped, uses original requirements and replays without extra calls", async (t) => {
+  let calls = 0;
+  const f = await workflowHttpFixture(t, { createDraft: async ({ input: received }) => {
+    calls++; assert.deepEqual(received.request, input.request);
+    if (calls === 1) throw new Error("PRIVATE credentials and response");
+    return { snapshot: { questions: [{ id: "q1", prompt: "1+1", answer: "2" }] } };
+  } });
+  const failed = (await (await f.request("/workflows", { body: input })).json()).workflow;
+  assert.deepEqual(failed.failure.code, "WORKFLOW_EXECUTION_FAILED");
+  const url = `/workflows/${failed.id}/recover`;
+  const body = { expectedRevision: 1, operationKey: "recover", request: { requirement: "FORGED" }, snapshot: { reviewedByTeacher: true } };
+  assert.equal((await f.request(url, { token: f.tokens.student, body })).status, 403);
+  assert.equal((await f.request(url, { token: f.tokens.other, body })).status, 404);
+  assert.equal((await f.request(url, { body: { ...body, expectedRevision: 2 } })).status, 409);
+  assert.equal((await f.request(url, { body: { expectedRevision: 1 } })).status, 400);
+  const response = await f.request(url, { body }); assert.equal(response.status, 201);
+  const recovered = (await response.json()).workflow;
+  assert.notEqual(recovered.id, failed.id); assert.deepEqual(recovered.request, input.request);
+  assert.equal(recovered.content.questions[0].reviewedByTeacher, undefined);
+  assert.doesNotMatch(JSON.stringify([failed, recovered]), /PRIVATE|FORGED/);
+  const replay = await f.request(url, { body }); assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).workflow.id, recovered.id); assert.equal(calls, 2);
+  assert.equal((await f.request(`/workflows/${recovered.id}/recover`, { body: { ...body, expectedRevision: 2 } })).status, 409);
+  const client = (await import("../../../scripts/teaching-workflow-client.mjs")).createTeachingWorkflowClient({ baseUrl: f.baseUrl, session: { sessionToken: f.tokens.teacher } });
+  assert.equal((await client.recover(failed.id, body)).id, recovered.id); assert.equal(calls, 2);
+  assert.equal((await client.get(failed.id)).status, "failed");
+});
+
 test("workflow list is teacher scoped, module filtered and returns safe summaries for Web recovery", async (t) => {
   const f = await workflowHttpFixture(t);
   assert.equal((await f.request("/workflows?module=generation", { token: null })).status, 401);

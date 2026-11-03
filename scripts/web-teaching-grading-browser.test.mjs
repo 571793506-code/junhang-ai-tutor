@@ -8,6 +8,7 @@ import { createServer } from "vite";
 import react from "@vitejs/plugin-react";
 import { gradingWorkflowFixture } from "./test-support/grading-workflow.mjs";
 import { createTeachingWorkflowClient } from "./teaching-workflow-client.mjs";
+import { workflowHttpFixture } from "./test-support/teaching-workflow-http.mjs";
 
 // Browser plugin not available. Reuse installed Playwright and Edge; no downloads.
 const require = createRequire(import.meta.url);
@@ -17,6 +18,56 @@ const launch = () => chromium.launch({ headless: true,
   ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}),
   ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}) });
 const pageSvg = (n) => `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800"><rect width="600" height="800" fill="white"/><g font-family="sans-serif" font-size="24" fill="#163b45"><text x="50" y="65">合成作业 · 第 ${n} 页</text><text x="60" y="155">${n === 1 ? "1. 说明交换加数为什么和不变" : "2. 24 + 18 = 42"}</text><text x="60" y="205">${n === 1 ? "交换两堆小棒，总数一样。" : "个位相加满十，向十位进一。"}</text></g></svg>`;
+
+test("failed grading recovery preserves the original requirement and safely replays a lost response", { timeout: 40000 }, async (t) => {
+  let calls = 0;
+  const request = { studentId: "s1", submissionId: "submission1", title: "恢复测试", requirement: "首次作答评分，订正另记" };
+  const f = await workflowHttpFixture(t, { createDraft: async ({ input }) => {
+    calls++; assert.deepEqual(input.request, request);
+    if (calls === 1) throw new Error("PRIVATE");
+    return { snapshot: { questions: [{ id: "q1", questionNo: "1", prompt: "1+1", answer: "2", studentAnswer: "2", correctAnswer: "2", score: 2, maxScore: 2, status: "correct", explanation: "计算正确" }] } };
+  } });
+  const c = createTeachingWorkflowClient({ baseUrl: f.baseUrl, session: { sessionToken: f.tokens.teacher } });
+  const failed = await c.create({ module: "grading", requestKey: "failed-browser", request });
+  const original = structuredClone(await f.repo.get(failed.id, "t1"));
+  const vite = await createServer({ configFile: false, root: path.resolve("apps/web"), cacheDir: path.join(artifactDir, "recovery-vite-cache"), plugins: [react(), {
+    name: "grading-recovery-fixture",
+    configureServer(server) { server.middlewares.use(async (req, res, next) => {
+      if (req.url !== "/__recovery") return next();
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.end(await server.transformIndexHtml("/__recovery", '<html><body><div id="root"></div><script type="module" src="/@id/__x00__recovery-entry"></script></body></html>'));
+    }); },
+    resolveId(id) { if (id === "\0recovery-entry") return id; },
+    load(id) { if (id === "\0recovery-entry") return `import React from 'react';import {createRoot} from 'react-dom/client';import {GradingWorkbench} from '/src/components/GradingWorkbench.tsx';import '/src/styles.css';createRoot(document.getElementById('root')).render(React.createElement(GradingWorkbench,{teacherId:'t1',active:true,sources:[],onLegacy:()=>{},onArchived:()=>{throw new Error('unexpected archive')}}));`; }
+  }], define: { "import.meta.env.VITE_API_BASE_URL": JSON.stringify("/__workflow-api") }, server: { host: "127.0.0.1", port: 0, proxy: { "/__workflow-api": { target: f.baseUrl, rewrite: (p) => p.replace("/__workflow-api", "") } } } });
+  await vite.listen(); t.after(() => vite.close());
+  const browser = await launch(); t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } }); page.setDefaultTimeout(8000);
+  const errors = []; page.on("pageerror", (e) => errors.push(e.message));
+  await page.addInitScript(({ token, id }) => { localStorage.setItem("junhang.web.sessionToken", token); if (!localStorage.getItem("junhang.grading-workflow.v1.t1")) localStorage.setItem("junhang.grading-workflow.v1.t1", id); }, { token: f.tokens.teacher, id: failed.id });
+  let loseResponse = true; const keys = [];
+  await page.route("**/workflows/*/recover", async (route) => {
+    keys.push(route.request().postDataJSON().operationKey);
+    const response = await route.fetch();
+    if (loseResponse) { loseResponse = false; return route.abort("failed"); }
+    return route.fulfill({ response });
+  });
+  await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}/__recovery`);
+  const recover = page.getByRole("button", { name: "按原要求恢复批改", exact: true });
+  await recover.click();
+  await page.getByText("暂未收到操作结果，请刷新任务核对，避免重复提交。", { exact: true }).waitFor();
+  assert.equal(calls, 2);
+  await page.reload();
+  await recover.click();
+  await page.getByRole("heading", { name: "恢复测试 · 版本 2 · 待教师复核", exact: true }).waitFor();
+  assert.equal(calls, 2); assert.equal(keys.length, 2); assert.equal(keys[0], keys[1]);
+  assert.deepEqual(await f.repo.get(failed.id, "t1"), original);
+  assert.equal(await page.getByRole("button", { name: "归档当前确认版本", exact: true }).isDisabled(), true);
+  await mkdir(artifactDir, { recursive: true }); await page.screenshot({ path: path.join(artifactDir, "grading-recovery.png") });
+  await page.reload();
+  await page.getByRole("heading", { name: "恢复测试 · 版本 2 · 待教师复核", exact: true }).waitFor();
+  assert.equal(calls, 2); assert.deepEqual(errors, []);
+});
 
 test("actual teacher page prefills dialogue entry and preserves multipart upload, source management and disabled workflow fallback", { timeout: 40000 }, async (t) => {
   const browser = await launch(); t.after(() => browser.close());

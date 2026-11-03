@@ -17,6 +17,11 @@ function gradingReviewSummary(head, saved = head, revision = head.currentRevisio
 
 const ACTIONS = new Set(["revise", "confirm", "restore", "cancel"]);
 const CONFIRMATION_FIELDS = ["reviewedByTeacher", "confirmedBy", "confirmedAt", "teacherConfirmation", "reviewedAt"];
+const FAILURE_CODES = new Set(["WORKFLOW_EXECUTION_FAILED", "WORKFLOW_SNAPSHOT_INVALID", "WORKFLOW_REQUEST_INCOMPLETE", "WORKFLOW_CONTEXT_REQUIRED", "WORKFLOW_EVIDENCE_CHANGED", "WORKFLOW_INPUT_INVALID", "WORKFLOW_CANCELLED", "WORKFLOW_VERSION_CONFLICT"]);
+function failureView(value) {
+  if (!value || !FAILURE_CODES.has(value.code) || !["execute", "validate", "persist"].includes(value.phase) || !Number.isSafeInteger(value.elapsedMs) || value.elapsedMs < 0) return null;
+  return { code: value.code, phase: value.phase, elapsedMs: value.elapsedMs };
+}
 
 function fail(code, status = 422) {
   throw Object.assign(new Error(code), { code, status });
@@ -163,6 +168,7 @@ export function createTeachingWorkflowService({ repository, runner = null, valid
       }
       const controller = new AbortController();
       activeControllers.set(workflow.id, { operationKey: operationInput.operationKey, controller });
+      const startedAt = Date.now(); let phase = "execute";
       try {
         const current = await repository.get(workflow.id, actor.teacherId);
         if (controller.signal.aborted || current?.status !== "running" || current?.activeOperationKey !== operationInput.operationKey) fail("WORKFLOW_VERSION_CONFLICT", 409);
@@ -177,6 +183,7 @@ export function createTeachingWorkflowService({ repository, runner = null, valid
         delete snapshot.workflowArchive;
         delete snapshot.creationPending;
         snapshot.resolvedRequest = clone(prepared.request);
+        phase = "validate";
         const validation = await validateSnapshot(snapshot, { actor, module: input.module, workflow, nextRevision: 2, request: clone(input.request) });
         if (validation?.ok !== true) fail("WORKFLOW_SNAPSHOT_INVALID");
         if (validation.snapshot) snapshot = clearExplanationConfirmation(inheritQuestionConfirmations({}, validation.snapshot));
@@ -189,10 +196,12 @@ export function createTeachingWorkflowService({ repository, runner = null, valid
           if (reviewed.snapshot) snapshot = clone(reviewed.snapshot);
         }
         if (controller.signal.aborted) fail("WORKFLOW_CANCELLED", 409);
+        phase = "persist";
         await repository.commitRevision({ ...operationInput, operation: "create", snapshot, affectedQuestionIds: questionIds(snapshot),
           commandFingerprint: createHash("sha256").update(stable(input)).digest("hex"), subjectRef: prepared.subjectRef || null });
       } catch (error) {
-        try { await repository.endOperation({ ...operationInput, status: ["WORKFLOW_SNAPSHOT_INVALID", "WORKFLOW_REQUEST_INCOMPLETE", "WORKFLOW_CONTEXT_REQUIRED", "WORKFLOW_EVIDENCE_CHANGED", "WORKFLOW_INPUT_INVALID"].includes(error.code) ? "needs_input" : "failed" }); } catch (endError) {
+        const failure = { code: FAILURE_CODES.has(error.code) ? error.code : "WORKFLOW_EXECUTION_FAILED", phase, elapsedMs: Math.max(0, Date.now() - startedAt) };
+        try { await repository.endOperation({ ...operationInput, failure, status: ["WORKFLOW_SNAPSHOT_INVALID", "WORKFLOW_REQUEST_INCOMPLETE", "WORKFLOW_CONTEXT_REQUIRED", "WORKFLOW_EVIDENCE_CHANGED", "WORKFLOW_INPUT_INVALID"].includes(error.code) ? "needs_input" : "failed" }); } catch (endError) {
           if (endError.code !== "WORKFLOW_CHECKPOINT_STALE") throw endError;
         }
         // Return the durable task state; failed/cancelled reservations are not drafts.
@@ -200,6 +209,19 @@ export function createTeachingWorkflowService({ repository, runner = null, valid
         if (activeControllers.get(workflow.id)?.controller === controller) activeControllers.delete(workflow.id);
       }
       return this.get({ actor, workflowId: workflow.id });
+    },
+    async recover({ actor, workflowId, expectedRevision, operationKey }) {
+      assertActor(actor, { ownerTeacherId: actor?.teacherId });
+      assertCommand({ action: "revise", operationKey, expectedRevision });
+      const workflow = await repository.get(workflowId, actor.teacherId);
+      if (!workflow) fail("WORKFLOW_NOT_FOUND", 404);
+      assertActor(actor, workflow);
+      if (workflow.currentRevision !== expectedRevision) fail("WORKFLOW_VERSION_CONFLICT", 409);
+      if (workflow.snapshot?.creationPending !== true || !["failed", "interrupted", "needs_input"].includes(workflow.status)) fail("WORKFLOW_RECOVERY_NOT_ALLOWED", 409);
+      // A retry is a new draft, never a rewrite of a failed task or an archived score.
+      // The original request and lineage come from the server, not a browser resubmission.
+      const key = createHash("sha256").update(stable({ workflowId, expectedRevision, operationKey })).digest("hex");
+      return this.create({ actor, input: { module: workflow.module, requestKey: `recover:${workflowId}:${key}`, request: clone(workflow.request) } });
     },
     async get({ actor, workflowId, revision = null }) {
       assertActor(actor, { ownerTeacherId: actor?.teacherId });
@@ -214,6 +236,7 @@ export function createTeachingWorkflowService({ repository, runner = null, valid
         workflowId: head.id, module: head.module, request: clone(head.request),
         revision: historical?.revision ?? head.currentRevision,
         snapshot: clone(historical?.snapshot ?? head.snapshot),
+        failure: revision != null && revision !== head.currentRevision ? null : failureView(head.checkpoint?.failure),
         ...gradingReviewSummary(head, historical ?? head, historical?.revision ?? head.currentRevision)
       };
     },

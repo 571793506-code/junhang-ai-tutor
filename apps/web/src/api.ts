@@ -558,11 +558,13 @@ export type GradingWorkflowQuestion = {
 };
 export type GradingWorkflowPage = { pageNumber: number; imageUrl: string | null; fileName: string; imageRefs: string[]; cropRef?: string | null; qualityStatus: string };
 export type GradingWorkflowView = TeachingWorkflowSummary & {
+  failure?: { code: string; phase: "execute" | "validate" | "persist"; elapsedMs: number } | null;
   content: { title?: string; questions: GradingWorkflowQuestion[]; pages?: GradingWorkflowPage[];
     gradingSummary?: { score: number | null; confirmedScore: number | null; totalScore: number | null; unresolvedCount: number; confirmedCount: number } };
   issues: Array<{ code: string; message: string }>;
 };
 export const createGradingWorkflow = (requestKey: string, request: Record<string, unknown>) => teachingWorkflowRequest<{ workflow: GradingWorkflowView }>("", { module: "grading", requestKey, request });
+export const recoverGradingWorkflow = (id: string, expectedRevision: number, operationKey: string) => teachingWorkflowRequest<{ workflow: GradingWorkflowView }>(`/${encodeURIComponent(id)}/recover`, { expectedRevision, operationKey });
 export const getGradingWorkflow = (id: string, revision?: number) => teachingWorkflowRequest<{ workflow: GradingWorkflowView }>(`/${encodeURIComponent(id)}${revision ? `/revisions/${revision}` : ""}`);
 export const executeGradingWorkflow = (id: string, command: TeachingWorkflowCommand) => teachingWorkflowRequest<{ workflow: GradingWorkflowView }>(`/${encodeURIComponent(id)}/commands`, command);
 export async function archiveTeachingGrading(id: string, expectedRevision: number) {

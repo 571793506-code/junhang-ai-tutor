@@ -9,6 +9,8 @@ For conversation-generated material, read `对话材料与 Web 衔接` in the Pl
 
 After independent archive, use Web `批改复核 → 已归档记录` or teacher-scoped `GET /api/grading/workbench?reviewState=archived`. The `gradingArchive` URL parameter restores navigation only. This history is read only: preserve final teacher scores, base/bonus groups, original images and unknown OCR; do not regrade, reconfirm, rearchive or present old AI summaries as final conclusions. Frozen workflow archives must pass server evidence validation. Report `pagination.capped` as a limited recent-submission search.
 
+For an incomplete failed/interrupted/needs_input creation, read the Playbook's recovery action. When the teacher requests recovery, use Web `按原要求恢复批改` or CLI `recover`, sending only expectedRevision and a stable operationKey such as `recover:<originalId>:<revision>`. The server copies the original request into an independent draft. Keep the same original ID, revision and key after a lost response or refresh to read the same successor; follow its returned ID thereafter. Stop if this recovery also fails, retain diagnostics and investigate. Recovery can call a model; historical `restore` does not. Neither grants teacher confirmation or changes existing scores/archives. A 2xx response with no questions is not successful grading; failure phase/time alone does not establish an upstream HTTP error.
+
 For generated materials, load the `generation` contract and read `gradingSourcePackage` / `questionLayoutManifest` before grading. For external materials, stay on the reference-answer path. When confirmed results feed a profile, load `skills/student-profile/SKILLS.md` after teacher confirmation.
 
 Minimum verification: `cmd /c npm.cmd run check:api`.

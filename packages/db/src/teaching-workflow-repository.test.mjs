@@ -36,6 +36,11 @@ before(async () => {
     await tx.$executeRawUnsafe(`SET LOCAL search_path TO "${schemaName}"`);
     for (const statement of sql.split(";").map((s) => s.trim()).filter(Boolean)) await tx.$executeRawUnsafe(statement);
   });
+  // Grading reads its optional archive relation too; provision its real schema dependencies.
+  const provisioned = spawnSync(process.execPath, ["node_modules/prisma/build/index.js", "db", "push", "--schema", path.join(testDir, "schema.prisma"), "--skip-generate"], {
+    env: { ...process.env, DATABASE_URL: url.href }, encoding: "utf8", timeout: 60000, windowsHide: true
+  });
+  assert.equal(provisioned.status, 0, `isolated grading schema setup failed: ${provisioned.error?.message || provisioned.stderr}`);
   repo = createTeachingWorkflowRepository(prisma);
   console.log(`Applied additive migration to isolated PostgreSQL schema ${schemaName}`);
 }, { timeout: 90000 });
@@ -133,6 +138,54 @@ test("restart preserves checkpoints and a new operation fences the previous exec
   await assert.rejects(repo.saveCheckpoint({ ...input, unitId: "late", candidate: {} }), /WORKFLOW_CHECKPOINT_STALE/);
   await assert.rejects(repo.commitRevision(input), /WORKFLOW_VERSION_CONFLICT/);
   await repo.commitRevision(next);
+});
+
+test("failure diagnostics merge atomically without losing checkpoints or accepting late writes", { skip: !integrationEnabled }, async () => {
+  const head = await create(); const input = cmd(head);
+  await repo.beginOperation(input);
+  await repo.saveCheckpoint({ ...input, unitId: "completed", candidate: { value: "kept" } });
+  const failure = { code: "WORKFLOW_EXECUTION_FAILED", phase: "execute", elapsedMs: 180000 };
+  const broken = createTeachingWorkflowRepository({ $transaction: (run) => prisma.$transaction((tx) => run({ ...tx,
+    teachingWorkflow: { ...tx.teachingWorkflow, update: async () => { throw new Error("injected diagnostic failure"); } }
+  })) });
+  await assert.rejects(broken.endOperation({ ...input, status: "failed", failure }), /injected diagnostic failure/);
+  const active = await repo.get(head.id, "teacher-a");
+  assert.equal(active.status, "running"); assert.equal(active.activeOperationKey, input.operationKey);
+  assert.equal(active.checkpoint.failure, undefined);
+  await repo.endOperation({ ...input, status: "failed", failure });
+  const ended = await repo.get(head.id, "teacher-a");
+  assert.deepEqual(ended.checkpoint.failure, failure); assert.equal(ended.checkpoint.units.completed.value, "kept");
+  const next = cmd(ended); await repo.beginOperation(next);
+  await assert.rejects(repo.endOperation({ ...input, status: "failed", failure: { ...failure, elapsedMs: 1 } }), /WORKFLOW_CHECKPOINT_STALE/);
+  await repo.cancel(next);
+  await assert.rejects(repo.endOperation({ ...next, status: "failed", failure }), /WORKFLOW_CHECKPOINT_STALE/);
+  assert.equal((await repo.get(head.id, "teacher-a")).status, "cancelled");
+});
+
+test("failed creation recovery persists one independent draft across concurrent HTTP replay and service reload", { skip: !integrationEnabled }, async (t) => {
+  let calls = 0;
+  const request = { title: "隔离恢复样本", requirement: "按首次作答评分，订正另记" };
+  const options = { repository: repo, createDraft: async ({ input }) => {
+    calls++; assert.deepEqual(input.request, request);
+    if (calls === 1) throw new Error("PRIVATE");
+    return { snapshot: { questions: [{ id: "q1", prompt: "1+1", answer: "2" }] } };
+  } };
+  const http = await workflowHttpFixture(t, options);
+  const client = createTeachingWorkflowClient({ baseUrl: http.baseUrl, session: { sessionToken: http.tokens.teacher } });
+  const failed = await client.create({ module: "grading", requestKey: randomUUID(), request });
+  const original = await repo.get(failed.id, "t1");
+  const input = { expectedRevision: failed.revision, operationKey: randomUUID() };
+  const [a, b] = await Promise.all([client.recover(failed.id, input), client.recover(failed.id, input)]);
+  assert.equal(a.id, b.id); assert.equal(calls, 2);
+  const second = await workflowHttpFixture(t, { ...options, repository: createTeachingWorkflowRepository(prisma) });
+  const reloaded = createTeachingWorkflowClient({ baseUrl: second.baseUrl, session: { sessionToken: second.tokens.teacher } });
+  const ready = await reloaded.recover(failed.id, input);
+  assert.equal(ready.status, "ready_for_review"); assert.equal(ready.id, a.id); assert.equal(calls, 2);
+  assert.notEqual(ready.content.questions[0].reviewedByTeacher, true);
+  assert.equal(ready.reviewStatus, "review_required");
+  assert.deepEqual(await repo.get(failed.id, "t1"), original);
+  assert.equal(await prisma.teachingWorkflowRevision.count({ where: { workflowId: failed.id } }), 1);
+  assert.equal(await prisma.teachingWorkflowRevision.count({ where: { workflowId: ready.id } }), 2);
 });
 
 test("HTTP and dialogue client share real persisted generation revisions across reload, replay and confirmation", { skip: !integrationEnabled }, async (t) => {

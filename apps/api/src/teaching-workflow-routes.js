@@ -15,7 +15,7 @@ const ERRORS = {
   WORKFLOW_NOT_FOUND: 404, WORKFLOW_REVISION_NOT_FOUND: 404, WORKFLOW_FORBIDDEN: 403,
   WORKFLOW_VERSION_CONFLICT: 409, WORKFLOW_REQUEST_KEY_REUSED: 409, WORKFLOW_OPERATION_KEY_REUSED: 409,
   WORKFLOW_OPERATION_ACTIVE_OR_REUSED: 409, WORKFLOW_CANCELLED: 409,
-  WORKFLOW_CREATION_INCOMPLETE: 409,
+  WORKFLOW_CREATION_INCOMPLETE: 409, WORKFLOW_RECOVERY_NOT_ALLOWED: 409,
   WORKFLOW_ARCHIVE_INVALID: 422, WORKFLOW_ARCHIVE_EVIDENCE_REQUIRED: 422, WORKFLOW_ARCHIVE_UNAVAILABLE: 503,
   WORKFLOW_REQUEST_INCOMPLETE: 422, WORKFLOW_CONTEXT_REQUIRED: 422, WORKFLOW_EVIDENCE_CHANGED: 409,
   WORKFLOW_EXECUTION_FAILED: 503,
@@ -61,7 +61,9 @@ function workflowView(result) {
   }
   const issues = result.snapshot?.creationPending === true
     ? [{ code: "WORKFLOW_CREATION_INCOMPLETE", message: result.status === "needs_input" ? "任务条件、来源证据或草稿结构尚不完整，请补齐后重新发起。" : "任务已登记，尚无可复核内容。请查看任务状态。" }] : [];
-  return { ...workflowSummary(result), content, issues };
+  const failure = result.failure && Object.hasOwn(ERRORS, result.failure.code) && ["execute", "validate", "persist"].includes(result.failure.phase) && Number.isSafeInteger(result.failure.elapsedMs) && result.failure.elapsedMs >= 0
+    ? pick(result.failure, ["code", "phase", "elapsedMs"]) : null;
+  return { ...workflowSummary(result), content, issues, failure };
 }
 function workflowSummary(result) {
   return { id: result.workflowId, module: result.module, revision: result.revision, status: result.status, request: requestInput(result.request || {}),
@@ -132,6 +134,10 @@ export function createTeachingWorkflowRouter({ service, archiveService, assignme
     return service.get({ actor, workflowId: req.params.id, revision });
   }));
   router.post("/workflows/:id/commands", handle((req, actor) => service.execute({ actor, workflowId: req.params.id, command: commandInput(req.body) })));
+  router.post("/workflows/:id/recover", handle((req, actor) => {
+    if (!object(req.body) || typeof req.body.operationKey !== "string" || !req.body.operationKey.trim() || !Number.isSafeInteger(req.body.expectedRevision) || req.body.expectedRevision < 1) invalid();
+    return service.recover({ actor, workflowId: req.params.id, expectedRevision: req.body.expectedRevision, operationKey: req.body.operationKey });
+  }, (result) => ["queued", "running"].includes(result.status) ? 202 : result.status === "ready_for_review" && !result.replayed ? 201 : 200));
   router.post("/workflows/:id/archive", handle((req, actor) => {
     if (!object(req.body) || !Number.isSafeInteger(req.body.expectedRevision) || req.body.expectedRevision < 1) invalid();
     return archiveService.publish({ actor, workflowId: req.params.id, expectedRevision: req.body.expectedRevision });

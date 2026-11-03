@@ -154,3 +154,78 @@ test("failed persistence cannot report a ready draft or trigger automatic recrea
   assert.deepEqual(result.snapshot.questions, []);
   assert.equal((await f.create()).status, "failed"); assert.equal(calls, 1);
 });
+
+test("explicit recovery creates one independent task from the server-stored request and leaves failure history intact", async () => {
+  let calls = 0;
+  const grading = { ...input, module: "grading", request: { studentId: "s1", submissionId: "submission1", requirement: "首次作答评分，订正另记" } };
+  const f = fixture({ createDraft: ({ input: received }) => {
+    calls++; assert.deepEqual(received.request, grading.request);
+    if (calls === 1) throw new Error("PRIVATE upstream credentials");
+    return draft();
+  } });
+  const failed = await f.create(grading);
+  const original = structuredClone(await f.repository.get(failed.workflowId, actor.teacherId));
+  const args = { actor, workflowId: failed.workflowId, expectedRevision: 1, operationKey: "recover-1", request: { requirement: "FORGED" } };
+  const recovered = await f.service.recover(args);
+  assert.notEqual(recovered.workflowId, failed.workflowId);
+  assert.equal(recovered.status, "ready_for_review"); assert.equal(recovered.revision, 2);
+  assert.deepEqual(recovered.request, grading.request);
+  assert.equal(recovered.snapshot.questions[0].reviewedByTeacher, undefined);
+  assert.deepEqual(await f.repository.get(failed.workflowId, actor.teacherId), original);
+  const restarted = createTeachingWorkflowService({ repository: f.repository });
+  assert.equal((await restarted.recover(args)).workflowId, recovered.workflowId);
+  assert.equal(calls, 2);
+});
+
+test("concurrent recovery replays the running reservation rather than calling an executor twice", async () => {
+  const entered = deferred(); const release = deferred(); let calls = 0;
+  const f = fixture({ createDraft: async () => { if (++calls === 1) throw new Error("failed"); entered.resolve(); await release.promise; return draft(); } });
+  const failed = await f.create();
+  const args = { actor, workflowId: failed.workflowId, expectedRevision: 1, operationKey: "recover-once" };
+  const pending = f.service.recover(args);
+  try {
+    await entered.promise;
+    const other = createTeachingWorkflowService(f.config);
+    const replay = await other.recover(args);
+    assert.equal(replay.status, "running"); assert.equal(replay.snapshot.creationPending, true);
+    assert.equal(calls, 2);
+  } finally { release.resolve(); }
+  assert.equal((await pending).status, "ready_for_review");
+});
+
+test("recovery rejects other teachers, stale versions, malformed keys, complete and cancelled tasks before execution", async () => {
+  let calls = 0; const f = fixture({ createDraft: () => { calls++; return draft(); } });
+  const completed = await f.create();
+  const args = { actor, workflowId: completed.workflowId, expectedRevision: 2, operationKey: "recover" };
+  await assert.rejects(f.service.recover(args), { code: "WORKFLOW_RECOVERY_NOT_ALLOWED" });
+  await assert.rejects(f.service.recover({ ...args, actor: { teacherId: "t2" } }), { code: "WORKFLOW_NOT_FOUND" });
+  await assert.rejects(f.service.recover({ ...args, expectedRevision: 1 }), { code: "WORKFLOW_VERSION_CONFLICT" });
+  await assert.rejects(f.service.recover({ ...args, operationKey: " " }), { code: "WORKFLOW_COMMAND_INVALID" });
+  const reserved = await f.repository.reserveCreation({ ...input, requestKey: "cancelled", ownerTeacherId: actor.teacherId });
+  const other = { ...args, workflowId: reserved.workflow.id, expectedRevision: 1 };
+  await assert.rejects(f.service.recover(other), { code: "WORKFLOW_RECOVERY_NOT_ALLOWED" });
+  await f.repository.cancel({ workflowId: reserved.workflow.id, ownerTeacherId: actor.teacherId, expectedRevision: 1 });
+  await assert.rejects(f.service.recover(other), { code: "WORKFLOW_RECOVERY_NOT_ALLOWED" });
+  assert.equal(calls, 1);
+});
+
+test("failure diagnostics retain safe stage, code and timing without exception text or secrets", async () => {
+  const f = fixture({ createDraft: () => { throw Object.assign(new Error("PRIVATE url and student content"), { code: "PRIVATE_SECRET", raw: "PRIVATE" }); } });
+  const failed = await f.create();
+  const stored = await f.repository.get(failed.workflowId, actor.teacherId);
+  assert.equal(stored.checkpoint.failure.phase, "execute");
+  assert.equal(stored.checkpoint.failure.code, "WORKFLOW_EXECUTION_FAILED");
+  assert.ok(Number.isSafeInteger(stored.checkpoint.failure.elapsedMs));
+  assert.ok(stored.checkpoint.failure.elapsedMs >= 0);
+  assert.deepEqual(stored.checkpoint.units, {});
+  assert.doesNotMatch(JSON.stringify(stored.checkpoint), /PRIVATE|url|raw/);
+  assert.equal(failed.failure.phase, "execute");
+  const invalid = fixture({ validateSnapshot: () => ({ ok: false }) });
+  const invalidResult = await invalid.create();
+  assert.equal(invalidResult.failure.phase, "validate");
+  assert.equal(invalidResult.failure.code, "WORKFLOW_SNAPSHOT_INVALID");
+  const persistence = fixture(); persistence.repository.commitRevision = () => { throw new Error("PRIVATE database connection"); };
+  const persisted = await persistence.create();
+  assert.equal(persisted.failure.phase, "persist");
+  assert.equal(persisted.failure.code, "WORKFLOW_EXECUTION_FAILED");
+});
