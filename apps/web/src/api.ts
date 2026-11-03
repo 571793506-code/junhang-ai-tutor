@@ -982,11 +982,13 @@ export type GradingWorkbench = {
     reviewed: number;
     pending: number;
   }> | null;
+  archivedAt?: string | null;
   uploadedBy: string;
   submittedAt: string;
 };
 
 export type GradingWorkbenchFilters = {
+  reviewState?: "pending" | "archived";
   page?: number;
   pageSize?: number;
   studentId?: string;
@@ -1000,6 +1002,7 @@ export async function listGradingWorkbenches(filters: GradingWorkbenchFilters = 
   const query = new URLSearchParams();
   query.set("page", String(filters.page || 1));
   query.set("pageSize", String(filters.pageSize || 50));
+  if (filters.reviewState) query.set("reviewState", filters.reviewState);
   if (filters.studentId) query.set("studentId", filters.studentId);
   if (filters.subject) query.set("subject", filters.subject);
   if (filters.kind) query.set("kind", filters.kind);
@@ -1010,6 +1013,7 @@ export async function listGradingWorkbenches(filters: GradingWorkbenchFilters = 
   });
   return readJson<{
     ok: boolean;
+    reviewState?: "pending" | "archived";
     workbenches: GradingWorkbench[];
     pagination: { page: number; pageSize: number; total: number; totalPages: number; hasMore: boolean; capped?: boolean };
     summary: { batches: number; pendingQuestions: number; lowConfidence: number; ready: number; exceptions: number };

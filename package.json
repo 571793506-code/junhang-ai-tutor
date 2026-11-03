@@ -50,7 +50,7 @@
     "check:generation:layout": "node scripts/generation-layout-check.mjs",
     "check:web:generation-workbench": "node scripts/web-generation-workbench-ui.test.mjs",
     "check:web:teaching-generation": "node --test scripts/web-teaching-generation-browser.test.mjs",
-    "check:web:teaching-grading": "node --test scripts/web-teaching-grading-browser.test.mjs",
+    "check:web:teaching-grading": "node --test scripts/web-teaching-grading-browser.test.mjs scripts/web-grading-history-browser.test.mjs",
     "check:web:grading-upload": "node --test apps/web/src/review-image-picker.test.mjs",
     "check:content-context": "node scripts/content-context-e2e.mjs",
     "check:content-upload-ui": "node scripts/content-upload-ui-contract.mjs",

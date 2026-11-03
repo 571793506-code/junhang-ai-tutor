@@ -2,6 +2,7 @@
 import { createRoot } from "react-dom/client";
 import { GenerationWorkbench } from "./components/GenerationWorkbench";
 import { GradingWorkbench as ContinuousGradingWorkbench } from "./components/GradingWorkbench";
+import { GradingArchiveHistory } from "./components/GradingArchiveHistory";
 import { chapterDraftsForTextbookAsset, matchesTeacherConfirmedTextbookChapterScope, matchesTextbookEvidenceScope, mergeTextbookChapterDrafts } from "@junhang/core";
 import {
   Activity,
@@ -448,7 +449,7 @@ const idleSync: SyncState = { busy: false, ok: null, message: "请登录后同�
 function App() {
   const [role, setRole] = useState<Role>("teacher");
   const [activeModule, setActiveModule] = useState<Record<Role, string>>({
-    teacher: new URLSearchParams(window.location.search).has("gradingAssignment") ? "批改复核" : "工作台",
+    teacher: ["gradingAssignment", "gradingArchive"].some(key => new URLSearchParams(window.location.search).has(key)) ? "批改复核" : "工作台",
     student: "主页",
     classroom: "课堂主页"
   });
@@ -1604,7 +1605,15 @@ function TeacherWorkspace({
   const [readingSupportNote, setReadingSupportNote] = useState("重点理解一般过去时 carried，以及 bright 在句子里的意思。");
 
   const [generationWorkspace, setGenerationWorkspace] = useState<"continuous" | "legacy">("continuous");
-  const [gradingWorkspace, setGradingWorkspace] = useState<"continuous" | "legacy">("continuous");
+  const [gradingWorkspace, setGradingWorkspace] = useState<"continuous" | "legacy" | "history">(() => new URLSearchParams(window.location.search).has("gradingArchive") ? "history" : "continuous");
+  function selectGradingWorkspace(workspace: "continuous" | "legacy" | "history") {
+    if (workspace !== "history") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("gradingArchive");
+      window.history.replaceState(null, "", url);
+    }
+    setGradingWorkspace(workspace);
+  }
   const selectableStudents = useMemo(() => students.filter((student) => student.canReceiveNewWork), [students]);
   const activeArchiveStudents = useMemo(() => students.filter((student) => student.canReceiveNewWork), [students]);
   const historicalArchiveStudents = useMemo(() => students.filter((student) => !student.canReceiveNewWork), [students]);
@@ -2177,7 +2186,8 @@ function TeacherWorkspace({
       </section>
     </section>
     <section className={moduleClass("批改复核", "panel span-6")}><PanelTitle badge="AI生成" icon={Upload} title="拍照上传批改" /><div className="template-controls"><label>学生<select value={selectedStudentId} onChange={(event) => setSelectedStudentId(event.target.value)}>{selectableStudents.map((student) => <option key={student.id} value={student.id}>{student.displayName}</option>)}</select></label><label>材料类型<select value={uploadMaterialType} onChange={(event) => setUploadMaterialType(event.target.value as typeof uploadMaterialType)}><option value="external_workbook">外部练习册</option><option value="generated_assessment">系统生成材料</option></select></label><label>类型<select value={uploadKind} onChange={(event) => setUploadKind(event.target.value)}><option>作业</option><option>小测</option><option>试卷</option><option>听写</option></select></label><label>科目<select value={uploadSubject} onChange={(event) => setUploadSubject(event.target.value as SubjectLabel)}>{subjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label></div>{uploadMaterialType === "generated_assessment" ? <label className="field-label">关联生成作业<select value={selectedGeneratedAssignmentId} onChange={(event) => setSelectedGeneratedAssignmentId(event.target.value)}><option value="">请选择已生成的题目与答案来源</option>{generatedAssessmentAssignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.title} · {assignment.items.length}题 · {assignment.status}</option>)}</select></label> : null}<label className="field-label">记录标题<input value={uploadTitle} placeholder="例如：三角形单元试卷批改、英语Unit 1听写批改" onChange={(event) => setUploadTitle(event.target.value)} /></label><ReviewImagePicker files={uploadFiles} setFiles={setUploadFiles} testId="teacher-grading-image-picker" /><p className="muted-line">外部练习册建议使用 iPad 连续拍摄多页清晰照片，按页序加入；系统只生成可追溯的识别/批改草稿，教师确认后才归档。</p>{uploadMaterialType === "external_workbook" ? <div className="external-answer-source-panel"><label>答案来源<select value={uploadAnswerSourceMode} onChange={(event) => setUploadAnswerSourceMode(event.target.value as typeof uploadAnswerSourceMode)}><option value="missing">暂未提供答案</option><option value="teacher_confirmed">教师已确认答案</option><option value="teacher_selected_reference">教师选择参考答案</option><option value="model_draft">系统生成参考答案草稿</option></select></label><label className="field-label">教师答案（可选）<textarea value={uploadAnswerKeyText} onChange={(event) => setUploadAnswerKeyText(event.target.value)} placeholder="例如：1.A 2.4 3.小数乘法" /></label><label className="field-label">参考资料 ID（可选）<input value={uploadReferenceSourceId} onChange={(event) => setUploadReferenceSourceId(event.target.value)} placeholder="教师确认的教材/练习册答案来源 ID" /></label></div> : null}<div className="review-upload-action"><button className="primary-button" disabled={!selectedStudent || !uploadFiles.length || (uploadMaterialType === "generated_assessment" && !selectedGeneratedAssignmentId) || isReviewUploading("grading")} onClick={() => selectedStudent && submitReviewUpload("grading", { studentId: selectedStudent.id, subject: uploadSubject, kind: uploadKind, title: uploadTitle.trim() || `${selectedStudent.displayName}${uploadKind}批改`, images: uploadFiles, assignmentId: uploadMaterialType === "generated_assessment" ? selectedGeneratedAssignmentId : undefined, materialType: uploadMaterialType, answerSourceMode: uploadAnswerSourceMode, answerKeyText: uploadAnswerKeyText, referenceSourceId: uploadReferenceSourceId })}><Upload size={17} />上传并批改</button>{renderReviewUploadStatus("grading")}</div></section>
-    <section className={moduleClass("批改复核", "panel full tw-entry-tabs")} aria-label="批改方式"><button className={gradingWorkspace === "continuous" ? "primary-button" : "secondary-button"} onClick={() => setGradingWorkspace("continuous")}>持续批改与版本</button><button className={gradingWorkspace === "legacy" ? "primary-button" : "secondary-button"} onClick={() => setGradingWorkspace("legacy")}>原有批改与来源管理</button></section>
+    <section className={moduleClass("批改复核", "panel full tw-entry-tabs")} aria-label="批改方式"><button className={gradingWorkspace === "continuous" ? "primary-button" : "secondary-button"} onClick={() => selectGradingWorkspace("continuous")}>持续批改与版本</button><button className={gradingWorkspace === "legacy" ? "primary-button" : "secondary-button"} onClick={() => selectGradingWorkspace("legacy")}>原有批改与来源管理</button><button className={gradingWorkspace === "history" ? "primary-button" : "secondary-button"} onClick={() => selectGradingWorkspace("history")}>已归档记录</button></section>
+    <GradingArchiveHistory key={`history-${teacher.id}`} active={activeModule === "批改复核" && gradingWorkspace === "history"} />
     <ContinuousGradingWorkbench key={`grading-${teacher.id}`} teacherId={teacher.id} active={activeModule === "批改复核" && gradingWorkspace === "continuous"}
       sources={gradingWorkbenches.filter((w) => selectableStudents.some((s) => s.id === w.studentId))} onLegacy={() => setGradingWorkspace("legacy")} onArchived={onRefreshOps} />
     <section className={moduleClass("批改复核", `panel full legacy-grading-workspace ${gradingWorkspace === "legacy" ? "" : "module-hidden"}`)}><PanelTitle icon={ListChecks} title="批改工作台" /><div className="button-row"><button className="secondary-button" onClick={onRefreshOps}><RefreshCw size={17} />刷新工作台</button></div><DialogueSourceRegistrationPanel onRegister={onRegisterDialoguePackage} students={students} /><GradingWorkbenchPanel pageData={gradingWorkbenchPage} onConfirmAnswerSource={onConfirmAnswerSource} onImportDialoguePackage={onImportDialoguePackage} onMarkReviewed={onMarkReviewed} onQueryGradingWorkbenches={onQueryGradingWorkbenches} onQuestionReview={onQuestionReview} onRecognize={onRecognize} reviewSubmissions={reviewSubmissions} students={students} workbenches={gradingWorkbenches} /></section>

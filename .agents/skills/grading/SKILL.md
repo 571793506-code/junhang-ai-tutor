@@ -7,6 +7,8 @@ description: Use when changing generated-material grading, external-workbook gra
 
 For conversation-generated material, read `对话材料与 Web 衔接` in the Playbook. Reuse the registered assignment and server-owned source; `scripts/dialogue-material.mjs` can prepare and register a missing canonical package. Open the receipt's Web entry to preselect the student/material, then upload actual student work. Registration, JSON review flags and transcription confirmation never substitute for teacher scoring confirmation or separate archive.
 
+After independent archive, use Web `批改复核 → 已归档记录` or teacher-scoped `GET /api/grading/workbench?reviewState=archived`. The `gradingArchive` URL parameter restores navigation only. This history is read only: preserve final teacher scores, base/bonus groups, original images and unknown OCR; do not regrade, reconfirm, rearchive or present old AI summaries as final conclusions. Frozen workflow archives must pass server evidence validation. Report `pagination.capped` as a limited recent-submission search.
+
 For generated materials, load the `generation` contract and read `gradingSourcePackage` / `questionLayoutManifest` before grading. For external materials, stay on the reference-answer path. When confirmed results feed a profile, load `skills/student-profile/SKILLS.md` after teacher confirmation.
 
 Minimum verification: `cmd /c npm.cmd run check:api`.

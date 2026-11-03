@@ -9,6 +9,15 @@
 
 .teaching-workbench[hidden] { display: none; }
 .tw-entry-tabs { display: flex; gap: 12px; flex-wrap: wrap; }
+.gh-grid { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr); gap: 24px; }
+.gh-grid > * { min-width: 0; overflow-wrap: anywhere; }
+.grading-history .gw-toolbar input { width: 100%; min-width: 0; padding: 10px; border: 1px solid #c6d7db; border-radius: 8px; }
+.grading-history .tw-task-list { max-height: 720px; }
+.grading-history .gw-summary { align-items: start; }
+.gh-originals { margin-top: 20px; }
+.gh-originals summary { cursor: pointer; color: #086c69; padding: 12px 0; }
+.gh-image img { display: block; width: 100%; height: auto; }
+@media (max-width: 850px) { .gh-grid { grid-template-columns: minmax(0, 1fr); } .grading-history .tw-task-list { max-height: 300px; } }
 .tw-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .tw-heading h2, .tw-heading h3 { margin: 0 0 8px; }
 .tw-heading p, .tw-edit > p { color: #526571; font-size: 14px; line-height: 1.6; }

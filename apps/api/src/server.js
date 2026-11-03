@@ -88,6 +88,7 @@ import { gradingQuestionReviewState, gradingSourceScoreGroups, requireAllQuestio
 import { filterNewReviewedMistakes, loadCurrentTeachingEvidence, reviewedMistakesFromResult } from "./grading-mistake-archive.js";
 import { isImmutableTeachingArchive, rejectArchivedSubmissionMutation } from "./teaching-archive-guard.js";
 import { hydrateQuestionDraftsFromOcr } from "./grading-workbench-question-drafts.js";
+import { gradingArchivePublishedAt, gradingWorkbenchArchivedSnapshot, loadGradingWorkbenchRows, projectArchivedGradingQuestion } from "./grading-workbench-history.js";
 import {
   EXTERNAL_GRADING_RECOGNITION_SCHEMA_VERSION,
   buildExternalGradingRecognitionPacket,
@@ -3413,17 +3414,18 @@ function syncAnnotationMarkersForQuestion(markers = [], question = {}) {
 
 function mapGradingWorkbench(submission) {
   const review = mapReviewSubmission(submission);
-  const grading = review.structuredGrading || {};
+  const archiveSnapshot = gradingWorkbenchArchivedSnapshot(submission);
+  const grading = archiveSnapshot ? { ...review.structuredGrading, questionResults: archiveSnapshot.questions } : review.structuredGrading || {};
   const recognitionPacket = grading.externalGradingRecognition || null;
   const archiveBlockers = recognitionPacket ? externalRecognitionArchiveBlockers(recognitionPacket) : [];
   const markers = Array.isArray(grading.annotationMarkers) ? grading.annotationMarkers : [];
-  const imageFiles = review.imageFiles || [];
+  const imageFiles = archiveSnapshot ? (archiveSnapshot.pages || []).map(page => ({ url: page.imageUrl, fileName: page.fileName || "", pageNumber: page.pageNumber })) : review.imageFiles || [];
   const imageQuality = review.ocr?.imageQuality || null;
   const qualityPages = Array.isArray(imageQuality?.pages) ? imageQuality.pages : [];
   const pages = imageFiles.length
     ? imageFiles.map((file, index) => ({
         id: `${review.id}-page-${index + 1}`,
-        pageNumber: index + 1,
+        pageNumber: file.pageNumber || index + 1,
         imageUrl: file.url || null,
         fileName: file.fileName || file.originalName || "",
         rotation: 0,
@@ -3447,10 +3449,10 @@ function mapGradingWorkbench(submission) {
         ocrStatus: review.ocr?.status || "PENDING",
         markers: markers.filter((marker) => Number(marker.page || 1) === 1)
       }];
-  const questions = hydrateQuestionDraftsFromOcr(
+  const questions = (archiveSnapshot ? archiveSnapshot.questions.map(projectArchivedGradingQuestion) : hydrateQuestionDraftsFromOcr(
     Array.isArray(grading.questionResults) ? grading.questionResults : [],
     review.ocr?.questions || []
-  )
+  ))
     .map((question, index) => normalizeQuestionWorkbenchItem(question, index, markers));
   const questionReviewState = gradingQuestionReviewState(questions);
   const answerSource = grading.answerSource || null;
@@ -3488,7 +3490,8 @@ function mapGradingWorkbench(submission) {
     questionReviewReady: questionReviewState.readyForArchive,
     workflowState: archiveBlockers.length ? "review_required" : review.needsReview ? "draft" : "archived",
     reviewedQuestionScore: questionReviewState.score,
-    scoreGroups: gradingSourceScoreGroups(questions, gradingSourcePackageForAssignment(submission.assignment)),
+    scoreGroups: gradingSourceScoreGroups(questions, archiveSnapshot?.gradingSourcePackage || gradingSourcePackageForAssignment(submission.assignment)),
+    archivedAt: gradingArchivePublishedAt(submission),
     uploadedBy: review.uploadedBy,
     submittedAt: review.submittedAt
   };
@@ -4855,6 +4858,7 @@ function gradingWorkbenchQueryFromRequest(req) {
     subject: optionalText(req.query.subject),
     kind: optionalText(req.query.kind),
     queueState,
+    reviewState: req.query.reviewState === "archived" ? "archived" : "pending",
     search: optionalText(req.query.search)
   };
 }
@@ -4875,25 +4879,9 @@ function gradingWorkbenchMatchesQuery(item, query) {
 }
 
 app.get("/api/grading/workbench", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
-  const { page, pageSize, studentId, subject, kind, queueState, search } = gradingWorkbenchQueryFromRequest(req);
-  const submissions = await prisma.submission.findMany({
-    where: {
-      grading: { needsReview: true },
-      ...(studentId ? { studentId } : {}),
-      student: {
-        OR: [
-          { responsibleTeacherId: req.session.teacherId },
-          { teacherAssignments: { some: { teacherId: req.session.teacherId, activeTo: null } } }
-        ]
-      }
-    },
-    orderBy: { submittedAt: "desc" },
-    take: 500,
-    include: {
-      student: true,
-      grading: true,
-      assignment: { include: { subject: true } }
-    }
+  const { page, pageSize, studentId, subject, kind, queueState, search, reviewState } = gradingWorkbenchQueryFromRequest(req);
+  const { rows: submissions, capped } = await loadGradingWorkbenchRows(prisma, {
+    teacherId: req.session.teacherId, studentId, reviewState
   });
 
   const query = { page, pageSize, studentId, subject, kind, queueState, search };
@@ -4904,6 +4892,7 @@ app.get("/api/grading/workbench", requireDatabase, requireSession(config, ["teac
 
   res.json({
     ok: true,
+    reviewState,
     workbenches,
     pagination: {
       page,
@@ -4911,7 +4900,7 @@ app.get("/api/grading/workbench", requireDatabase, requireSession(config, ["teac
       total,
       totalPages: Math.max(1, Math.ceil(total / pageSize)),
       hasMore: start + workbenches.length < total,
-      capped: submissions.length === 500
+      capped
     },
     summary: {
       batches: total,

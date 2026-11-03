@@ -323,11 +323,15 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 - `GET /api/grading/workbench`
   - 教师端批改工作台列表。
+  - `reviewState=pending|archived`，默认 `pending`，沿用待复核队列。`archived` 只返回 `GRADED`、`needsReview=false`、已记录教师身份与独立归档时间且复核状态有效的记录；不可变工作流归档还须通过完整证据校验，不能仅凭已复核标记进入历史。
+  - 两种模式均限制在当前教师负责或有效绑定的学生范围；先读取按提交时间倒序的最近500次匹配提交，再验证归档、检索和分页。`pagination.capped=true` 表示范围受限，历史结果不是全库总数。响应回传 `reviewState`，已验证归档返回 `archivedAt`。
   - 返回 `workbenches[]`，每条包含 `pages`, `questions`, `markers`, `quality`, `summary`, `score`, `provisionalScore`, `needsTeacherReview`；外部材料额外返回 `materialType=external_workbook`、`answerSource`、`recognitionPacket` 和 `archiveBlockers`。有关联生成卷时可包含 `questionLayoutManifest`，仅供教师复核和图片标注对齐使用。
   - Web、小程序只负责展示和教师操作；识别、批改、审查和归档仍在 API/服务层完成。
 
 - `GET /api/grading/workbench/:submissionId`
   - 教师端打开单个批改工作台详情。
+  - Web“已归档记录”复用该教师鉴权接口，以 `archivedAt` 和归档状态核验只读详情；`?gradingArchive=<submissionId>` 仅恢复导航，不授予读取、评分或归档权限。待复核队列和独立归档动作不变。
+  - 不可变归档从已验证冻结快照投影题目、页序、原图与来源包，不重新合并当前OCR；多空答案和原始过程仅转换显示格式，不改历史证据。Web按显式题号显示逐题教师结果，题干与解析独占行，不将旧AI摘要当作教师最终结论。小程序及平板可复用相同只读契约。
   - 关键字段：`pages[].imageUrl`, `pages[].markers`, `pages[].qualityStatus`, `pages[].qualityScore`, `pages[].qualityIssues`, `questions[].bbox`, `questions[].prompt`, `questions[].studentAnswer`, `questions[].correctAnswer`, `questions[].errorStep`, `questions[].confidence`。
   - 列表及详情可返回 `scoreGroups: [{ id, label, score, maxScore, total, reviewed, pending }]`。分组仅来自服务端已验证来源包的 `questions[].context.scoreGroup=base|bonus`，按显式题号匹配当前逐题结果；不根据题序、OCR或教师补丁猜测附加题。来源缺失、重复题号、分值或声明总分不一致等情况返回 `null`，兼容既有无分组成绩。
   - 基础和附加分独立汇总；组内任一题尚未通过教师逐题确认或分数无效时，该组 `score=null`，由 `pending` 提示待确认数。Web、小程序和平板教师端可共用此字段展示，不将基础79/100与附加0/10误呈现为79/110；该展示不改变既有归档动作或存储总分口径，也不授予归档或档案准入。
