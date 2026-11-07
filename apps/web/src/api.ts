@@ -914,6 +914,7 @@ export type GradingWorkbench = {
   provisionalScore?: number | null;
   needsTeacherReview: boolean;
   archiveEligible: boolean;
+  canArchive?: boolean;
   archiveBlockers: string[];
   answerSource?: ExternalGradingAnswerSource | null;
   recognitionPacket?: ExternalGradingRecognitionPacket | null;

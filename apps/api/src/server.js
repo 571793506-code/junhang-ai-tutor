@@ -3459,6 +3459,8 @@ function mapGradingWorkbench(submission) {
   if (!answerSource) archiveBlockers.push("答案来源缺失");
   if (pages.some((page) => ["poor", "needs_review"].includes(page.qualityStatus))) archiveBlockers.push("图片质量需复核");
   if (questionReviewState.unresolved > 0) archiveBlockers.push("存在未确认题目");
+  const archivedAt = gradingArchivePublishedAt(submission);
+  const canArchive = !archivedAt && questionReviewState.readyForArchive && archiveBlockers.length === 0;
   return {
     id: review.batchId || review.id,
     submissionId: review.id,
@@ -3469,11 +3471,12 @@ function mapGradingWorkbench(submission) {
     subject: review.subject,
     kind: review.kind,
     materialType: review.materialType || recognitionPacket?.materialType || "generated_assessment",
-    status: review.needsReview ? "reviewing" : "archived",
+    status: archivedAt ? "archived" : "reviewing",
     score: grading.score ?? review.score ?? null,
     provisionalScore: grading.provisionalScore ?? null,
     needsTeacherReview: Boolean(grading.needsTeacherReview || review.needsReview),
     archiveEligible: Boolean(grading.archiveEligible) && archiveBlockers.length === 0,
+    canArchive,
     archiveBlockers,
     answerSource,
     recognitionPacket,
@@ -3488,10 +3491,10 @@ function mapGradingWorkbench(submission) {
     pendingQuestionCount: questionReviewState.unresolved,
     reviewedQuestionCount: questionReviewState.reviewed,
     questionReviewReady: questionReviewState.readyForArchive,
-    workflowState: archiveBlockers.length ? "review_required" : review.needsReview ? "draft" : "archived",
+    workflowState: archivedAt ? "archived" : archiveBlockers.length ? "review_required" : "draft",
     reviewedQuestionScore: questionReviewState.score,
     scoreGroups: gradingSourceScoreGroups(questions, archiveSnapshot?.gradingSourcePackage || gradingSourcePackageForAssignment(submission.assignment)),
-    archivedAt: gradingArchivePublishedAt(submission),
+    archivedAt,
     uploadedBy: review.uploadedBy,
     submittedAt: review.submittedAt
   };
@@ -4872,8 +4875,8 @@ function gradingWorkbenchMatchesQuery(item, query) {
     if (!text.includes(query.search.toLowerCase())) return false;
   }
   if (query.queueState === "pending") return item.pendingQuestionCount > 0 || item.questionReviewReady !== true;
-  if (query.queueState === "low_confidence") return item.quality?.lowConfidence === true || item.archiveEligible === false || item.needsTeacherReview === true;
-  if (query.queueState === "ready") return item.questionReviewReady === true;
+  if (query.queueState === "low_confidence") return item.quality?.lowConfidence === true;
+  if (query.queueState === "ready") return item.canArchive === true;
   if (query.queueState === "exception") return item.questionCount === 0 || /失败|待识别/.test(item.ocrStatusLabel || "");
   return true;
 }
@@ -4905,8 +4908,8 @@ app.get("/api/grading/workbench", requireDatabase, requireSession(config, ["teac
     summary: {
       batches: total,
       pendingQuestions: filtered.reduce((sum, item) => sum + item.pendingQuestionCount, 0),
-      lowConfidence: filtered.filter((item) => item.quality?.lowConfidence === true || item.archiveEligible === false || item.needsTeacherReview === true).length,
-      ready: filtered.filter((item) => item.questionReviewReady === true).length,
+      lowConfidence: filtered.filter((item) => gradingWorkbenchMatchesQuery(item, { queueState: "low_confidence" })).length,
+      ready: filtered.filter((item) => gradingWorkbenchMatchesQuery(item, { queueState: "ready" })).length,
       exceptions: filtered.filter((item) => item.questionCount === 0 || /失败|待识别/.test(item.ocrStatusLabel || "")).length
     }
   });

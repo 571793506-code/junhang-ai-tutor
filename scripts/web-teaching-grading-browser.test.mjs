@@ -19,6 +19,57 @@ const launch = () => chromium.launch({ headless: true,
   ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}) });
 const pageSvg = (n) => `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800"><rect width="600" height="800" fill="white"/><g font-family="sans-serif" font-size="24" fill="#163b45"><text x="50" y="65">合成作业 · 第 ${n} 页</text><text x="60" y="155">${n === 1 ? "1. 说明交换加数为什么和不变" : "2. 24 + 18 = 42"}</text><text x="60" y="205">${n === 1 ? "交换两堆小棒，总数一样。" : "个位相加满十，向十位进一。"}</text></g></svg>`;
 
+test("legacy archive status, counts and actions share evidence readiness without treating draft flags as a block", { timeout: 60000 }, async t => {
+  const vite = await createServer({ configFile: false, root: path.resolve("apps/web"), cacheDir: path.join(artifactDir, "legacy-readiness-vite"),
+    plugins: [react()], server: { host: "127.0.0.1", port: 0 } });
+  await vite.listen(); t.after(() => vite.close());
+  const browser = await launch(); t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }); page.setDefaultTimeout(12000);
+  const errors = [], archiveWrites = [], queries = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const teacher = { id: "t1", displayName: "测试教师", role: "teacher", status: "active" };
+  const question = { id: "q1", questionNo: "1", prompt: "24+18", studentAnswer: "42", correctAnswer: "42", score: 5, maxScore: 5, status: "correct", reviewedByTeacher: true };
+  const ready = { id: "ready", submissionId: "ready", assignmentId: "paper", title: "教师已核对试卷", studentId: "s1", studentName: "就绪学生", subject: "数学", kind: "试卷",
+    materialType: "generated_assessment", status: "reviewing", workflowState: "draft", needsTeacherReview: true, archiveEligible: false, canArchive: true,
+    archiveBlockers: [], questions: [question], pages: [], questionCount: 1, pendingQuestionCount: 0, reviewedQuestionCount: 1, questionReviewReady: true,
+    quality: { lowConfidence: false }, ocrStatusLabel: "已核对", summary: "", uploadedBy: "teacher", submittedAt: "2026-11-07T08:00:00Z", archivedAt: null };
+  const blocked = { ...ready, id: "blocked", submissionId: "blocked", title: "证据待补齐试卷", studentName: "阻断学生", canArchive: false, archiveBlockers: ["图片质量需复核"] };
+  const denied = { ...ready, id: "denied", submissionId: "denied", title: "服务待确认试卷", studentName: "待确认学生", canArchive: false };
+  const base = { ok: true, teacher, teachers: [teacher], sessionToken: "synthetic-intercept-only", students: [], tasks: [], assignments: [], classroomDevices: [], classroomBroadcasts: [],
+    dictationTasks: [], readingTasks: [], corrections: [], logs: [], reports: [], submissions: [], jobs: [], assets: [], sources: [], events: [], modelRuns: [], index: null,
+    database: { ok: true }, ai: { features: [], mode: "test" } };
+  await page.route("**/api/**", route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith("/mark-reviewed")) archiveWrites.push(url.pathname);
+    if (url.pathname === "/api/teaching/workflows") return route.fulfill({ status: 404, body: "Route absent" });
+    queries.push(url.searchParams.get("queueState"));
+    return route.fulfill({ json: { ...base, workbenches: url.searchParams.get("queueState") === "ready" ? [ready] : [blocked, ready, denied] } });
+  });
+  await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}/?gradingAssignment=paper`);
+  await page.getByRole("button", { name: "登录同步真实数据", exact: true }).click();
+  await page.getByRole("button", { name: "原有批改与来源管理", exact: true }).first().click();
+  const panel = page.locator(".grading-workbench");
+  await panel.locator(".grading-stage-head").getByText("待补齐归档条件", { exact: true }).waitFor();
+  assert.equal(await panel.getByRole("button", { name: "确认归档", exact: true }).isDisabled(), true);
+  await panel.getByText("归档阻断：图片质量需复核", { exact: true }).waitFor();
+  assert.match(await panel.locator(".grading-command-metrics").innerText(), /低置信\s*0\s*份/);
+  assert.match(await panel.locator(".grading-command-metrics").innerText(), /可归档\s*1\s*份/);
+  await panel.getByRole("button", { name: /待确认学生 · 试卷/ }).click();
+  await panel.locator(".grading-stage-head").getByText("待补齐归档条件", { exact: true }).waitFor();
+  assert.equal(await panel.getByRole("button", { name: "确认归档", exact: true }).isDisabled(), true);
+  await panel.getByRole("button", { name: /就绪学生 · 试卷/ }).click();
+  await panel.locator(".grading-stage-head").getByText("待教师确认归档", { exact: true }).waitFor();
+  assert.equal(await panel.getByRole("button", { name: "确认归档", exact: true }).isEnabled(), true);
+  await panel.getByRole("button", { name: "筛选", exact: true }).click();
+  await panel.getByLabel("批改状态筛选", { exact: true }).selectOption("ready");
+  await panel.getByRole("button", { name: "应用筛选", exact: true }).click();
+  await panel.getByRole("heading", { name: "教师已核对试卷", exact: true }).waitFor();
+  assert.equal(await panel.locator(".grading-batch-list > button").count(), 1);
+  assert.ok(queries.includes("ready"));
+  await mkdir(artifactDir, { recursive: true }); await page.screenshot({ path: path.join(artifactDir, "grading-legacy-archive-readiness.png") });
+  assert.deepEqual(archiveWrites, []); assert.deepEqual(errors, []);
+});
+
 for (const outcome of ["success", "failure"]) test(`failed grading recovery safely replays a lost response, successor ${outcome}`, { timeout: 40000 }, async (t) => {
   let calls = 0;
   const request = { studentId: "s1", submissionId: "submission1", title: "恢复测试", requirement: "首次作答评分，订正另记" };

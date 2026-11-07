@@ -2894,8 +2894,12 @@ function reviewedQuestionScore(questions: GradingWorkbench["questions"]) {
   return Number(questions.reduce((sum, question) => sum + Number(question.score || 0), 0).toFixed(2));
 }
 
+function gradingWorkbenchCanArchive(item: GradingWorkbench) {
+  return !item.archivedAt && item.canArchive !== false && allQuestionsReviewed(item.questions) && item.archiveBlockers.length === 0;
+}
+
 function gradingWorkbenchNeedsReview(item: GradingWorkbench) {
-  return !allQuestionsReviewed(item.questions) || item.quality?.lowConfidence === true || item.archiveEligible === false || item.needsTeacherReview === true;
+  return !item.archivedAt && !gradingWorkbenchCanArchive(item);
 }
 
 function questionMaxScoreTotal(questions: GradingWorkbench["questions"]) {
@@ -3112,8 +3116,8 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onImportDialoguePackage,
       ? "图片质量较差"
       : "图片需复核";
   const pendingQuestionTotal = workbenches.reduce((sum, item) => sum + item.pendingQuestionCount, 0);
-  const lowConfidenceTotal = workbenches.filter((item) => item.needsTeacherReview || item.quality?.lowConfidence || item.archiveEligible === false).length;
-  const archiveReadyTotal = workbenches.filter((item) => allQuestionsReviewed(item.questions)).length;
+  const lowConfidenceTotal = workbenches.filter((item) => item.quality?.lowConfidence === true).length;
+  const archiveReadyTotal = workbenches.filter(gradingWorkbenchCanArchive).length;
   const activeQuestionIndex = activeQuestions.findIndex((item) => item.id === question?.id) ?? -1;
   const questionStatusCounts = activeQuestions.reduce((counts, item) => {
     if (item.status === "correct") counts.correct += 1;
@@ -3129,7 +3133,9 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onImportDialoguePackage,
   const maxScoreTotal = questionMaxScoreTotal(activeQuestions);
   const questionConfirmDisabled = !active || !question || questionStatus === "uncertain" || !questionScoreWithinMax || !questionMistakeEvidenceReady;
   const archiveBlockers = active?.archiveBlockers || [];
-  const archiveDisabled = !active || !allQuestionsReviewedForArchive || archiveBlockers.length > 0;
+  const archiveReady = Boolean(active && gradingWorkbenchCanArchive(active));
+  const archiveDisabled = !archiveReady;
+  const archiveStatusLabel = active?.archivedAt ? "已归档" : !allQuestionsReviewedForArchive ? "待逐题确认" : archiveReady ? "待教师确认归档" : "待补齐归档条件";
   const archiveScoreLabel = active?.scoreGroups?.length
     ? active.scoreGroups.map(group => `${group.label}${group.score != null ? `${group.score}/${group.maxScore} 分` : `待确认 ${group.pending} 题`}`).join("；")
     : reviewedScoreTotal != null
@@ -3206,7 +3212,7 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onImportDialoguePackage,
           <h3>{active?.title}</h3>
           <p>{active?.studentName} · {active?.subject} · {active?.kind} · {active ? new Date(active.submittedAt).toLocaleString("zh-CN") : ""}</p>
         </div>
-        <StatusPill label={allQuestionsReviewedForArchive ? "可归档" : "待逐题确认"} status={allQuestionsReviewedForArchive ? "ready" : "pending"} />
+        <StatusPill label={archiveStatusLabel} status={archiveReady || active?.archivedAt ? "ready" : "pending"} />
       </div>
       <div className="grading-score-strip">
         <span>正确 {questionStatusCounts.correct}</span>
@@ -3214,7 +3220,8 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onImportDialoguePackage,
         <span>{archiveScoreLabel}</span>
       </div>
       <p className={`context-note ${allQuestionsReviewedForArchive ? "" : "blocked"}`}><ShieldCheck size={15} />逐题确认完成后自动汇总总分；仍为“无法识别”的题目不会进入正式归档。</p>
-      {active?.materialType === "external_workbook" ? <div className="external-review-summary"><strong>外部练习册证据复核</strong><span>答案来源：{active.answerSource?.mode || "missing"} · {active.answerSource?.status === "confirmed" ? "已确认" : "待教师确认"}</span>{archiveBlockers.length ? <p className="context-note blocked">归档阻断：{archiveBlockers.join("、")}</p> : <p className="context-note">页序、图片质量和逐题识别均已满足当前门禁。</p>}<div className="review-field-row"><label className="field-label">教师确认答案（可选）<textarea value={answerKeyDraft} onChange={(event) => setAnswerKeyDraft(event.target.value)} placeholder="例如：1.A 2.4 3.小数乘法" /></label><label className="field-label">参考资料 ID<input value={referenceSourceDraft} onChange={(event) => setReferenceSourceDraft(event.target.value)} placeholder="教师确认的参考答案来源 ID" /></label></div><div className="button-row"><button className="secondary-button" disabled={!active} onClick={() => active && onConfirmAnswerSource(active.submissionId, { mode: "teacher_confirmed", answerKeyText: answerKeyDraft, referenceSourceId: referenceSourceDraft })} type="button">确认答案来源</button><button className="secondary-button" disabled={!active} onClick={() => active && onConfirmAnswerSource(active.submissionId, { mode: "teacher_selected_reference", answerKeyText: answerKeyDraft, referenceSourceId: referenceSourceDraft })} type="button">选择参考答案</button></div></div> : null}
+      {archiveBlockers.length ? <p className="context-note blocked">归档阻断：{archiveBlockers.join("、")}</p> : null}
+      {active?.materialType === "external_workbook" ? <div className="external-review-summary"><strong>外部练习册证据复核</strong><span>答案来源：{active.answerSource?.mode || "missing"} · {active.answerSource?.status === "confirmed" ? "已确认" : "待教师确认"}</span>{!archiveBlockers.length ? <p className="context-note">页序、图片质量和逐题识别均已满足当前门禁。</p> : null}<div className="review-field-row"><label className="field-label">教师确认答案（可选）<textarea value={answerKeyDraft} onChange={(event) => setAnswerKeyDraft(event.target.value)} placeholder="例如：1.A 2.4 3.小数乘法" /></label><label className="field-label">参考资料 ID<input value={referenceSourceDraft} onChange={(event) => setReferenceSourceDraft(event.target.value)} placeholder="教师确认的参考答案来源 ID" /></label></div><div className="button-row"><button className="secondary-button" disabled={!active} onClick={() => active && onConfirmAnswerSource(active.submissionId, { mode: "teacher_confirmed", answerKeyText: answerKeyDraft, referenceSourceId: referenceSourceDraft })} type="button">确认答案来源</button><button className="secondary-button" disabled={!active} onClick={() => active && onConfirmAnswerSource(active.submissionId, { mode: "teacher_selected_reference", answerKeyText: answerKeyDraft, referenceSourceId: referenceSourceDraft })} type="button">选择参考答案</button></div></div> : null}
       {active ? <div className="external-review-summary dialogue-answer-package-panel"><strong>对话重新批改</strong><span>把对话中生成的“结构化答案包”或“结构化批改结果 JSON”粘贴到这里，或选择已下载的 JSON 文件；系统会保留原始内容并进入教师逐题复核。</span><input accept=".json,application/json" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setDialogueAnswerPackageText(await file.text()); }} type="file" /><textarea className="wide-textarea compact-textarea" value={dialogueAnswerPackageText} onChange={(event) => setDialogueAnswerPackageText(event.target.value)} placeholder="粘贴结构化答案包或批改结果 JSON" /><div className="button-row"><button className="secondary-button" disabled={!dialogueAnswerPackageText.trim() || dialoguePackageBusy} onClick={async () => { if (!active || !dialogueAnswerPackageText.trim()) return; setDialoguePackageBusy(true); try { await onImportDialoguePackage(active.submissionId, dialogueAnswerPackageText); } finally { setDialoguePackageBusy(false); } }} type="button"><RefreshCw size={16} />{dialoguePackageBusy ? "正在重新批改" : "导入并重新批改"}</button></div></div> : null}
       <div className="review-image-tabs">{active?.pages.map((item) => <button className={item.pageNumber === page?.pageNumber ? "active" : ""} key={item.id} onClick={() => selectPage(item.pageNumber)}>第 {item.pageNumber} 页</button>)}</div>
       {page ? <p className={`context-note ${page.qualityStatus === "ready" ? "" : "blocked"}`}><ShieldCheck size={15} />{pageQualityText}{page.qualityScore != null ? ` · 质量分 ${Math.round(page.qualityScore * 100)}%` : ""}{pageQualityIssues.length ? ` · ${pageQualityIssues.slice(0, 2).join("；")}` : ""}</p> : null}
@@ -3274,7 +3281,7 @@ function GradingWorkbenchPanel({ onConfirmAnswerSource, onImportDialoguePackage,
       </div>
       <div className="review-confirm-form">
         <label className="field-label">批次复核备注<textarea value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} placeholder="逐题确认完成后自动汇总总分，可在这里补充本次批改的总体说明。" /></label>
-        <p className={`context-note ${allQuestionsReviewedForArchive ? "" : "blocked"}`}><ShieldCheck size={15} />{allQuestionsReviewedForArchive ? `所有题目已确认，归档总分 ${archiveScoreLabel}。` : `还有 ${unresolvedQuestions.length} 题未满足归档条件。`}</p>
+        <p className={`context-note ${archiveReady || active?.archivedAt ? "" : "blocked"}`}><ShieldCheck size={15} />{active?.archivedAt ? `本卷已独立归档，教师评分 ${archiveScoreLabel}。` : !allQuestionsReviewedForArchive ? `还有 ${unresolvedQuestions.length} 题未满足归档条件。` : archiveReady ? `所有题目已确认，待归档总分 ${archiveScoreLabel}；点击确认归档后才写入正式记录。` : "所有题目已确认，仍需补齐服务端归档条件。"}</p>
       </div>
       <div className="grading-action-dock">
         <button className="secondary-button" disabled={!active} onClick={() => active && onRecognize(active.submissionId)}><RefreshCw size={16} />重新识别</button>

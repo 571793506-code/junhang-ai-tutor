@@ -325,11 +325,14 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
   - 教师端批改工作台列表。
   - `reviewState=pending|archived`，默认 `pending`，沿用待复核队列。`archived` 只返回 `GRADED`、`needsReview=false`、已记录教师身份与独立归档时间且复核状态有效的记录；不可变工作流归档还须通过完整证据校验，不能仅凭已复核标记进入历史。
   - 两种模式均限制在当前教师负责或有效绑定的学生范围；先读取按提交时间倒序的最近500次匹配提交，再验证归档、检索和分页。`pagination.capped=true` 表示范围受限，历史结果不是全库总数。响应回传 `reviewState`，已验证归档返回 `archivedAt`。
-  - 返回 `workbenches[]`，每条包含 `pages`, `questions`, `markers`, `quality`, `summary`, `score`, `provisionalScore`, `needsTeacherReview`；外部材料额外返回 `materialType=external_workbook`、`answerSource`、`recognitionPacket` 和 `archiveBlockers`。有关联生成卷时可包含 `questionLayoutManifest`，仅供教师复核和图片标注对齐使用。
+  - 返回 `workbenches[]`，每条包含 `pages`, `questions`, `markers`, `quality`, `summary`, `score`, `provisionalScore`, `needsTeacherReview`, `canArchive`, `archiveBlockers`；外部材料额外返回 `materialType=external_workbook`、`answerSource` 和 `recognitionPacket`。有关联生成卷时可包含 `questionLayoutManifest`，仅供教师复核和图片标注对齐使用。
+  - `queueState=ready` 与 `summary.ready` 统一按 `canArchive=true` 计算；`queueState=low_confidence` 与 `summary.lowConfidence` 仅按 `quality.lowConfidence=true` 计算，不能把所有未归档草稿或待教师复核记录计为低置信。
   - Web、小程序只负责展示和教师操作；识别、批改、审查和归档仍在 API/服务层完成。
 
 - `GET /api/grading/workbench/:submissionId`
   - 教师端打开单个批改工作台详情。
+  - 列表及详情的 `canArchive` 表示当前是否满足发起独立归档的工作台条件：尚未有效归档、所有题目已确认且分值有效、`archiveBlockers` 为空。来源缺失、图片质量需复核等阻断适用于所有材料类型；Web、小程序及平板应复用该服务端字段并展示阻断原因，不因逐题确认完成就显示已归档。
+  - `archiveEligible=false`、`needsTeacherReview=true` 可为归档前草稿状态，不单独否定已满足上述条件的教师独立归档请求。`canArchive=true` 不代表已归档、不授予归档权限，也不跳过实际归档接口的最新校验；有效 `archivedAt` 才表示已独立归档。旧API缺少 `canArchive` 时，端侧可按逐题确认、阻断和归档时间保守兼容，服务端明确返回 `false` 时不可放行。
   - Web“已归档记录”复用该教师鉴权接口，以 `archivedAt` 和归档状态核验只读详情；`?gradingArchive=<submissionId>` 仅恢复导航，不授予读取、评分或归档权限。待复核队列和独立归档动作不变。
   - 不可变归档从已验证冻结快照投影题目、页序、原图与来源包，不重新合并当前OCR；多空答案和原始过程仅转换显示格式，不改历史证据。Web按显式题号显示逐题教师结果，题干与解析独占行，不将旧AI摘要当作教师最终结论。小程序及平板可复用相同只读契约。
   - 关键字段：`pages[].imageUrl`, `pages[].markers`, `pages[].qualityStatus`, `pages[].qualityScore`, `pages[].qualityIssues`, `questions[].bbox`, `questions[].prompt`, `questions[].studentAnswer`, `questions[].correctAnswer`, `questions[].errorStep`, `questions[].confidence`。
@@ -362,7 +365,7 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 
 - `POST /api/review/submissions/:submissionId/mark-reviewed`
   - 关键字段：`score`, `reviewNote`。
-  - 低置信、`needsTeacherReview=true`、`archiveEligible=false` 或仅有 `provisionalScore` 的批改结果，必须提交有效 `score`。
+  - 先校验所有题目已获教师确认且分值有效；可采用服务端逐题汇总分，无需前端重复提交总分。显式提交无效 `score` 返回400 `INVALID_REVIEWED_SCORE`；需要教师确认分数的草稿既无有效显式 `score`、又无可用逐题汇总时，返回400 `LOW_CONFIDENCE_SCORE_REQUIRED`。草稿旗标本身不要求教师重复填写已经逐题确认的分数。
   - API 在校验通过后才更新最终分、创建错题记录，并写入学生档案相关时间线。
   - 只有教师确认复核后，才允许把分数、错题和薄弱点写入归档。
 

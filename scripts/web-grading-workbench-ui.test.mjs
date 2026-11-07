@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import ts from "typescript";
 
 const source = fs.readFileSync(new URL("../apps/web/src/main.tsx", import.meta.url), "utf8");
 
@@ -78,7 +79,18 @@ test("external workbench displays original recognition evidence and blocks archi
   assert.match(source, /原始识别/);
   assert.match(source, /答案来源/);
   assert.match(source, /确认答案来源/);
-  assert.match(source, /archiveDisabled.*archiveBlockers/);
+  const helpers = source.slice(source.indexOf("function reviewedQuestionReady("), source.indexOf("\nfunction gradingWorkbenchNeedsReview("));
+  const canArchive = new Function(`${ts.transpile(helpers)}; return gradingWorkbenchCanArchive;`)();
+  const reviewed = { archivedAt: null, archiveBlockers: [], archiveEligible: false, needsTeacherReview: true,
+    questions: [{ reviewedByTeacher: true, status: "correct", score: 5, maxScore: 5 }] };
+  assert.equal(canArchive(reviewed), true);
+  assert.equal(canArchive({ ...reviewed, archiveBlockers: ["图片质量需复核"] }), false);
+  assert.equal(canArchive({ ...reviewed, canArchive: false }), false);
+  assert.equal(canArchive({ ...reviewed, questions: [] }), false);
+  assert.equal(canArchive({ ...reviewed, questions: [{ ...reviewed.questions[0], reviewedByTeacher: false }] }), false);
+  assert.equal(canArchive({ ...reviewed, archivedAt: "2026-11-07T08:00:00Z" }), false);
+  assert.match(source, /const archiveReady = Boolean\(active && gradingWorkbenchCanArchive\(active\)\)/);
+  assert.match(source, /const archiveDisabled = !archiveReady/);
 });
 
 test("grading queue exposes server-backed student, subject, kind, exception, and pagination controls", () => {
