@@ -1,0 +1,180 @@
+/* B + C: midnight navigation and review tools, light teaching content. */
+.app-shell.role-teacher {
+  --surface: #fff;
+  --surface-strong: #fff;
+  --surface-soft: #f8f6ff;
+  --line: #e8e9f2;
+  --line-soft: #eeedf5;
+  --text: #292941;
+  --muted: #6f778f;
+  --accent: #7660db;
+  --accent-strong: #6049bd;
+  --accent-soft: #f0eaff;
+  --accent-line: #c7b9f2;
+  --action-text: #fff;
+  --shadow: 0 4px 16px #6256a008;
+  grid-template-columns: 222px minmax(0, 1fr);
+  background: #f7f8fd;
+}
+
+.role-teacher .sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 28px 17px 20px;
+  overflow-y: auto;
+  color: #e8f1ff;
+  background: #080d17;
+  border-color: #182339;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.role-teacher .brand { gap: 10px; margin: 0 5px 25px; }
+.role-teacher .brand-mark {
+  width: 36px;
+  height: 38px;
+  flex: 0 0 auto;
+  color: #49d6e4;
+  background: #11343f;
+  border: 1px solid #31cadb44;
+  border-radius: 11px;
+}
+.role-teacher .brand strong { font-size: 17px; white-space: nowrap; }
+.role-teacher .brand span { margin-top: 5px; color: #8999b5; font-size: 11px; letter-spacing: 1px; }
+.role-teacher .role-switch { gap: 5px; margin-bottom: 22px; }
+.role-teacher .role-switch button {
+  min-height: 36px;
+  padding: 6px 2px;
+  font-size: 11px;
+  color: #a1afc5;
+  background: #101827;
+  border-color: #24314a;
+}
+.role-teacher .role-switch button.active { color: #7ee4ef; background: #112f3a; border-color: #26535f; }
+.role-teacher .nav-list { gap: 7px; scrollbar-width: thin; scrollbar-color: #34455f #101827; }
+.role-teacher .nav-list::-webkit-scrollbar { height: 5px; }
+.role-teacher .nav-list::-webkit-scrollbar-track { background: #101827; }
+.role-teacher .nav-list::-webkit-scrollbar-thumb { background: #34455f; border-radius: 5px; }
+.role-teacher .nav-item {
+  position: relative;
+  min-height: 47px;
+  padding: 0 14px;
+  gap: 12px;
+  border-radius: 9px;
+  color: #99a9c2;
+  font-size: 14px;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.role-teacher .nav-item:hover { background: #131e2e; color: #e8f1ff; }
+.role-teacher .nav-item.active { color: #78e1ed; background: #112f3a; }
+.role-teacher .nav-item.active::before { content: ""; position: absolute; left: 0; width: 3px; height: 21px; border-radius: 3px; background: #31cadb; }
+.teacher-sidebar-identity { display: flex; gap: 11px; align-items: center; padding: 19px 7px 0; margin-top: auto; border-top: 1px solid #1b2638; }
+.teacher-identity-avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; background: #11343f; color: #78e1ed; }
+.teacher-sidebar-identity strong { display: block; color: #e8f1ff; font-size: 13px; font-weight: 500; }
+.teacher-sidebar-identity small { display: block; color: #8999b5; font-size: 11px; margin-top: 4px; }
+
+.role-teacher .main { padding: 0 34px 28px; background: #f7f8fd; }
+.role-teacher .topbar {
+  min-height: 111px;
+  padding: 24px 34px;
+  margin: 0 -34px 23px;
+  background: #101827;
+  color: #ecf3ff;
+  border-bottom: 1px solid #24314a;
+}
+.role-teacher .topbar h1 { margin: 0; font-size: 29px; letter-spacing: -.6px; font-weight: 650; }
+.teacher-page-description { margin: 8px 0 0; color: #a1afc5; font-size: 13px; line-height: 1.6; }
+.role-teacher .topbar .api-sync-status { color: #b3bfd3; background: #141e30; border-color: #29364c; backdrop-filter: none; }
+.role-teacher .topbar .api-sync-status.ready { color: #a6e0cb; background: #132b2b; border-color: #25463e; }
+.role-teacher .topbar .api-sync-status :is(span, svg) { color: inherit; }
+.role-teacher :is(.panel, .summary-band, .auth-panel, .hero-band) { background: #fff; border-color: var(--line); border-radius: 14px; box-shadow: var(--shadow); backdrop-filter: none; }
+.role-teacher :is(.panel, .summary-band) { padding: 20px; }
+.role-teacher .hero-band { background: #fff; min-height: 160px; padding: 22px; }
+.role-teacher :is(.daily-action-card, .daily-material-card, .teacher-flow-card) { background: #fff; border-color: var(--line); border-radius: 12px; }
+.role-teacher .daily-action-card { transition: border-color 150ms ease, background-color 150ms ease; }
+.role-teacher .daily-action-card:hover { background: #faf9ff; border-color: var(--accent-line); }
+.role-teacher :is(.daily-action-card, .daily-material-card) strong { color: var(--text); }
+.role-teacher :is(.daily-action-card span, .daily-material-card p, .tw-heading p, .tw-edit > p, .muted-line, .note-line) { color: var(--muted); }
+.role-teacher :is(.daily-material-card a, .gh-originals summary, .ui-disclosure > summary, .gw-analysis-link, .gw-evidence a, .tw-edit a) { color: var(--accent-strong); }
+.role-teacher .metric { background: #f8f6ff; border-left-width: 3px; border-radius: 10px; }
+.role-teacher .panel-title h2 { font-size: 17px; }
+.role-teacher .tw-status { background: #eaf8f1; color: #25876a; border-radius: 6px; padding: 6px 10px; font-size: 12px; }
+.role-teacher :where(.teaching-workbench) button { min-height: 40px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface); padding: 9px 12px; font-size: 13px; line-height: 1.5; }
+.role-teacher :is(.primary-button, .secondary-button) { min-height: 40px; border-radius: 8px; font-size: 13px; line-height: 1.5; }
+.role-teacher .primary-button { color: var(--action-text); background: var(--accent); border-color: var(--accent); box-shadow: none; }
+.role-teacher .primary-button:hover:not(:disabled) { background: var(--accent-strong); border-color: var(--accent-strong); }
+.role-teacher .secondary-button { color: var(--text); background: var(--surface); border-color: var(--line); }
+.role-teacher .secondary-button:hover:not(:disabled) { background: var(--surface-soft); border-color: var(--accent-line); }
+.role-teacher :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) { color: var(--text); background: var(--surface-strong); border-color: var(--line); border-radius: 8px; font-size: 14px; }
+.role-teacher :is(input, textarea)::placeholder { color: var(--muted); opacity: 1; }
+.role-teacher :is(.tw-grid, .grading-continuous) label { color: var(--text); }
+.role-teacher input:is([type="checkbox"], [type="radio"]) { accent-color: var(--accent); }
+.role-teacher :is(button, a, input, select, textarea, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.role-teacher :is(.subject-tabs, .report-tabs) button { color: var(--muted); background: var(--surface); border-color: var(--line); border-radius: 8px; font-size: 13px; }
+.role-teacher :is(.subject-tabs, .report-tabs) button.active { color: var(--accent-strong); background: var(--accent-soft); border-color: var(--accent-line); box-shadow: none; }
+.role-teacher :is(.tw-request, .gw-original, .tw-question, .tw-explanation, .gw-question-detail, .gw-analysis) { background: #fff; border-color: var(--line); border-radius: 14px; }
+.role-teacher .tw-request { background: #fafaff; }
+.role-teacher :is(.tw-question.selected, .tw-task-list .selected) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.role-teacher .tw-task-list button { color: var(--text); background: var(--surface); border-color: var(--line); }
+.role-teacher .tw-task-list small { color: var(--muted); }
+.role-teacher .tw-answer { background: #f8f6ff; border-radius: 9px; }
+.role-teacher .tw-answer details + details { border-color: var(--line); }
+.role-teacher .tw-answer summary { color: var(--accent-strong); }
+.role-teacher .gw-summary { color: var(--text); background: #f5f2ff; border: 1px solid var(--line); }
+.role-teacher .gw-original { background: #fff; }
+.role-teacher .gw-image-region { border: 2px solid var(--accent); background: #7660db08; }
+.role-teacher .gw-question-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 9px; max-height: 440px; overflow-y: auto; padding: 2px 4px 4px 2px; }
+.role-teacher .gw-question-picker button { min-height: 48px; text-align: left; border-left-width: 3px; }
+.role-teacher .gw-question-picker button[data-question-status="correct"] { border-left-color: #25876a; }
+.role-teacher .gw-question-picker button[data-question-status="wrong"] { border-left-color: #bd5d59; }
+.role-teacher .gw-question-picker button:is([data-question-status="partial"], [data-question-status="uncertain"]) { border-left-color: #b98730; }
+.role-teacher .gw-question-picker button[aria-pressed="true"] { color: var(--accent-strong); background: var(--accent-soft); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.role-teacher :is(.gw-question-detail, .gw-analysis) h4 { color: var(--text); }
+.role-teacher .gw-analysis-heading span { color: var(--muted); }
+.role-teacher .gw-analysis-section { border-color: var(--line); }
+
+/* Local tokens let every existing control in the tool panel keep its contrast. */
+.role-teacher :is(.gw-edit, .tw-edit) {
+  --surface: #141c2b;
+  --surface-strong: #101827;
+  --surface-soft: #1b273a;
+  --text: #ecf3ff;
+  --muted: #adbad0;
+  --line: #29364c;
+  --line-soft: #29364c;
+  --accent: #31cadb;
+  --accent-strong: #70dce7;
+  --accent-soft: #11343f;
+  --accent-line: #3d8f9a;
+  --action-text: #07131e;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 8px 22px #0b132419;
+}
+.role-teacher :is(.gw-edit, .tw-edit) h3 { color: #58d6e3; font-size: 16px; }
+.role-teacher :is(.gw-edit, .tw-edit) :is(label, p, small, legend) { color: var(--muted); }
+.role-teacher :is(.gw-edit, .tw-edit) :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea, fieldset) { color: var(--text); background: var(--surface-strong); border-color: var(--line); }
+.role-teacher :is(.gw-edit, .tw-edit) a { color: #70dce7; }
+.role-teacher :is(.gw-edit, .tw-edit) .tw-notice { color: #f0dcae; background: #352c20; border-color: #655239; }
+.role-teacher :is(.gw-mobile-tabs, .tw-mobile-tabs) button { color: var(--text); background: #fff; border-color: var(--line); border-radius: 8px; }
+.role-teacher :is(.gw-mobile-tabs, .tw-mobile-tabs) button[aria-pressed="true"] { color: var(--accent-strong); background: var(--accent-soft); border-color: var(--accent); }
+
+@media (min-width: 768px) and (max-width: 1100px) {
+  .app-shell.role-teacher { grid-template-columns: minmax(0, 1fr); }
+  .role-teacher .sidebar { display: grid; height: auto; padding: 12px 20px; gap: 10px 20px; overflow-y: visible; }
+  .role-teacher .sidebar .brand, .role-teacher .sidebar .role-switch { margin: 0; }
+  .role-teacher .sidebar .role-switch { min-width: 280px; }
+  .role-teacher .teacher-sidebar-identity { display: none; }
+  .role-teacher .main { padding: 0 20px 24px; }
+  .role-teacher .topbar { margin: 0 -20px 20px; padding: 20px; min-height: 100px; }
+  .role-teacher .topbar h1 { font-size: 25px; }
+  .role-teacher :is(.primary-button, .secondary-button, .teaching-workbench button, .tw-mobile-tabs button, .gw-mobile-tabs button) { min-height: 44px; }
+  .role-teacher .sidebar .nav-item.active::before { height: 18px; }
+  .role-teacher .gw-question-picker { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .role-teacher :is(.nav-item, .daily-action-card) { transition: none; }
+}

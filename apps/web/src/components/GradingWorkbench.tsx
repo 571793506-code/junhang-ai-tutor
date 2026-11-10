@@ -195,7 +195,7 @@ export function GradingWorkbench({ teacherId, active, sources, onLegacy, onArchi
       <div className="gw-grid" data-region={region}>
         <aside className="gw-original"><h3>作业原图</h3><label>页码<select aria-label="原图页码" value={pageNumber} onChange={(e) => setPageNumber(Number(e.target.value))}>{pages.map((p) => <option key={p.pageNumber} value={p.pageNumber}>第 {p.pageNumber} 页</option>)}</select></label><EvidenceImage page={page} question={question} /></aside>
         <div className="gw-questions"><label className="tw-check"><input type="checkbox" checked={onlyDoubts} disabled={dirty || !!busy} onChange={(e) => setOnlyDoubts(e.target.checked)} />只看疑点题</label>
-          <div className="gw-question-picker">{shownQuestions.map((q) => <button key={q.id} disabled={dirty || !!busy} aria-pressed={questionId === q.id} onClick={() => { setQuestionId(q.id); setChecked(false); }}>第 {q.questionNo} 题 · {statuses[q.status]}{q.reviewedByTeacher ? " · 已确认" : ""}</button>)}</div>
+          <div className="gw-question-picker">{shownQuestions.map((q) => <button key={q.id} data-question-status={q.status} disabled={dirty || !!busy} aria-pressed={questionId === q.id} onClick={() => { setQuestionId(q.id); setChecked(false); }}>第 {q.questionNo} 题 · {statuses[q.status]}{q.reviewedByTeacher ? " · 已确认" : ""}</button>)}</div>
           {onlyDoubts && !shownQuestions.length && <p>没有待核对的疑点题。取消筛选可继续逐题确认。</p>}
           {question && <a className="gw-analysis-link" href="#grading-current-question">查看本题题干与作答 ↓</a>}
         </div>

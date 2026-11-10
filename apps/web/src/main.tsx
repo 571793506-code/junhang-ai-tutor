@@ -110,6 +110,18 @@ import {
   uploadSubmission
 } from "./api";
 import "./styles.css";
+import "./teacher-theme.css";
+
+const teacherModuleIcons: Record<string, typeof Home> = {
+  工作台: Home, 学生权限: UsersRound, 今日任务: CalendarDays, 生成打印: Sparkles,
+  批改复核: ListChecks, 学生档案: UserRound, 教材资料: BookOpen, 课堂设备: MonitorCheck, 系统状态: Settings2
+};
+const teacherModuleDescriptions: Record<string, string> = {
+  工作台: "从教学内容、学生任务和学习记录开始。", 学生权限: "管理学生信息与使用权限。",
+  今日任务: "按学生查看任务与完成情况。", 生成打印: "创建教学内容，继续修改与确认。",
+  批改复核: "核对原图与作答，逐题修改和确认。", 学生档案: "结合已确认记录，查看学生近期学习情况。",
+  教材资料: "检索教材与资料，核对教学内容来源。", 课堂设备: "查看课堂设备与教学互动。", 系统状态: "查看服务状态与运行记录。"
+};
 
 type Role = "student" | "teacher" | "classroom";
 type ProviderStatus = "ready" | "blocked" | "unavailable" | "pending";
@@ -1295,18 +1307,19 @@ function App() {
   return (
     <div className={`app-shell role-${role}`}>
       <aside className="sidebar">
-        <div className="brand"><GraduationCap size={28} /><div><strong>君航 AI 助教</strong><span>整体运行工作台</span></div></div>
+        <div className="brand">{role === "teacher" ? <div className="brand-mark"><Sparkles size={24} /></div> : <GraduationCap size={28} />}<div><strong>君航 AI 助教</strong><span>{role === "teacher" ? "教学工作空间" : "整体运行工作台"}</span></div></div>
         <div className="role-switch">
           <button className={role === "teacher" ? "active" : ""} onClick={() => switchRole("teacher")}>教师端</button>
           <button className={role === "student" ? "active" : ""} onClick={() => switchRole("student")}>学生端</button>
           <button className={role === "classroom" ? "active" : ""} onClick={() => switchRole("classroom")}>课堂平板</button>
         </div>
         <nav className="nav-list">
-          {currentNav.map((item) => <button className={`nav-item ${currentModule === item ? "active" : ""}`} key={item} onClick={() => selectModule(item)}><Home size={17} /><span>{item}</span></button>)}
+          {currentNav.map((item) => { const ModuleIcon = role === "teacher" ? teacherModuleIcons[item] || Home : Home; return <button className={`nav-item ${currentModule === item ? "active" : ""}`} aria-current={currentModule === item ? "page" : undefined} key={item} onClick={() => selectModule(item)}><ModuleIcon size={18} /><span>{item}</span></button>; })}
         </nav>
+        {role === "teacher" && currentTeacher && <div className="teacher-sidebar-identity"><span className="teacher-identity-avatar"><UserRound size={18} /></span><div><strong>{currentTeacher.displayName}</strong><small>教师工作空间</small></div></div>}
       </aside>
       <main className="main">
-        <header className="topbar"><div><p className="eyebrow">{roleLabel(role)}</p><h1>{role === "teacher" ? `教师端 · ${currentModule}` : role === "student" ? `学生端 · ${currentModule}` : `课堂平板 · ${currentModule}`}</h1></div><ApiSyncStatus state={syncForRole(sync, role)} /></header>
+        <header className="topbar"><div>{role !== "teacher" && <p className="eyebrow">{roleLabel(role)}</p>}<h1>{role === "teacher" ? currentModule : role === "student" ? `学生端 · ${currentModule}` : `课堂平板 · ${currentModule}`}</h1>{role === "teacher" && <p className="teacher-page-description">{teacherModuleDescriptions[currentModule]}</p>}</div><ApiSyncStatus state={syncForRole(sync, role)} /></header>
         {role === "teacher" && auth.teacherId && currentTeacher ? <TeacherWorkspace activeModule={currentModule} ai={ai} capabilities={capabilities} assessmentJobs={assessmentJobs} assignments={assignments} audit={audit} contentIndex={contentIndex} corrections={corrections} devices={devices} knowledgeSources={knowledgeSources} latestAssessmentDraft={latestAssessmentDraft} logs={logs} onAssessment={createAssessment} onAssessmentCancel={cancelAssessmentGeneration} onAssessmentJobSelect={selectAssessmentGenerationJob} onAssessmentRecovery={recoverAssessmentGeneration} onAssessmentDraftSelect={(assignment) => {
           const draft = assessmentDraftRefFromAssignment(assignment);
           if (draft) {
