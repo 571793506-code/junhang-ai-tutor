@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { GradingImageStage } from "./GradingImageStage";
 import { getGradingWorkbench, listGradingWorkbenches, teachingImageUrl, type GradingWorkbench } from "../api";
 
 const statuses = { correct: "正确", wrong: "错误", partial: "部分正确", uncertain: "待核对" };
@@ -115,9 +116,8 @@ export function GradingArchiveHistory({ active }: { active: boolean }) {
 
 function ArchiveImage({ page }: { page: GradingWorkbench["pages"][number] }) {
   const url = teachingImageUrl(page.imageUrl);
-  const [broken, setBroken] = useState("");
-  return <div className="gw-evidence gh-image">{!url || broken === url ? <p className="tw-notice">第 {page.pageNumber} 页原图暂不可用。</p> : <>
-    <a href={url} target="_blank" rel="noreferrer">打开第 {page.pageNumber} 页原图</a>
-    <img src={url} loading="lazy" alt={`归档原卷第 ${page.pageNumber} 页`} onError={() => setBroken(url)} />
-  </>}</div>;
+  return <div className="gw-evidence gh-image">
+    {url && <a href={url} target="_blank" rel="noreferrer">打开第 {page.pageNumber} 页原图</a>}
+    <GradingImageStage className="gw-image-wrap" url={url} loading="lazy" pageNumber={page.pageNumber} alt={`归档原卷第 ${page.pageNumber} 页`} />
+  </div>;
 }

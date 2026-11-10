@@ -79,6 +79,8 @@ export interface LearningTaskCard {
   status: "待完成" | "进行中" | "已完成" | "需复核";
   minutes: number;
   dueLabel: string;
+  dueAt?: string | null;
+  createdAt?: string | null;
   source: string;
   knowledgePoints: string[];
   summary?: string;

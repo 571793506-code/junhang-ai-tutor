@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { GradingImageStage } from "./GradingImageStage";
 import { archiveTeachingGrading, createGradingWorkflow, recoverGradingWorkflow, executeGradingWorkflow, getGradingWorkflow, listTeachingWorkflows,
   teachingImageUrl, type GradingWorkflowPage, type GradingWorkflowQuestion, type GradingWorkflowView, type TeachingWorkflowCommand, type TeachingWorkflowSummary } from "../api";
 
@@ -19,20 +20,17 @@ const dubious = (q: GradingWorkflowQuestion) => q.status === "uncertain" || need
 
 function EvidenceImage({ page, question }: { page?: GradingWorkflowPage; question?: GradingWorkflowQuestion }) {
   const url = teachingImageUrl(page?.imageUrl);
-  const [brokenUrl, setBrokenUrl] = useState("");
   const box = question?.bbox;
   const sameImage = !!page && (!question?.sourceImageRef || page.imageRefs?.includes(question.sourceImageRef));
   const sameCrop = (question?.cropRef || null) === (page?.cropRef || null);
   const located = sameImage && sameCrop && box && box.page === page?.pageNumber && [box.x, box.y, box.w, box.h].every(Number.isFinite)
     && box.x >= 0 && box.y >= 0 && box.w > 0 && box.h > 0 && box.x + box.w <= 1 && box.y + box.h <= 1;
   return <div className="gw-evidence">
-    {!url || brokenUrl === url ? <p className="tw-notice">原图暂不可用，请回到原批次检查图片。</p> : <>
-      <div className="gw-image-wrap"><img src={url} alt={`作业原图第 ${page?.pageNumber} 页`} onError={() => setBrokenUrl(url)} />
+      <GradingImageStage className="gw-image-wrap" url={url} pageNumber={page?.pageNumber || 1} alt={`作业原图第 ${page?.pageNumber || 1} 页`}>
         {located && <span className="gw-image-region" data-testid="grading-question-region" aria-label={`第${question?.questionNo}题原图区域`}
-          style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%` }} />}</div>
-      <a href={url} target="_blank" rel="noreferrer">打开原图核对</a>
+          style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%` }} />}</GradingImageStage>
+      {url && <a href={url} target="_blank" rel="noreferrer">打开原图核对</a>}
       {!located && <p className="muted-line">没有与此原图匹配的可靠位置，请查看完整图片核对。</p>}
-    </>}
     <small>图片质量：{page?.qualityStatus === "unknown" ? "未提供" : ["usable", "ready", "good"].includes(page?.qualityStatus || "") ? "可用" : "需核对"}。位置标记不代表识别正确。</small>
   </div>;
 }

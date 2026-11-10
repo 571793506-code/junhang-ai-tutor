@@ -311,7 +311,8 @@ test("teacher target selectors use the API availability contract", () => {
   assert.match(source, /const assessmentTargetBlockReason = generationTargetScope === "student" && !generationSelectedStudent/);
   assert.match(source, /title="生成今日任务"[\s\S]{0,1200}\{selectableStudents\.map\(\(student\) => <option key=\{student\.id\}/);
   assert.match(source, /title="已发布今日任务完成情况"[\s\S]{0,1800}\{selectableStudents\.map\(\(student\) => <option key=\{student\.id\}/);
-  assert.match(source, /title="拍照上传批改"[\s\S]{0,800}\{selectableStudents\.map\(\(student\) => <option key=\{student\.id\}/);
+  const uploadPanel = source.split('id="grading-upload"')[1]?.split('</details>')[0] || "";
+  assert.match(uploadPanel, /\{selectableStudents\.map\(\(student\) => <option key=\{student\.id\}/);
 });
 
 test("generation history can be filtered by student, subject, state, and keyword", () => {

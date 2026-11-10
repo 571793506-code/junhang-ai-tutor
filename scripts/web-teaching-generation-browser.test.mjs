@@ -9,6 +9,7 @@ import react from "@vitejs/plugin-react";
 import { workflowHttpFixture } from "./test-support/teaching-workflow-http.mjs";
 import { createTeachingWorkflowExecution } from "../apps/api/src/teaching-workflow-execution.js";
 import { createTeachingWorkflowClient } from "./teaching-workflow-client.mjs";
+import { demoStudents } from "@junhang/core";
 
 // Browser plugin not available: use installed Playwright via an explicit module path.
 const require = createRequire(import.meta.url);
@@ -56,11 +57,21 @@ test("rendered generation workbench shares HTTP versions, preserves conflicts an
   await page.addInitScript((token) => localStorage.setItem("junhang.web.sessionToken", token), f.tokens.teacher);
   await page.goto(`${base}/__workbench`);
   await page.getByText("服务可用", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "新建内容", exact: true }).click();
   await page.getByLabel("具体要求", { exact: true }).fill("两道四年级进位加法专项练习");
   await page.getByLabel("题量", { exact: true }).fill("2");
   await page.getByRole("button", { name: "生成内容草稿", exact: true }).click();
   await page.getByRole("heading", { name: "加法专项", exact: true }).waitFor();
   assert.equal(await page.locator(".tw-question").count(), 2);
+  assert.equal(await page.locator(".tw-answer details[open]").count(), 0);
+  const firstQuestion = page.locator(".tw-question").first();
+  await firstQuestion.getByText("答案与解析 · 待确认", { exact: true }).click();
+  await firstQuestion.getByText("答案：39", { exact: true }).waitFor();
+  assert.equal(await firstQuestion.getByText("计算正确得5分", { exact: true }).isVisible(), false);
+  await firstQuestion.getByText("评分细则", { exact: true }).click();
+  await firstQuestion.getByText("计算正确得5分", { exact: true }).waitFor();
+  await page.getByText("查看完整生成要求", { exact: true }).click();
+  await page.locator(".tw-content").getByText("两道四年级进位加法专项练习", { exact: true }).waitFor();
   await page.getByLabel("学生作答预览（隐藏答案）").check();
   assert.equal(await page.locator(".tw-answer").count(), 0);
   await page.getByLabel("学生作答预览（隐藏答案）").uncheck();
@@ -117,6 +128,21 @@ test("rendered generation workbench shares HTTP versions, preserves conflicts an
   assert.equal(printCalls, 1);
   await mkdir(artifactDir, { recursive: true });
   await page.screenshot({ path: path.join(artifactDir, "generation-desktop.png"), fullPage: false });
+  for (const viewport of [{ width: 1024, height: 768 }, { width: 768, height: 1024 }]) {
+    await page.setViewportSize(viewport);
+    await page.getByRole("button", { name: "内容成果", exact: true }).click();
+    assert.ok(await page.locator(".tw-content").evaluate((el) => el.getBoundingClientRect().width) >= viewport.width - 100);
+    await page.locator(".tw-question").first().getByRole("button", { name: "选择此题", exact: true }).click();
+    await page.getByLabel("修改要求", { exact: true }).fill("iPad 尚未提交的修改");
+    await page.getByRole("button", { name: "内容成果", exact: true }).click();
+    await page.getByRole("button", { name: "修改与版本", exact: true }).click();
+    assert.equal(await page.getByLabel("修改要求", { exact: true }).inputValue(), "iPad 尚未提交的修改");
+    await page.getByLabel("修改要求", { exact: true }).fill("");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  }
+  await page.getByRole("button", { name: "内容成果", exact: true }).click();
+  await page.screenshot({ path: path.join(artifactDir, "generation-ipad.png"), fullPage: false });
+  await page.setViewportSize({ width: 1480, height: 980 });
   await page.getByRole("button", { name: "查看历史版本", exact: true }).click();
   await page.getByRole("button", { name: "恢复为新版本", exact: true }).click();
   await page.locator(".tw-question").first().getByText("21+18", { exact: true }).waitFor();
@@ -135,6 +161,7 @@ test("rendered generation workbench shares HTTP versions, preserves conflicts an
   await page.getByRole("button", { name: "查看历史版本", exact: true }).click();
   await page.getByText("历史内容只读。恢复会新增版本；当前最新版本不会被覆盖。").waitFor();
   assert.equal(await page.getByRole("button", { name: "恢复为新版本", exact: true }).isDisabled(), true);
+  await page.getByRole("button", { name: "新建内容", exact: true }).click();
   await page.getByLabel("教学用途", { exact: true }).selectOption("explanation");
   await page.getByLabel("具体要求", { exact: true }).fill("用例题讲解进位加法");
   await page.getByRole("button", { name: "生成内容草稿", exact: true }).click();
@@ -160,6 +187,7 @@ test("rendered generation workbench shares HTTP versions, preserves conflicts an
 
   // Change server-owned evidence, rather than mocking the conflict response.
   await page.setViewportSize({ width: 1480, height: 980 });
+  await page.getByRole("button", { name: "新建内容", exact: true }).click();
   await page.getByLabel("教学用途", { exact: true }).selectOption("focused");
   await page.getByLabel("具体要求", { exact: true }).fill("两道四年级进位加法专项练习");
   await page.getByLabel("题量", { exact: true }).fill("2");
@@ -245,6 +273,7 @@ test("actual teacher page retains legacy generation when workflow service is una
   await page.getByRole("button", { name: "生成打印", exact: true }).click();
   const workbench = page.getByRole("region", { name: "持续生成工作台", exact: true });
   await workbench.getByText("服务暂未启用", { exact: true }).waitFor();
+  await workbench.getByRole("button", { name: "新建内容", exact: true }).click();
   assert.equal(await workbench.getByRole("button", { name: "生成内容草稿", exact: true }).isDisabled(), true);
   serviceStatus = 503;
   const unavailable = page.waitForResponse((r) => r.url().includes("/api/teaching/workflows") && r.status() === 503);
@@ -252,10 +281,93 @@ test("actual teacher page retains legacy generation when workflow service is una
   await workbench.getByRole("button", { name: "原有生成与打印", exact: true }).click();
   assert.equal(await workbench.isVisible(), false);
   await page.locator(".generation-workbench-shell").waitFor({ state: "visible" });
-  await page.getByRole("button", { name: "持续编辑工作台", exact: true }).click();
+  await page.getByRole("button", { name: "生成与继续修改", exact: true }).click();
   await workbench.waitFor({ state: "visible" });
   assert.equal(await page.locator(".generation-workbench-shell").isVisible(), false);
   assert.deepEqual(errors, []);
   await mkdir(artifactDir, { recursive: true });
   await page.screenshot({ path: path.join(artifactDir, "teacher-unavailable.png"), fullPage: false });
+});
+
+test("teacher daily UI filters task evidence, preserves material inputs and shows actual profile state", { timeout: 60000 }, async (t) => {
+  const vite = await createServer({ configFile: false, root, cacheDir: path.join(artifactDir, "daily-vite"), plugins: [react()], server: { host: "127.0.0.1", port: 0 } });
+  await vite.listen(); t.after(() => vite.close());
+  const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) }); t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } }); page.setDefaultTimeout(10000);
+  const errors = [], writes = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const teacher = { id: "daily-teacher", displayName: "日常界面测试教师", role: "teacher", status: "active" };
+  const students = [
+    { ...demoStudents[0], id: "daily-a", displayName: "学生甲", canReceiveNewWork: true, publishedProfileSnapshot: { draftStatus: "review_required", period: { label: "11月记录" } } },
+    { ...demoStudents[0], id: "daily-b", displayName: "学生乙", canReceiveNewWork: true, publishedProfileSnapshot: { draftStatus: "published", period: { label: "10月记录" } } }
+  ];
+  const task = (id, studentId, date, status = "待完成") => ({ id, studentId, studentName: studentId === "daily-a" ? "学生甲" : "学生乙", title: `任务${id}`, subject: "数学", status, minutes: 10, dueAt: date, dueLabel: "今日", source: "教师", knowledgePoints: [], summary: "简要内容", description: `完整任务说明${id}` });
+  const tasks = [task("a-today", "daily-a", "2026-11-10T06:00:00Z"), task("a-done", "daily-a", "2026-11-10T06:00:00Z", "已完成"),
+    ...Array.from({ length: 10 }, (_, i) => task(`a-history-${i}`, "daily-a", "2026-10-01T06:00:00Z")), task("unknown", "daily-a", null), task("b-only", "daily-b", "2026-11-10T06:00:00Z")];
+  const base = { ok: true, teacher, teachers: [teacher], sessionToken: "synthetic-intercept-only", students, tasks, assignments: [], classroomDevices: [], classroomBroadcasts: [], dictationTasks: [], readingTasks: [],
+    corrections: [], logs: [{ id: "other-log", time: "今天", feature: "ai-qa", action: "其他学生的记录", result: "不能归给当前学生", actorType: "student" }], reports: [], submissions: [], workbenches: [], jobs: [], assets: [], events: [], modelRuns: [], index: null,
+    sources: [{ id: "source-one", title: "六年级分数练习参考", summary: "分数除法", subject: "数学", grade: "六年级", reviewStatus: "PENDING", chunkCount: 1, allowedForGeneration: false }], database: { ok: true }, ai: { features: [], mode: "test" } };
+  await page.route("**/api/**", route => {
+    const request = route.request(), url = new URL(request.url());
+    if (request.method() !== "GET" && url.pathname !== "/api/teacher-login") writes.push(url.pathname);
+    if (url.pathname === "/api/teaching/workflows") return route.fulfill({ status: 404, body: "Route absent" });
+    return route.fulfill({ json: base });
+  });
+  await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}/`);
+  await page.getByRole("button", { name: "登录同步真实数据", exact: true }).click();
+  await page.getByRole("heading", { name: "日常工作入口", exact: true }).waitFor();
+  assert.equal(await page.getByRole("heading", { name: "展示与互动控制台", exact: true }).isVisible(), false);
+  await page.getByRole("button", { name: "今日任务", exact: true }).click();
+  const list = page.locator(".teacher-task-list");
+  assert.equal(await list.locator(".daily-task-card").count(), 10);
+  await list.getByRole("button", { name: "下一页", exact: true }).click();
+  await list.getByText(/日期未记录/).last().waitFor();
+  await list.getByLabel("任务日期", { exact: true }).fill("2026-11-10");
+  assert.equal(await list.locator(".daily-task-card").count(), 2);
+  assert.equal(await list.getByText("完整任务说明a-today", { exact: true }).isVisible(), false);
+  await list.getByText("任务a-today", { exact: true }).click();
+  await list.getByText("完整任务说明a-today", { exact: true }).waitFor();
+  const taskForm = page.locator("section").filter({ has: page.getByRole("heading", { name: "生成今日任务", exact: true }) });
+  await taskForm.getByRole("combobox").first().selectOption("daily-b");
+  assert.equal(await list.locator(".daily-task-card").count(), 1);
+  await list.getByText("任务b-only", { exact: true }).waitFor();
+  await list.getByLabel("任务学生范围", { exact: true }).selectOption("all");
+  await list.getByLabel("任务完成状态", { exact: true }).selectOption("已完成");
+  assert.equal(await list.locator(".daily-task-card").count(), 1);
+  await list.getByText("任务a-done", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "教材资料", exact: true }).click();
+  assert.equal(await page.getByTestId("content-index-panel").isVisible(), false);
+  await page.getByRole("button", { name: "资料来源与复核", exact: true }).click();
+  await page.getByLabel("检索资料来源", { exact: true }).fill("没有的关键词");
+  assert.equal(await page.getByText("六年级分数练习参考", { exact: true }).isVisible(), false);
+  await page.getByLabel("检索资料来源", { exact: true }).fill("分数");
+  await page.getByText("六年级分数练习参考", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "导入与索引管理", exact: true }).click();
+  await page.getByTestId("content-material-file-input").setInputFiles({ name: "合成讲义.txt", mimeType: "text/plain", buffer: Buffer.from("合成测试资料") });
+  await page.getByText("已选择 1 份资料", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "教材检索", exact: true }).click();
+  await page.getByRole("button", { name: "导入与索引管理", exact: true }).click();
+  await page.getByText("已选择 1 份资料", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "学生档案", exact: true }).click();
+  await page.getByRole("combobox", { name: /^归档学生/ }).selectOption("daily-a");
+  await page.getByText("当前版本发布后可见", { exact: true }).waitFor();
+  const overview = page.locator(".archive-overview");
+  await overview.getByText("档案范围：11月记录", { exact: true }).waitFor();
+  assert.equal(await overview.getByText("其他学生的记录", { exact: true }).count(), 0);
+  assert.equal(await page.evaluate(() => document.querySelector(".archive-overview").getBoundingClientRect().top < document.querySelector(".student-profile-workspace").getBoundingClientRect().top), true);
+  await page.getByRole("combobox", { name: /^归档学生/ }).selectOption("daily-b");
+  await page.getByText("当前保存版本已发布", { exact: true }).waitFor();
+  await mkdir(artifactDir, { recursive: true });
+  await page.screenshot({ path: path.join(artifactDir, "daily-profile-desktop.png") });
+  for (const viewport of [{ width: 1024, height: 768 }, { width: 768, height: 1024 }]) {
+    await page.setViewportSize(viewport);
+    for (const module of ["学生档案", "今日任务", "教材资料", "工作台"]) {
+      await page.getByRole("button", { name: module, exact: true }).click();
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${module} ${viewport.width}`);
+    }
+    assert.ok(await page.locator(".sidebar").evaluate((el) => el.getBoundingClientRect().height) < 150, "iPad navigation should leave room for teaching content");
+  }
+  await page.screenshot({ path: path.join(artifactDir, "daily-home-ipad.png") });
+  assert.deepEqual(writes, []);
+  assert.deepEqual(errors, []);
 });

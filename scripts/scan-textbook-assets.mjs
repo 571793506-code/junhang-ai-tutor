@@ -40,7 +40,7 @@ function inferSubject(text) {
 }
 
 function inferGrade(text) {
-  return normalizeGradeLevel(text)?.label || "";
+  return normalizeGradeLevel(text.replace(/[一二三四五六七八九1-9]年级\s*起点/g, ""))?.label || "";
 }
 
 function inferVolume(text) {
@@ -72,7 +72,7 @@ function toAsset(filePath) {
   return {
     id: crypto.createHash("sha1").update(relativePath).digest("hex").slice(0, 16),
     subject,
-    grade: inferGrade(searchText),
+    grade: inferGrade(path.basename(filePath, path.extname(filePath))) || inferGrade(relativePath),
     edition: baseline.edition || inferEdition(searchText),
     editionDisplay: baseline.displayName,
     curriculumSeries: baseline.series,

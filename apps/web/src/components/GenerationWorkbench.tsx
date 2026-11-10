@@ -45,6 +45,7 @@ export function GenerationWorkbench({ teacherId, students, active, onLegacy, tex
   const [type, setType] = useState("calculation");
   const [dayGoals, setDayGoals] = useState("巩固基础\n应用与辨析");
   const [useTextbook, setUseTextbook] = useState(false);
+  const [requestMode, setRequestMode] = useState<"new" | "existing">("existing");
   const requestAttempt = useRef<{ signature: string; requestKey: string } | null>(null);
   const commandAttempt = useRef<{ signature: string; operationKey: string } | null>(null);
 
@@ -113,6 +114,7 @@ export function GenerationWorkbench({ teacherId, students, active, onLegacy, tex
     try {
       const result = await createTeachingWorkflow({ module: "generation", requestKey: requestAttempt.current.requestKey, request });
       if (mounted.current && (!selectedId.current || selectedId.current === result.workflow.id)) apply(result.workflow);
+      if (mounted.current) setRequestMode("existing");
       if (mounted.current) setMessage(running(result.workflow.status) ? "任务处理中，可在任务列表打开并检查进度。" : result.workflow.issues[0]?.message || "草稿已保存，请检查内容后确认。");
       await refreshList();
     } catch (error) { failure(error); } finally { finish(); }
@@ -175,12 +177,17 @@ export function GenerationWorkbench({ teacherId, students, active, onLegacy, tex
     if (view && value) setEdit({ workflowId: view.id, revision: view.revision, target: isExplanation ? "explanation" : selection, value: structuredClone(value) });
   };
   return <section className="teaching-workbench panel full" aria-label="持续生成工作台" hidden={!active}>
-    <div className="tw-heading"><div><h2>持续生成工作台</h2><p>先看内容，再局部修改、确认。对话与网页继续同一份成果。</p></div><span className="tw-status">{available === null ? "检查服务中" : available ? "服务可用" : "服务暂未启用"}</span></div>
+    <div className="tw-heading"><div><h2>内容生成与修改</h2><p>新建教学内容，或打开已有成果继续修改、确认。</p></div><span className="tw-status">{available === null ? "检查服务中" : available ? "服务可用" : "服务暂未启用"}</span></div>
     {available === false && <div className="tw-notice" role="status">持续编辑服务暂未启用。你可以继续使用原有生成与打印。<button onClick={onLegacy}>原有生成与打印</button><button onClick={() => void refreshList()}>重新检查</button></div>}
     {message && <p className="tw-notice" role="status">{message}</p>}
     <nav className="tw-mobile-tabs" aria-label="工作区域">{[["request", "要求与任务"], ["content", "内容成果"], ["edit", "修改与版本"]].map(([id, label]) => <button key={id} aria-pressed={region === id} onClick={() => setRegion(id)}>{label}</button>)}</nav>
     <div className="tw-grid" data-region={region}>
       <aside className="tw-request">
+        <div className="tw-entry-tabs" role="group" aria-label="内容入口">
+          <button className={requestMode === "new" ? "primary-button" : "secondary-button"} aria-pressed={requestMode === "new"} onClick={() => { setRequestMode("new"); setRegion("request"); }}>新建内容</button>
+          <button className={requestMode === "existing" ? "primary-button" : "secondary-button"} aria-pressed={requestMode === "existing"} onClick={() => setRequestMode("existing")}>已有成果 / 继续修改</button>
+        </div>
+        <div className="tw-create" hidden={requestMode !== "new"}>
         <h3>教学要求</h3>
         <label>学科<select value={subject} onChange={(e) => setSubject(e.target.value)}>{["语文", "数学", "英语"].map((s) => <option key={s}>{s}</option>)}</select></label>
         <label>年级<select value={grade} onChange={(e) => { setGrade(e.target.value); setStudentId(""); }}>{["三年级", "四年级", "五年级", "六年级", "七年级"].map((s) => <option key={s}>{s}</option>)}</select></label>
@@ -194,12 +201,18 @@ export function GenerationWorkbench({ teacherId, students, active, onLegacy, tex
         <small>{textbook?.title || "未选择教材；教材相关要求请先选择已审批资料。"}</small><button className="secondary-button" onClick={onMaterials}>选择教材资料</button>
         <button className="primary-button" disabled={available !== true || !!busy || dirty || !requirement.trim() || grade === "七年级" && subject !== "数学" || (["focused", "multi_day"].includes(purpose) && (!Number.isInteger(count) || count < 1 || count > 100)) || purpose === "multi_day" && !dayGoals.trim()} onClick={() => void create()}>{busy === "create" ? "正在生成…" : "生成内容草稿"}</button>
         <button className="secondary-button" disabled={!!busy} onClick={() => { requestAttempt.current = null; setMessage("下一次提交将创建独立新任务，请先核对已有任务。"); }}>按相同要求另建任务</button>
-        <h3>我的任务</h3><button className="secondary-button" onClick={() => void refreshList()}>刷新任务列表</button>
-        <div className="tw-task-list">{tasks.map((task) => <button key={task.id} disabled={dirty || !!busy && busy !== "create"} className={task.id === view?.id ? "selected" : ""} onClick={() => { setEdit(null); setPreview(null); setAssets([]); setLatestRevision(task.revision); void load(task.id); setRegion("content"); }}><strong>{String(task.request.title || task.request.requirement || "教学任务")}</strong><small>版本 {task.revision} · {statusLabels[task.status] || "待检查"}</small></button>)}</div>
+        </div>
+        <div hidden={requestMode !== "existing"}>
+        <details className="ui-disclosure tw-library" open={!view}><summary>我的任务 · {tasks.length} 份成果（展开切换）</summary><button className="secondary-button" onClick={() => void refreshList()}>刷新任务列表</button>
+        <div className="tw-task-list">{tasks.map((task) => <button key={task.id} disabled={dirty || !!busy && busy !== "create"} className={task.id === view?.id ? "selected" : ""} onClick={() => { setEdit(null); setPreview(null); setAssets([]); setLatestRevision(task.revision); void load(task.id); setRegion("content"); }}><strong>{task.id === view?.id ? view.content.title || taskTitle(task) : taskTitle(task)}</strong><small>{String(task.request.grade || "")} · {String(task.request.subject || "")} · 版本 {task.revision} · {statusLabels[task.status] || "待检查"}</small></button>)}</div>
+        {!tasks.length && <p className="review-empty">暂无已有成果，点击“新建内容”填写教学要求。</p>}
+        </details>
+        </div>
       </aside>
       <div className="tw-content">
-        {!view ? <div className="tw-empty"><h3>{busy === "create" ? "正在准备教学内容" : "从一份教学要求开始"}</h3><p>{busy === "create" ? "任务列表会自动刷新。你可以打开处理中的任务检查进度或取消。" : "生成后在这里查看题目、讲解和解析；已有对话任务可以从左侧继续。"}</p></div> : <>
+        {!view ? <div className="tw-empty"><h3>{busy === "create" ? "正在准备教学内容" : "从一份教学要求开始"}</h3><p>{busy === "create" ? "任务列表会自动刷新。你可以打开处理中的任务检查进度或取消。" : "生成后在这里查看题目、讲解和解析；已有对话任务可以从“要求与任务”区域继续。"}</p></div> : <>
           <div className="tw-heading"><div><h3>{view.content.title || "教学草稿"}</h3><p>版本 {view.revision} · {statusLabels[view.status] || "待检查"}</p></div><button className="secondary-button" disabled={!!busy && busy !== "create"} onClick={() => void load(view.id)}>刷新当前版本</button></div>
+          <details className="ui-disclosure"><summary>查看完整生成要求</summary><p className="preserve-lines">{asText(view.request.requirement) || "未保存生成要求"}</p></details>
           {view.issues.map((issue) => <p className="tw-notice" key={issue.code}>{issue.message}</p>)}
           {running(view.status) && <button className="secondary-button" onClick={() => void cancel()}>取消本次处理</button>}
           {latestStatus === "cancelled" && <p className="tw-notice">本任务已取消，保存的内容仍可查看。继续生成请填写要求并新建任务。</p>}
@@ -210,7 +223,7 @@ export function GenerationWorkbench({ teacherId, students, active, onLegacy, tex
             <div className="tw-heading"><strong>第 {q.questionNo} 题 · {q.score} 分</strong><button disabled={!!edit || !!busy} aria-pressed={selection === q.id} onClick={() => { setSelection(q.id); setRegion("edit"); }}>选择此题</button></div>
             <p>{q.prompt}</p>{q.options?.map((o, i) => <p key={i}>{o}</p>)}
             {q.figure != null && <p className="tw-notice">此题包含图形，请在 PDF 预览中核对图形与标注。</p>}
-            {!studentPreview && <div className="tw-answer"><strong>答案：{asText(q.answer)}</strong><ol>{q.analysisSteps?.map((s, i) => <li key={i}>{s}</li>)}</ol><p>评分依据：{asText(q.rubric)}</p><p>考点：{q.knowledgePoint}</p><p>易错点：{q.commonMistake}</p><small>{q.reviewedByTeacher ? "已确认" : "待确认"}</small></div>}
+            {!studentPreview && <div className="tw-answer"><details><summary>答案与解析 · {q.reviewedByTeacher ? "已确认" : "待确认"}</summary><strong>答案：{asText(q.answer)}</strong><ol>{q.analysisSteps?.map((s, i) => <li key={i}>{s}</li>)}</ol><p>考点：{q.knowledgePoint}</p><p>易错点：{q.commonMistake}</p></details><details><summary>评分细则</summary><p className="preserve-lines">{asText(q.rubric)}</p></details></div>}
           </article>)}
         </>}
       </div>
@@ -234,6 +247,11 @@ export function GenerationWorkbench({ teacherId, students, active, onLegacy, tex
       </aside>
     </div>
   </section>;
+}
+
+function taskTitle(task: TeachingWorkflowSummary) {
+  const title = String(task.request.title || task.request.requirement || "教学任务").replace(/\s+/g, " ").trim();
+  return title.length > 36 ? `${title.slice(0, 36)}…` : title;
 }
 
 function ContentEditor({ value, explanation, onChange }: { value: TeachingQuestion | TeachingExplanation; explanation: boolean; onChange: (value: TeachingQuestion | TeachingExplanation) => void }) {

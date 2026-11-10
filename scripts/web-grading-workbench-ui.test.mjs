@@ -4,6 +4,7 @@ import test from "node:test";
 import ts from "typescript";
 
 const source = fs.readFileSync(new URL("../apps/web/src/main.tsx", import.meta.url), "utf8");
+const styles = fs.readFileSync(new URL("../apps/web/src/styles.css", import.meta.url), "utf8");
 
 test("grading workbench archives only after all questions are reviewed", () => {
   assert.match(source, /patchGradingWorkbenchQuestion/);
@@ -71,6 +72,24 @@ test("web grading workbench can register dialogue answer packages as shared sour
   assert.match(source, /登记对话生成内容为统一批改来源/);
   assert.match(source, /registerDialogueAnswerPackage/);
   assert.match(source, /系统生成材料/);
+});
+
+test("legacy grading details use a full-width row below image review", () => {
+  assert.match(source, /className="grading-inspector grading-detail-row"/);
+  assert.match(styles, /\.grading-detail-row\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
+  assert.match(styles, /\.grading-detail-row\s*\{[^}]*position:\s*static/s);
+});
+
+test("dialogue source registration prefills package metadata and routes the registered assignment to upload", () => {
+  assert.match(source, /applyDialoguePackageMetadata/);
+  assert.match(source, /onRegistered/);
+  assert.match(source, /setSelectedGeneratedAssignmentId\(assignment\.id\)/);
+  assert.match(source, /setUploadMaterialType\("generated_assessment"\)/);
+  assert.match(source, /<DialogueSourceRegistrationPanel onRegister=\{onRegisterDialoguePackage\} onRegistered=\{selectRegisteredDialogueAssignment\}/);
+  assert.match(source, /generatedAssignmentMatchesStudent/);
+  assert.match(source, /所选学生与答案来源适用范围不匹配/);
+  assert.match(source, /<option>练习<\/option>/);
+  assert.match(source, /!generatedAssignmentMatchesStudent/);
 });
 
 test("external workbench displays original recognition evidence and blocks archive", () => {

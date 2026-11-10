@@ -1063,7 +1063,7 @@ export async function registerDialogueAnswerPackage(input: {
   });
   return readJson<{
     ok: boolean;
-    assignment: Record<string, unknown>;
+    assignment: AssignmentCard;
     gradingSource: { sourceId: string; version: number; fingerprint: string };
     imported: { originalSourceId: string | null; originalFingerprint: string | null; fingerprint: string; questionCount: number };
   }>(response);

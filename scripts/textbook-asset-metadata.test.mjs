@@ -76,7 +76,8 @@ test("scanner recognizes first and second grade and preserves the Zunyi baseline
   const files = [
     ["人教版-小学语文", "义务教育教科书·语文一年级上册.edupdf"],
     ["人教版-小学数学", "义务教育教科书·数学二年级下册.edupdf"],
-    ["PEP-小学英语", "义务教育教科书·英语（三年级起点）三年级上册.edupdf"]
+    ["PEP-小学英语", "义务教育教科书·英语（三年级起点）三年级上册.edupdf"],
+    ["PEP-小学英语/三年级起点", "义务教育教科书·英语（三年级起点）六年级下册.edupdf"]
   ];
   for (const [directory, name] of files) {
     const fullDirectory = path.join(root, directory);
@@ -90,10 +91,11 @@ test("scanner recognizes first and second grade and preserves the Zunyi baseline
   });
   assert.equal(result.status, 0, result.stderr);
   const report = JSON.parse(result.stdout);
-  assert.equal(report.count, 3);
+  assert.equal(report.count, 4);
   const byTitle = new Map(report.samples.map((asset) => [asset.title, asset]));
   assert.equal(byTitle.get("义务教育教科书·语文一年级上册")?.grade, "一年级");
   assert.equal(byTitle.get("义务教育教科书·数学二年级下册")?.grade, "二年级");
+  assert.equal(byTitle.get("义务教育教科书·英语（三年级起点）六年级下册")?.grade, "六年级");
   assert.equal(byTitle.get("义务教育教科书·语文一年级上册")?.edition, "统编版");
   assert.equal(byTitle.get("义务教育教科书·语文一年级上册")?.curriculumSeries, "人教体系");
   assert.equal(byTitle.get("义务教育教科书·数学二年级下册")?.edition, "人教版");

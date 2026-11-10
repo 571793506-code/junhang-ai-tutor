@@ -1310,6 +1310,8 @@ function mapTask(task) {
     status: taskStatusToClient(task.status),
     minutes: metadata.minutes ?? 15,
     dueLabel: task.dueAt ? "指定日期" : "今日",
+    dueAt: task.dueAt?.toISOString() || null,
+    createdAt: task.createdAt?.toISOString() || null,
     source: readableText(metadata.source, "教师端生成"),
     knowledgePoints: (metadata.knowledgePoints || []).map((item) => readableText(item, "")).filter(Boolean),
     summary: details.summary,

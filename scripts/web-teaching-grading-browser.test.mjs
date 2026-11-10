@@ -31,7 +31,7 @@ test("legacy archive status, counts and actions share evidence readiness without
   const question = { id: "q1", questionNo: "1", prompt: "24+18", studentAnswer: "42", correctAnswer: "42", score: 5, maxScore: 5, status: "correct", reviewedByTeacher: true };
   const ready = { id: "ready", submissionId: "ready", assignmentId: "paper", title: "教师已核对试卷", studentId: "s1", studentName: "就绪学生", subject: "数学", kind: "试卷",
     materialType: "generated_assessment", status: "reviewing", workflowState: "draft", needsTeacherReview: true, archiveEligible: false, canArchive: true,
-    archiveBlockers: [], questions: [question], pages: [], questionCount: 1, pendingQuestionCount: 0, reviewedQuestionCount: 1, questionReviewReady: true,
+    archiveBlockers: [], questions: [question], pages: [{ id: "p1", pageNumber: 1, imageUrl: "/uploads/missing.svg", qualityStatus: "ready", markers: [{ id: "m1", questionNo: "1", label: "✓", status: "correct", x: 0.2, y: 0.2 }] }, { id: "p2", pageNumber: 2, imageUrl: "/uploads/good.svg", qualityStatus: "ready", markers: [] }], questionCount: 1, pendingQuestionCount: 0, reviewedQuestionCount: 1, questionReviewReady: true,
     quality: { lowConfidence: false }, ocrStatusLabel: "已核对", summary: "", uploadedBy: "teacher", submittedAt: "2026-11-07T08:00:00Z", archivedAt: null };
   const blocked = { ...ready, id: "blocked", submissionId: "blocked", title: "证据待补齐试卷", studentName: "阻断学生", canArchive: false, archiveBlockers: ["图片质量需复核"] };
   const denied = { ...ready, id: "denied", submissionId: "denied", title: "服务待确认试卷", studentName: "待确认学生", canArchive: false };
@@ -45,6 +45,9 @@ test("legacy archive status, counts and actions share evidence readiness without
     queries.push(url.searchParams.get("queueState"));
     return route.fulfill({ json: { ...base, workbenches: url.searchParams.get("queueState") === "ready" ? [ready] : [blocked, ready, denied] } });
   });
+  let imageRestored = false;
+  await page.route("**/uploads/*.svg", route => route.request().url().endsWith("missing.svg") && !imageRestored
+    ? route.fulfill({ status: 404, body: "Missing original" }) : route.fulfill({ contentType: "image/svg+xml", body: pageSvg(1) }));
   await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}/?gradingAssignment=paper`);
   await page.getByRole("button", { name: "登录同步真实数据", exact: true }).click();
   await page.getByRole("button", { name: "原有批改与来源管理", exact: true }).first().click();
@@ -66,6 +69,24 @@ test("legacy archive status, counts and actions share evidence readiness without
   await panel.getByRole("heading", { name: "教师已核对试卷", exact: true }).waitFor();
   assert.equal(await panel.locator(".grading-batch-list > button").count(), 1);
   assert.ok(queries.includes("ready"));
+  const imageStage = panel.locator(".grading-image-stage");
+  await imageStage.getByText("第 1 页原图无法加载", { exact: true }).waitFor();
+  assert.equal(await imageStage.locator(".annotation-marker").count(), 0);
+  await imageStage.getByRole("link", { name: "上传新批次", exact: true }).click();
+  assert.equal(await page.locator("#grading-upload").getAttribute("open"), "");
+  await page.locator("#grading-upload").getByLabel("记录标题").fill("折叠保留测试");
+  await page.locator("#grading-upload > summary").click();
+  await page.locator("#grading-upload > summary").click();
+  assert.equal(await page.locator("#grading-upload").getByLabel("记录标题").inputValue(), "折叠保留测试");
+  await panel.getByRole("button", { name: "第 2 页", exact: true }).click();
+  await imageStage.getByRole("img").evaluate(img => img.decode());
+  assert.equal(await imageStage.locator(".grading-image-unavailable").count(), 0);
+  await panel.getByRole("button", { name: "第 1 页", exact: true }).click();
+  await imageStage.getByText("第 1 页原图无法加载", { exact: true }).waitFor();
+  imageRestored = true;
+  await imageStage.getByRole("button", { name: "重试加载", exact: true }).click();
+  await imageStage.getByRole("img").evaluate(img => img.decode());
+  await imageStage.locator(".annotation-marker").waitFor();
   await mkdir(artifactDir, { recursive: true }); await page.screenshot({ path: path.join(artifactDir, "grading-legacy-archive-readiness.png") });
   assert.deepEqual(archiveWrites, []); assert.deepEqual(errors, []);
 });
@@ -124,7 +145,7 @@ for (const outcome of ["success", "failure"]) test(`failed grading recovery safe
   assert.equal(calls, 2); assert.deepEqual(errors, []);
 });
 
-test("actual teacher page prefills dialogue entry and preserves multipart upload, source management and disabled workflow fallback", { timeout: 40000 }, async (t) => {
+test("actual teacher page prefills dialogue entry and preserves multipart upload, source management and disabled workflow fallback", { timeout: 90000 }, async (t) => {
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }); page.setDefaultTimeout(10000);
   const errors = []; page.on("pageerror", (e) => errors.push(e.message));
@@ -138,13 +159,16 @@ test("actual teacher page prefills dialogue entry and preserves multipart upload
   const dialogueAssignment = { id: "dialogue-paper", title: "对话生成试卷", studentId: "s2", subject: "数学", kind: "试卷", status: "待完成",
     gradingSource: { sourceId: "dialogue-paper", version: 1, fingerprint: "synthetic" }, gradingSourceQuestionCount: 1,
     items: [{ id: "q1", orderIndex: 1, prompt: "1+1", itemType: "fill" }] };
-  let uploaded = false, workflowStatus = 404, multipart = "";
+  let uploaded = false, uploadCount = 0, workflowStatus = 404, multipart = "";
   const workbench = { id: "submission1", submissionId: "submission1", assignmentId: "paper1", title: "测试上传", studentId: "s1", studentName: "测试学生",
     subject: "数学", kind: "作业", materialType: "external_workbook", status: "待复核", workflowState: "review_required", needsTeacherReview: true,
     archiveEligible: false, archiveBlockers: ["ANSWER_SOURCE_NOT_CONFIRMED"], questions: [],
     pages: [{ id: "page1", pageNumber: 1, imageUrl: "http://127.0.0.1:8787/uploads/qa-page.png", qualityStatus: "ready" }], questionCount: 0, pendingQuestionCount: 0,
     ocrStatusLabel: "待核对", summary: "合成上传记录", uploadedBy: "teacher", submittedAt: "2026-09-17T10:00:00Z" };
-  const base = { ok: true, teacher, teachers: [teacher], sessionToken: "synthetic-intercept-only", students: [student, dialogueStudent, disabled], tasks: [], assignments: [dialogueAssignment],
+  let currentAssignments = [dialogueAssignment];
+  let registeredRequest = null;
+  let registeredAssignment = null;
+  const base = { ok: true, teacher, teachers: [teacher], sessionToken: "synthetic-intercept-only", students: [student, dialogueStudent, disabled], tasks: [], assignments: currentAssignments,
     classroomDevices: [], classroomBroadcasts: [], dictationTasks: [], readingTasks: [], corrections: [], logs: [], reports: [], submissions: [], jobs: [], assets: [],
     sources: [], events: [], modelRuns: [], index: null, database: { ok: true }, ai: { features: [], mode: "test" } };
   // No request reaches the real API; this checks upload/entry integration, not OCR or source registration quality.
@@ -152,22 +176,36 @@ test("actual teacher page prefills dialogue entry and preserves multipart upload
     const p = new URL(route.request().url()).pathname;
     if (p === "/api/teaching/workflows") return route.fulfill(workflowStatus === 404 ? { status: 404, contentType: "text/html", body: "Route absent" } : { status: 503, json: { ok: false, error: "WORKFLOW_UNAVAILABLE" } });
     if (p === "/api/submissions/grade") { multipart = route.request().postData() || ""; uploaded = true;
-      return route.fulfill({ json: { ok: true, result: { available: false, queued: true }, uploadedFiles: [], persistence: { active: false } } }); }
-    return route.fulfill({ json: { ...base, workbenches: uploaded ? [workbench] : [] } });
+      uploadCount++;
+      // This flow proceeds to another upload; the first synthetic grading must finish first.
+      return route.fulfill({ json: { ok: true, result: { available: true, queued: false }, uploadedFiles: [], persistence: { active: false } } }); }
+    if (p === "/api/grading/source-packages/dialogue") {
+      registeredRequest = route.request().postDataJSON();
+      registeredAssignment = { id: "registered-practice", title: "三年级计算专项练习", studentId: null, studentName: "", targetScope: "grade", targetGrade: "三年级",
+        subject: "数学", kind: "练习", status: "待完成", gradingSource: { sourceId: "registered-practice", version: 1, fingerprint: "synthetic-registered" },
+        gradingSourceQuestionCount: 1, items: [{ id: "q2", orderIndex: 1, prompt: "9 × 8", itemType: "calculation" }] };
+      currentAssignments = [...currentAssignments, registeredAssignment];
+      return route.fulfill({ json: { ok: true, assignment: registeredAssignment } });
+    }
+    return route.fulfill({ json: { ...base, assignments: currentAssignments, workbenches: uploaded ? [workbench] : [] } });
   });
   await page.route("**/uploads/qa-page.png", (route) => route.fulfill({ contentType: "image/svg+xml", body: pageSvg(1) }));
   const entry = new URL(process.env.WEB_BASE_URL || "http://127.0.0.1:5173/");
   entry.searchParams.set("gradingAssignment", dialogueAssignment.id);
   await page.goto(entry.href);
+  console.log("grading-entry: page loaded");
   await page.getByRole("button", { name: "登录同步真实数据", exact: true }).click();
   await page.getByText("教师端已登录：测试教师", { exact: true }).waitFor();
-  const upload = page.locator("section").filter({ has: page.getByRole("heading", { name: "拍照上传批改", exact: true }) });
+  console.log("grading-entry: logged in");
+  const upload = page.locator("#grading-upload");
+  assert.equal(await upload.getAttribute("open"), "");
   await upload.locator("select").nth(4).waitFor();
   assert.equal(await upload.locator("select").nth(0).inputValue(), "s2");
   assert.equal(await upload.locator("select").nth(1).inputValue(), "generated_assessment");
   assert.equal(await upload.locator("select").nth(2).inputValue(), "试卷");
   assert.equal(await upload.locator("select").nth(4).inputValue(), "dialogue-paper");
   assert.equal(await upload.getByRole("button", { name: "上传并批改", exact: true }).isDisabled(), true);
+  console.log("grading-entry: prefill verified");
   // Explicit teacher changes remain effective after the one-time prefill.
   await upload.locator("select").nth(0).selectOption("s1");
   await upload.locator("select").nth(1).selectOption("external_workbook");
@@ -191,7 +229,54 @@ test("actual teacher page prefills dialogue entry and preserves multipart upload
   });
   assert.equal(await legacyImage.getAttribute("src"), `${apiOrigin}/uploads/qa-page.png`);
   await legacyImage.evaluate((img) => img.decode());
+  await page.locator("summary").filter({ hasText: "登记对话答案来源" }).click();
   await page.getByText("登记对话生成内容为统一批改来源", { exact: true }).waitFor();
+  console.log("grading-entry: legacy view visible");
+  const packageText = JSON.stringify({ schemaVersion: "junhang-grading-source-v1", sourceId: "dialogue-source", version: 1, title: "三年级计算专项练习",
+    subject: "数学", kind: "练习", grade: "三年级", questions: [{ questionNo: "1", prompt: "9 × 8", answer: "72" }] });
+  const registration = page.locator(".dialogue-answer-package-panel").filter({ hasText: "登记对话生成内容为统一批改来源" });
+  await registration.getByPlaceholder("粘贴对话输出的结构化答案包 JSON").fill(packageText);
+  assert.equal(await registration.getByLabel("内容标题").inputValue(), "三年级计算专项练习");
+  assert.equal(await registration.getByRole("textbox", { name: "年级", exact: true }).inputValue(), "三年级");
+  assert.equal(await registration.getByLabel("科目").inputValue(), "数学");
+  assert.equal(await registration.getByLabel("类型").inputValue(), "练习");
+  await registration.getByPlaceholder("粘贴对话输出的结构化答案包 JSON").fill("");
+  assert.equal(await registration.getByLabel("内容标题").inputValue(), "");
+  assert.equal(await registration.getByRole("textbox", { name: "年级", exact: true }).inputValue(), "");
+  assert.equal(await registration.getByRole("button", { name: "登记共享答案来源", exact: true }).isDisabled(), true);
+  await registration.getByPlaceholder("粘贴对话输出的结构化答案包 JSON").fill(packageText);
+  await registration.getByPlaceholder("粘贴对话输出的结构化答案包 JSON").fill("{");
+  assert.equal(await registration.getByLabel("内容标题").inputValue(), "");
+  assert.equal(await registration.getByRole("textbox", { name: "年级", exact: true }).inputValue(), "");
+  await registration.getByPlaceholder("粘贴对话输出的结构化答案包 JSON").fill(packageText);
+  await page.locator("summary").filter({ hasText: "登记对话答案来源" }).click();
+  await page.locator("summary").filter({ hasText: "登记对话答案来源" }).click();
+  assert.equal(await registration.getByPlaceholder("粘贴对话输出的结构化答案包 JSON").inputValue(), packageText);
+  await upload.locator("summary").click();
+  assert.equal(await upload.getAttribute("open"), null);
+  await registration.getByRole("button", { name: "登记共享答案来源", exact: true }).click();
+  await page.getByText("已登记统一答案来源：三年级计算专项练习", { exact: false }).waitFor();
+  assert.equal(await registration.getByLabel("内容标题").inputValue(), "");
+  assert.equal(await registration.getByRole("textbox", { name: "年级", exact: true }).inputValue(), "");
+  console.log("grading-entry: source registered");
+  assert.equal(registeredRequest.title, "三年级计算专项练习");
+  assert.equal(registeredRequest.subject, "数学");
+  assert.equal(registeredRequest.kind, "练习");
+  assert.equal(registeredRequest.grade, "三年级");
+  const registeredUpload = page.locator("#grading-upload");
+  assert.equal(await registeredUpload.getAttribute("open"), "");
+  assert.equal(await registeredUpload.locator("select").nth(1).inputValue(), "generated_assessment");
+  assert.equal(await registeredUpload.locator("select").nth(2).inputValue(), "练习");
+  assert.equal(await registeredUpload.locator("select").nth(4).inputValue(), "registered-practice");
+  console.log("grading-entry: upload source prefilled");
+  await page.getByTestId("teacher-grading-image-picker-library-input").setInputFiles([{ name: "shared-page.png", mimeType: "image/png", buffer: png }]);
+  await registeredUpload.getByText("所选学生与答案来源适用范围不匹配，请先选择对应年级或学生。", { exact: true }).waitFor();
+  assert.equal(await registeredUpload.getByRole("button", { name: "上传并批改", exact: true }).isDisabled(), true);
+  console.log("grading-entry: mismatched student blocked");
+  await registeredUpload.locator("select").nth(0).selectOption("s2");
+  await registeredUpload.getByText("所选学生与答案来源适用范围不匹配，请先选择对应年级或学生。", { exact: true }).waitFor({ state: "detached" });
+  assert.equal(await registeredUpload.getByRole("button", { name: "上传并批改", exact: true }).isEnabled(), true, await registeredUpload.innerText());
+  assert.equal(uploadCount, 1);
   await page.getByRole("button", { name: "持续批改与版本", exact: true }).click();
   workflowStatus = 503;
   const response = page.waitForResponse((r) => r.url().includes("/api/teaching/workflows") && r.status() === 503);
