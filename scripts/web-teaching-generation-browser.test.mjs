@@ -11,11 +11,12 @@ import { createTeachingWorkflowExecution } from "../apps/api/src/teaching-workfl
 import { createTeachingWorkflowClient } from "./teaching-workflow-client.mjs";
 import { demoStudents } from "@junhang/core";
 
-// Browser plugin not available: use installed Playwright via an explicit module path.
+// Browser plugin not available: use installed Playwright with Chrome via an explicit module path.
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || "playwright");
 const root = path.resolve("apps/web");
 const artifactDir = process.env.WEB_QA_OUTPUT || path.join(os.tmpdir(), "junhang-generation-web-qa");
+const launchChrome = () => chromium.launch({ headless: true, channel: "chrome" });
 const explanation = { concept: "进位加法", steps: ["对齐数位", "满十进一"], workedExamples: [{ prompt: "24+18", answer: "42", analysisSteps: ["个位相加满十", "十位加上进位"] }], commonMistakes: ["不要漏进位"] };
 const item = (n) => ({ itemType: "calculation", prompt: `${20 + n}+18`, answer: String(38 + n), score: 5, rubric: "计算正确得5分", analysisSteps: ["先算个位", "再算十位"], knowledgePoint: "进位加法", commonMistake: "不要漏进位" });
 
@@ -50,7 +51,7 @@ test("rendered generation workbench shares HTTP versions, preserves conflicts an
     server: { host: "127.0.0.1", port: 0, proxy: { "/__workflow-api": { target: f.baseUrl, rewrite: (p) => p.replace("/__workflow-api", "") } } } });
   await vite.listen(); t.after(() => vite.close());
   const base = `http://127.0.0.1:${vite.httpServer.address().port}`;
-  const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) }); t.after(() => browser.close());
+  const browser = await launchChrome(); t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1480, height: 980 } });
   page.setDefaultTimeout(10000);
   const errors = []; page.on("pageerror", (e) => errors.push(e.message));
@@ -58,10 +59,26 @@ test("rendered generation workbench shares HTTP versions, preserves conflicts an
   await page.goto(`${base}/__workbench`);
   await page.getByText("服务可用", { exact: true }).waitFor();
   await page.getByRole("button", { name: "新建内容", exact: true }).click();
+  const purposeSelect = page.getByLabel("教学用途", { exact: true });
+  const kindSelect = page.getByRole("combobox", { name: "内容类型", exact: true });
+  await kindSelect.waitFor();
+  assert.deepEqual(await kindSelect.locator("option").allTextContents(), ["练习", "小测"]);
+  await purposeSelect.selectOption("comprehensive");
+  await kindSelect.selectOption("试卷");
+  await purposeSelect.selectOption("multi_day");
+  assert.equal(await kindSelect.inputValue(), "练习");
+  assert.deepEqual(await kindSelect.locator("option").allTextContents(), ["练习", "小测"]);
+  await purposeSelect.selectOption("comprehensive");
+  await kindSelect.selectOption("试卷");
+  await purposeSelect.selectOption("focused");
+  assert.equal(await kindSelect.inputValue(), "练习");
+  assert.equal(await kindSelect.getByRole("option", { name: "试卷", exact: true }).count(), 0);
   await page.getByLabel("具体要求", { exact: true }).fill("两道四年级进位加法专项练习");
   await page.getByLabel("题量", { exact: true }).fill("2");
+  const firstCreate = page.waitForRequest(r => r.url().endsWith("/api/teaching/workflows") && r.method() === "POST");
   await page.getByRole("button", { name: "生成内容草稿", exact: true }).click();
   await page.getByRole("heading", { name: "加法专项", exact: true }).waitFor();
+  assert.equal((await firstCreate).postDataJSON().request.kind, "练习");
   assert.equal(await page.locator(".tw-question").count(), 2);
   assert.equal(await page.locator(".tw-answer details[open]").count(), 0);
   const firstQuestion = page.locator(".tw-question").first();
@@ -236,7 +253,7 @@ test("rendered generation workbench shares HTTP versions, preserves conflicts an
 });
 
 test("running Web entry renders login without blank page or framework errors", { timeout: 20000 }, async (t) => {
-  const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) }); t.after(() => browser.close());
+  const browser = await launchChrome(); t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
   const errors = []; page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(process.env.WEB_BASE_URL || "http://127.0.0.1:5173/");
@@ -248,19 +265,27 @@ test("running Web entry renders login without blank page or framework errors", {
   console.log(JSON.stringify({ url: page.url(), title: await page.title(), screenshot: path.join(artifactDir, "web-running.png") }));
 });
 
-test("actual teacher page retains legacy generation when workflow service is unavailable", { timeout: 30000 }, async (t) => {
-  const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) }); t.after(() => browser.close());
+test("actual teacher page keeps history read only and browsable across grades when workflow service is unavailable", { timeout: 30000 }, async (t) => {
+  const browser = await launchChrome(); t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.setDefaultTimeout(10000);
   const errors = []; page.on("pageerror", (e) => errors.push(e.message));
   const teacher = { id: "web-qa-teacher", displayName: "交互测试教师", phone: "test-only", role: "teacher", status: "active" };
+  const record = { id: "history-three", title: "三年级计算材料", studentId: null, studentName: "", targetScope: "grade", targetGrade: "三年级",
+    subject: "数学", kind: "练习", status: "待完成", difficulty: "基础", totalScore: 10, items: ["24+18", "36+27"], gradingEligible: true,
+    draftReviewStatus: "accepted", draftRequest: { requirement: "两道进位加法，保留书写空间。" }, layoutValidation: { ok: true },
+    draftReviewAsset: { id: "draft", url: "/exports/draft.pdf" }, finalExportAssets: {
+      studentPaper: { id: "student", url: "/exports/student.pdf" }, answerAnalysis: { id: "analysis", url: "/exports/analysis.pdf" } } };
   const empty = { ok: true, teacher, teachers: [teacher], sessionToken: "synthetic-no-server-session",
-    students: [], tasks: [], assignments: [], classroomDevices: [], classroomBroadcasts: [], dictationTasks: [], readingTasks: [],
+    students: [], tasks: [], assignments: [record, { ...record, id: "history-six", title: "六年级待审查材料", targetGrade: "六年级", gradingEligible: false,
+      draftReviewStatus: "pending_teacher_review", finalExportAssets: null }], classroomDevices: [], classroomBroadcasts: [], dictationTasks: [], readingTasks: [],
     corrections: [], logs: [], reports: [], submissions: [], workbenches: [], jobs: [], assets: [], sources: [], events: [], modelRuns: [],
     index: null, database: { ok: true }, ai: { features: [], generatedAt: "2026-09-17", mode: "test" } };
   let serviceStatus = 404;
+  const writes = [];
   // Intercept all API calls: synthetic login never submits credentials or writes to the running database.
   await page.route("**/api/**", (route) => {
+    if (route.request().method() !== "GET") writes.push(new URL(route.request().url()).pathname);
     const url = new URL(route.request().url());
     if (url.pathname === "/api/teaching/workflows") return route.fulfill(serviceStatus === 404
       ? { status: 404, contentType: "text/html", body: "<p>Route not found</p>" }
@@ -278,12 +303,42 @@ test("actual teacher page retains legacy generation when workflow service is una
   serviceStatus = 503;
   const unavailable = page.waitForResponse((r) => r.url().includes("/api/teaching/workflows") && r.status() === 503);
   await workbench.getByRole("button", { name: "重新检查", exact: true }).click(); await unavailable;
-  await workbench.getByRole("button", { name: "原有生成与打印", exact: true }).click();
+  await workbench.getByRole("button", { name: "查看已有材料与打印记录", exact: true }).click();
   assert.equal(await workbench.isVisible(), false);
-  await page.locator(".generation-workbench-shell").waitFor({ state: "visible" });
+  const history = page.getByRole("region", { name: "历史生成材料", exact: true });
+  await history.waitFor();
+  assert.equal(await page.locator(".generation-workbench-shell").count(), 0);
+  assert.equal(await history.locator(".generation-history-list > details").count(), 2);
+  await history.getByRole("combobox", { name: "年级", exact: true }).selectOption("三年级");
+  assert.equal(await history.locator(".generation-history-list > details").count(), 1);
+  await history.locator("summary").filter({ hasText: "三年级计算材料" }).click();
+  await history.getByText("24+18", { exact: true }).waitFor();
+  assert.equal(await history.getByText("两道进位加法，保留书写空间。", { exact: true }).isVisible(), true);
+  for (const [name, href] of [["查看草稿 PDF", "/exports/draft.pdf"], ["学生卷 PDF", "/exports/student.pdf"], ["答案解析 PDF", "/exports/analysis.pdf"]]) {
+    assert.equal(await history.getByRole("link", { name, exact: true }).getAttribute("href"), href);
+  }
+  await history.getByRole("combobox", { name: "年级", exact: true }).selectOption("六年级");
+  assert.equal(await history.locator(".generation-history-list > details").count(), 1);
+  await history.locator("summary").filter({ hasText: "六年级待审查材料" }).click();
+  await history.getByText("尚不可供批改选择", { exact: true }).waitFor();
+  await history.getByRole("combobox", { name: "状态", exact: true }).selectOption("accepted");
+  await history.getByText("暂无符合条件的材料记录。", { exact: true }).waitFor();
+  await history.getByRole("combobox", { name: "年级", exact: true }).selectOption("");
+  await history.getByRole("button", { name: "刷新材料记录", exact: true }).click();
+  await history.getByText("材料记录已刷新。", { exact: true }).waitFor();
+  assert.equal(await history.getByRole("button", { name: /生成内容|确认|导出/ }).count(), 0);
+  await mkdir(artifactDir, { recursive: true });
+  for (const [name, width, height] of [["desktop", 1440, 1000], ["ipad-landscape", 1024, 768], ["ipad-portrait", 768, 1024]]) {
+    await page.setViewportSize({ width, height });
+    await history.scrollIntoViewIfNeeded();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    await page.screenshot({ path: path.join(artifactDir, `generation-history-${name}.png`) });
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("button", { name: "生成与继续修改", exact: true }).click();
   await workbench.waitFor({ state: "visible" });
-  assert.equal(await page.locator(".generation-workbench-shell").isVisible(), false);
+  assert.equal(await history.isVisible(), false);
+  assert.deepEqual(writes.filter(p => p !== "/api/teacher-login"), []);
   assert.deepEqual(errors, []);
   await mkdir(artifactDir, { recursive: true });
   await page.screenshot({ path: path.join(artifactDir, "teacher-unavailable.png"), fullPage: false });
@@ -292,7 +347,7 @@ test("actual teacher page retains legacy generation when workflow service is una
 test("teacher daily UI filters task evidence, preserves material inputs and shows actual profile state", { timeout: 60000 }, async (t) => {
   const vite = await createServer({ configFile: false, root, cacheDir: path.join(artifactDir, "daily-vite"), plugins: [react()], server: { host: "127.0.0.1", port: 0 } });
   await vite.listen(); t.after(() => vite.close());
-  const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) }); t.after(() => browser.close());
+  const browser = await launchChrome(); t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } }); page.setDefaultTimeout(10000);
   const errors = [], writes = [];
   page.on("pageerror", error => errors.push(error.message));

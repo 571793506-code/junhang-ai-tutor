@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { createServer } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Browser plugin not available. Use the existing Playwright/Edge runtime.
+// Browser plugin not available. Use the existing Playwright/Chrome runtime.
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || "playwright");
 
@@ -23,7 +23,7 @@ test("archive history is read only, keeps score groups and selected detail after
       load(id) { if (id === "\0history-entry") return `import React from 'react'; import {createRoot} from 'react-dom/client'; import {GradingArchiveHistory} from '/src/components/GradingArchiveHistory.tsx'; import '/src/styles.css'; createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode,null,React.createElement(GradingArchiveHistory,{active:true})));`; }
     }], define: { "import.meta.env.VITE_API_BASE_URL": JSON.stringify("/__history-api") }, server: { host: "127.0.0.1", port: 0 } });
   await vite.listen(); t.after(() => vite.close());
-  const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
+  const browser = await chromium.launch({ headless: true, channel: "chrome" });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.setDefaultTimeout(8000);

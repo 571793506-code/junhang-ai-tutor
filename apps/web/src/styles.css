@@ -2438,6 +2438,30 @@ button:disabled {
   scroll-margin-top: 24px;
 }
 
+.grading-collection { display: grid; gap: 16px; min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.collection-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.collection-heading h3, .collection-current h4 { margin: 0; }
+.collection-heading p { margin: 8px 0 0; color: var(--muted); line-height: 1.7; }
+.collection-heading > button { flex-shrink: 0; }
+.grading-collection .template-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; }
+.grading-collection :is(label, select, input, fieldset) { min-width: 0; }
+.grading-collection select { width: 100%; text-overflow: ellipsis; }
+.grading-collection p { overflow-wrap: anywhere; }
+.collection-roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.collection-roster button { display: grid; gap: 6px; min-height: 68px; text-align: left; padding: 12px; }
+.collection-roster span { font-size: 12px; }
+.collection-current { display: grid; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); }
+.collection-current fieldset { display: grid; gap: 14px; border: 0; margin: 0; padding: 0; }
+.collection-pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.collection-pages li { display: grid; grid-template-columns: 1fr 1fr; align-content: start; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.collection-pages img { grid-column: 1 / -1; width: 100%; height: 170px; object-fit: contain; background: var(--surface-soft); }
+.collection-pages span { grid-column: 1 / -1; overflow-wrap: anywhere; font-size: 13px; }
+.role-teacher .grading-collection button { min-height: 44px; }
+@media (min-width: 768px) and (max-width: 1100px) {
+  .collection-heading { display: grid; }
+  .collection-heading > button { justify-self: start; }
+}
+
 .grading-disclosure > summary {
   cursor: pointer;
   padding: 12px 4px;
@@ -2920,6 +2944,57 @@ button:disabled {
 .generation-record-board {
   margin-top: 0;
 }
+
+.generation-history-list {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.generation-history-record {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  overflow-wrap: anywhere;
+}
+
+.generation-history-record > summary {
+  padding: 16px;
+  cursor: pointer;
+  line-height: 1.7;
+}
+
+.generation-history-record > summary span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.generation-history-details,
+.generation-history-job {
+  padding: 16px;
+}
+
+.generation-history-details {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.generation-history-details dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.generation-history-details dt { color: var(--muted); font-size: 13px; }
+.generation-history-details dd { margin: 0; }
+.generation-history-details li + li { margin-top: 12px; }
+.generation-history-job > span { display: block; margin-top: 8px; }
 
 .generation-record-grid {
   display: grid;

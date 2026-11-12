@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { StudentProfile } from "@junhang/core";
+import { createRequestKey } from "../request-key";
 import { createTeachingWorkflow, executeTeachingWorkflow, exportAssessmentDraft, exportAssessmentPrint, getTeachingWorkflow,
   listTeachingWorkflows, publishTeachingAssignment, type TeachingExplanation, type TeachingQuestion,
   type TeachingWorkflowCommand, type TeachingWorkflowSummary, type TeachingWorkflowView } from "../api";
@@ -9,7 +10,7 @@ const statusLabels: Record<string, string> = { queued: "排队中", running: "�
 const itemTypes = [["calculation", "计算"], ["fill", "填空"], ["choice", "选择"], ["solution", "解答"], ["reading", "阅读"], ["writing", "写作"]];
 const asText = (value: unknown) => typeof value === "string" ? value : value == null ? "" : JSON.stringify(value, null, 2);
 const running = (status?: string) => status === "queued" || status === "running";
-const key = () => crypto.randomUUID();
+const key = createRequestKey;
 type Edit = { workflowId: string; revision: number; target: string; value: TeachingQuestion | TeachingExplanation };
 type Props = { teacherId: string; students: StudentProfile[]; active: boolean; onLegacy: () => void;
   textbook?: { assetId: string; chapterId?: string; title: string }; onMaterials: () => void };
@@ -104,7 +105,7 @@ export function GenerationWorkbench({ teacherId, students, active, onLegacy, tex
     if (!requirement.trim() || !start("create")) return;
     const selectedStudent = students.find((s) => s.id === studentId && s.canReceiveNewWork);
     const request: Record<string, unknown> = { requirement: requirement.trim(), subject, grade: selectedStudent?.grade || grade, purpose,
-      ...(purpose !== "explanation" ? { kind } : {}), targetScope: studentId ? "student" : "grade", ...(studentId ? { studentId } : {}),
+      ...(purpose !== "explanation" ? { kind: purpose !== "comprehensive" && kind === "试卷" ? "练习" : kind } : {}), targetScope: studentId ? "student" : "grade", ...(studentId ? { studentId } : {}),
       ...(purpose === "focused" ? { requestedItemCount: count, requestedItemTypes: [type] } : {}),
       ...(purpose === "multi_day" ? { dayPlan: dayGoals.split("\n").map((goal) => goal.trim()).filter(Boolean).map((goal, i) => ({ dayId: `d${i + 1}`, goal, requestedItemCount: count, requestedItemTypes: [type] })) } : {}),
       ...(useTextbook && textbook ? { textbookAssetId: textbook.assetId, textbookChapterId: textbook.chapterId } : {}) };
@@ -178,7 +179,7 @@ export function GenerationWorkbench({ teacherId, students, active, onLegacy, tex
   };
   return <section className="teaching-workbench panel full" aria-label="持续生成工作台" hidden={!active}>
     <div className="tw-heading"><div><h2>内容生成与修改</h2><p>新建教学内容，或打开已有成果继续修改、确认。</p></div><span className="tw-status">{available === null ? "检查服务中" : available ? "服务可用" : "服务暂未启用"}</span></div>
-    {available === false && <div className="tw-notice" role="status">持续编辑服务暂未启用。你可以继续使用原有生成与打印。<button onClick={onLegacy}>原有生成与打印</button><button onClick={() => void refreshList()}>重新检查</button></div>}
+    {available === false && <div className="tw-notice" role="status">生成服务暂不可用，已有材料和打印文件仍可查看。<button onClick={onLegacy}>查看已有材料与打印记录</button><button onClick={() => void refreshList()}>重新检查</button></div>}
     {message && <p className="tw-notice" role="status">{message}</p>}
     <nav className="tw-mobile-tabs" aria-label="工作区域">{[["request", "要求与任务"], ["content", "内容成果"], ["edit", "修改与版本"]].map(([id, label]) => <button key={id} aria-pressed={region === id} onClick={() => setRegion(id)}>{label}</button>)}</nav>
     <div className="tw-grid" data-region={region}>
@@ -192,8 +193,9 @@ export function GenerationWorkbench({ teacherId, students, active, onLegacy, tex
         <label>学科<select value={subject} onChange={(e) => setSubject(e.target.value)}>{["语文", "数学", "英语"].map((s) => <option key={s}>{s}</option>)}</select></label>
         <label>年级<select value={grade} onChange={(e) => { setGrade(e.target.value); setStudentId(""); }}>{["三年级", "四年级", "五年级", "六年级", "七年级"].map((s) => <option key={s}>{s}</option>)}</select></label>
         <label>教学对象<select value={studentId} onChange={(e) => setStudentId(e.target.value)}><option value="">本年级通用</option>{students.filter((s) => s.canReceiveNewWork && s.grade === grade).map((s) => <option key={s.id} value={s.id}>{s.displayName}</option>)}</select></label>
-        <label>教学用途<select aria-label="教学用途" value={purpose} onChange={(e) => setPurpose(e.target.value)}><option value="focused">专项巩固</option><option value="comprehensive">综合测评</option><option value="multi_day">多日训练</option><option value="explanation">概念讲解</option></select></label>
-        {purpose !== "explanation" && <label>内容类型<select value={kind} onChange={(e) => setKind(e.target.value)}>{["练习", "小测", "试卷"].map((s) => <option key={s}>{s}</option>)}</select></label>}
+        <label>教学用途<select aria-label="教学用途" value={purpose} onChange={(e) => { setPurpose(e.target.value); if (e.target.value !== "comprehensive" && kind === "试卷") setKind("练习"); }}><option value="focused">专项巩固</option><option value="comprehensive">综合测评</option><option value="multi_day">多日训练</option><option value="explanation">概念讲解</option></select></label>
+        {purpose !== "explanation" && <label>内容类型<select value={kind} onChange={(e) => setKind(e.target.value)}>{(purpose === "comprehensive" ? ["练习", "小测", "试卷"] : ["练习", "小测"]).map((s) => <option key={s}>{s}</option>)}</select></label>}
+        <small className="tw-purpose-hint">{purpose === "explanation" ? "讲解按概念、步骤和例题组织，不生成试卷。" : "用途决定教学组织，内容类型区分练习、小测和试卷；仅综合测评可选试卷。题目范围、题型和难度以具体要求为准。"}</small>
         {["focused", "multi_day"].includes(purpose) && <><label>题型<select value={type} onChange={(e) => setType(e.target.value)}>{itemTypes.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label><label>{purpose === "multi_day" ? "每天题量" : "题量"}<input type="number" min={1} max={100} value={count} onChange={(e) => setCount(Number(e.target.value))} /></label></>}
         {purpose === "multi_day" && <label>每日目标（每行一天）<textarea value={dayGoals} onChange={(e) => setDayGoals(e.target.value)} /></label>}
         <label>具体要求<textarea aria-label="具体要求" value={requirement} onChange={(e) => setRequirement(e.target.value)} placeholder="例如：10道四年级进位加法，先基础后应用；每题有解析和易错提醒。" /></label>

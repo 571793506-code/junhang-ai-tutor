@@ -645,6 +645,8 @@ export async function completeLearningTask(taskId: string, input: Record<string,
 
 export async function uploadSubmission(input: {
   assignmentId?: string;
+  collectionBatchId?: string;
+  collectionTitle?: string;
   materialType?: "external_workbook" | "generated_assessment";
   answerSourceMode?: "teacher_confirmed" | "teacher_selected_reference" | "model_draft" | "missing";
   answerKeyText?: string;
@@ -666,6 +668,8 @@ export async function uploadSubmission(input: {
 }) {
   const form = new FormData();
   if (input.assignmentId) form.set("assignmentId", input.assignmentId);
+  if (input.collectionBatchId) form.set("collectionBatchId", input.collectionBatchId);
+  if (input.collectionTitle) form.set("collectionTitle", input.collectionTitle);
   if (input.materialType) form.set("materialType", input.materialType);
   if (input.answerSourceMode) form.set("answerSourceMode", input.answerSourceMode);
   if (input.answerKeyText) form.set("answerKeyText", input.answerKeyText);
@@ -692,12 +696,15 @@ export async function uploadSubmission(input: {
   });
   return readJson<{
     ok: boolean;
+    replayed?: boolean;
+    collectionBatchId?: string;
     persistence: { active: boolean; reason: string };
     uploadedFiles: Array<{ fileName: string; originalName: string; path: string }>;
     result: {
       available: boolean;
       queued?: boolean;
       gradingText?: string;
+      structured?: { persistedStatus?: string | null };
       persisted?: {
         modelRunId?: string | null;
         submissionId?: string | null;
@@ -705,6 +712,16 @@ export async function uploadSubmission(input: {
       };
     };
   }>(response);
+}
+
+export interface GradingCollectionRecord {
+  batchId: string; title: string; assignmentId: string; studentId: string; submissionId: string;
+  imageCount: number; status: string; submittedAt: string;
+}
+
+export async function listGradingCollections(batchId?: string) {
+  const response = await fetch(`${API_BASE_URL}/api/grading/collections${batchId ? `?batchId=${encodeURIComponent(batchId)}` : ""}`, { headers: authHeaders() });
+  return readJson<{ ok: boolean; capped: boolean; submissions: GradingCollectionRecord[] }>(response);
 }
 
 export async function publishClassroomBroadcast(input: Record<string, unknown>) {

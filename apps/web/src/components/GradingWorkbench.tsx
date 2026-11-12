@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createRequestKey } from "../request-key";
 import { GradingImageStage } from "./GradingImageStage";
 import { archiveTeachingGrading, createGradingWorkflow, recoverGradingWorkflow, executeGradingWorkflow, getGradingWorkflow, listTeachingWorkflows,
   teachingImageUrl, type GradingWorkflowPage, type GradingWorkflowQuestion, type GradingWorkflowView, type TeachingWorkflowCommand, type TeachingWorkflowSummary } from "../api";
@@ -8,7 +9,7 @@ type Props = { teacherId: string; active: boolean; sources: Source[]; onLegacy: 
 type Edit = { id: string; revision: number; questionId: string; mode: "recognition" | "score"; answer: string; blank: boolean;
   status: GradingWorkflowQuestion["status"]; score: string; explanation: string; knowledgePoint: string; errorStep: string; suggestedPractice: string };
 const text = (v: unknown) => typeof v === "string" ? v : v == null ? "" : JSON.stringify(v);
-const key = () => crypto.randomUUID();
+const key = createRequestKey;
 const running = (s?: string) => s === "running" || s === "queued";
 const labels: Record<string, string> = { queued: "排队中", running: "处理中", ready_for_review: "待教师复核", confirmed: "已确认", historical: "历史版本", cancelled: "已取消", failed: "处理失败", needs_input: "需补齐来源或识别", interrupted: "已中断" };
 const currentArchive = (t: TeachingWorkflowSummary) => t.archive?.workflowId === t.id && t.archive.revision === t.revision && t.archive.status === "archived" ? t.archive : null;
@@ -180,7 +181,7 @@ export function GradingWorkbench({ teacherId, active, sources, onLegacy, onArchi
       <button className="primary-button" disabled={available !== true || !!busy || dirty || !sourceId} onClick={() => void create()}>{busy === "create" ? "正在准备批改…" : "从此批次开始持续批改"}</button>
       <button className="secondary-button" disabled={!!busy || dirty} onClick={() => { creation.current = null; setMessage("再次开始将新建独立任务，请先核对已有任务。"); }}>按此批次另建任务</button>
       <button className="secondary-button" onClick={onLegacy}>原有批改与来源管理</button></div>
-    <p className="muted-line">上传、识别和答案来源登记沿用原入口；没有可靠来源或识别证据的任务会要求补齐。这里不会自动重跑整批图片。</p>
+    <p className="muted-line">在本页“拍照上传批改”加入作答；答案来源可在“原有批改与来源管理”核对。持续批改用于逐题修正识别、调整评分、按要求重判、教师确认和历史版本恢复，确认后再独立归档。</p>
     <div className="gw-task-bar"><label>继续已有任务<select aria-label="继续已有批改任务" value={view?.id || ""} disabled={dirty || !!busy && busy !== "create"} onChange={(e) => { if (e.target.value) void load(e.target.value); }}><option value="">选择任务</option>{tasks.map((t) => <option key={t.id} value={t.id}>{text(t.request.title) || "批改任务"} · 版本 {t.revision} · {reviewLabel(t)}</option>)}</select></label><button className="secondary-button" onClick={() => void refreshList()}>刷新任务列表</button></div>
     {!view ? <p className="tw-empty">选择已上传批次开始，或继续对话中已经保存的批改任务。</p> : <>
       <div className="tw-heading"><h3>{view.content.title || text(view.request.title) || "批改草稿"} · 版本 {view.revision} · {reviewLabel(view)}</h3><button className="secondary-button" disabled={!!busy && busy !== "create"} onClick={() => void load(view.id)}>刷新当前批改</button></div>
