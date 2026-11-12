@@ -1,9 +1,11 @@
 ﻿import cors from "cors";
 import express from "express";
 import { canReplayDialogueSource } from "./dialogue-source-registration.js";
+import { canUseGradingAssignment, collectionSubmissionId, collectionSubmissionReplayResult, isGradingSourceEligible, persistCollectionSubmission } from "./grading-collection.js";
+import { registerGradingCollectionRoutes } from "./grading-collection-routes.js";
 import { execFile } from "node:child_process";
 import { Buffer } from "node:buffer";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -428,7 +430,7 @@ function queuedSubmissionResult(input = {}, submission = null) {
   };
 }
 
-async function createQueuedPhotoSubmission(input = {}) {
+async function createQueuedPhotoSubmission(input = {}, db = prisma) {
   const imageCount = input.imageNames?.length || input.uploadedFiles?.length || 0;
   const materialType = input.assignmentId ? "generated_assessment" : "external_workbook";
   const externalGradingRecognition = materialType === "external_workbook"
@@ -447,7 +449,7 @@ async function createQueuedPhotoSubmission(input = {}) {
       })
     : null;
   const assignment = input.assignmentId
-    ? await prisma.assignment.findUnique({ where: { id: input.assignmentId } })
+    ? await db.assignment.findUnique({ where: { id: input.assignmentId } })
     : await createAssignmentDraft({
         subject: input.subject || null,
         title: input.title || "图片提交批改记录",
@@ -476,8 +478,9 @@ async function createQueuedPhotoSubmission(input = {}) {
     source: input.uploadedBy === "student" ? "student_upload" : "teacher_upload",
     reviewed: false
   };
-  return prisma.submission.create({
+  return db.submission.create({
     data: {
+      ...(input.collectionSubmissionId ? { id: input.collectionSubmissionId } : {}),
       assignmentId: assignment.id,
       studentId: input.studentId,
       status: "SUBMITTED",
@@ -498,6 +501,10 @@ async function createQueuedPhotoSubmission(input = {}) {
         imageFiles: input.uploadedFiles || [],
         uploadedBy: input.uploadedBy || "teacher",
         uploadBatchId: input.batchId || null,
+        collectionBatchId: input.collectionBatchId || null,
+        collectionTitle: input.collectionTitle || null,
+        collectionTeacherId: input.collectionTeacherId || null,
+        collectionContentFingerprint: input.collectionContentFingerprint || null,
         imageTotal: imageCount,
         pageNumber: null,
         questionRange: input.questionRange || ""
@@ -1384,8 +1391,9 @@ function mapAssignment(assignment, options = {}) {
       };
   return {
     id: assignment.id,
-    studentId: metadata.targetStudentId || submission?.studentId || null,
-    studentName: submission?.student?.displayName || metadata.studentName || "",
+    studentId: metadata.targetStudentId || (metadata.targetScope === "grade" || metadata.source === "dialogue-import" ? null : submission?.studentId) || null,
+    studentName: metadata.targetScope === "grade" || (metadata.source === "dialogue-import" && !metadata.targetStudentId)
+      ? "" : metadata.studentName || submission?.student?.displayName || "",
     targetScope: metadata.targetScope || (metadata.targetGrade ? "grade" : "student"),
     targetGrade: metadata.targetGrade || assignment.grade || null,
     kind,
@@ -1402,6 +1410,7 @@ function mapAssignment(assignment, options = {}) {
     totalScore: metadata.totalScore || (kind === "试卷" ? 100 : 60),
     gradingSource: gradingSourceReference(gradingSourcePackage),
     gradingSourceQuestionCount: gradingSourcePackage?.questions?.length || 0,
+    gradingEligible: isGradingSourceEligible(assignment),
     generationContextSummary,
     items: assignment.items?.map((item) => item.prompt) || [],
     draftReviewStatus: metadata.draftReviewStatus || null,
@@ -3270,6 +3279,7 @@ function mapReviewSubmission(submission) {
     })),
     uploadedBy: content.uploadedBy || assignmentMetadata.uploadedBy || "",
     batchId: content.uploadBatchId || assignmentMetadata.uploadBatchId || null,
+    collectionBatchId: content.collectionBatchId || null,
     imageIndex: ocr.imageIndex || content.imageIndex || null,
     imageTotal: ocr.imageTotal || content.imageTotal || assignmentMetadata.expectedImageCount || null,
     pageNumber: ocr.pageNumber || null,
@@ -4461,6 +4471,7 @@ app.post("/api/assessments/:assignmentId/print-export", requireDatabase, require
 
 app.post(
   "/api/submissions/grade",
+  requireDatabase,
   requireSession(config, ["student", "teacher"]),
   submissionImageUpload.array("images"),
   asyncRoute(async (req, res) => {
@@ -4471,6 +4482,12 @@ app.post(
       answerSourceMode: optionalText(body.answerSourceMode),
       answerKeyText: optionalText(body.answerKeyText),
       referenceSourceId: optionalText(body.referenceSourceId),
+      collectionBatchId: optionalText(body.collectionBatchId),
+      collectionTitle: optionalText(body.collectionTitle)?.slice(0, 200),
+      collectionSubmissionId: null,
+      collectionTeacherId: null,
+      collectionContentFingerprint: null,
+      uploadedBy: req.session.role,
       uploadedFiles: uploadedFileMeta(req.files || [])
     };
     input.uploadedFiles = input.uploadedFiles.map((file) => ({
@@ -4481,6 +4498,10 @@ app.post(
     if (scopeError) return res.status(403).json(scopeError);
     if (!(await assertTeacherStudentScope(req, res, input.studentId))) return;
     if (!(await assertStudentAvailableForNewWork(req, res, input.studentId))) return;
+    if (input.collectionBatchId && (req.session.role !== "teacher" || !input.assignmentId || input.collectionBatchId.length > 120)) {
+      return res.status(400).json({ ok: false, error: "COLLECTION_SOURCE_REQUIRED", message: "同卷多人采集需由教师选择已确认材料，并使用有效批次。" });
+    }
+    if (!input.uploadedFiles.length) return res.status(400).json({ ok: false, error: "SUBMISSION_IMAGES_REQUIRED", message: "请先上传该学生的作答照片。" });
     input.imageNames = [
       ...(Array.isArray(input.imageNames) ? input.imageNames : []),
       ...input.uploadedFiles.map((file) => file.fileName)
@@ -4494,11 +4515,20 @@ app.post(
         return res.status(404).json({ ok: false, error: "ASSIGNMENT_NOT_FOUND", message: "未找到要关联的生成作业。" });
       }
       const sourceMetadata = safeJson(sourceAssignment.metadata, {});
-      if (!(await assertAssignmentStudentScope(req, res, sourceAssignment, input.studentId))) return;
+      const student = await prisma.student.findUnique({ where: { id: input.studentId }, select: { id: true, grade: true } });
+      const eligibility = canUseGradingAssignment({ assignment: sourceAssignment, student,
+        teacherId: req.session.role === "teacher" ? req.session.teacherId : sourceMetadata.teacherId });
+      if (!eligibility.ok) return res.status(409).json({ ok: false, error: eligibility.reason,
+        message: "该材料尚未完成教师确认、答案包校验，或不适用于当前学生及年级，请重新选择。" });
+      if (sourceMetadata.source === "dialogue-import" && req.session.role !== "teacher") {
+        return res.status(403).json({ ok: false, error: "ASSIGNMENT_TEACHER_SCOPE_MISMATCH", message: "此材料仅供登记教师关联批改。" });
+      }
       if (req.session.role === "teacher" && sourceMetadata.teacherId && sourceMetadata.teacherId !== req.session.teacherId) {
         return res.status(403).json({ ok: false, error: "ASSIGNMENT_TEACHER_SCOPE_MISMATCH", message: "当前教师无权使用该生成作业。" });
       }
       input.assignmentTitle = sourceAssignment.title;
+      input.subject = sourceAssignment.subject?.name || sourceMetadata.subject || input.subject;
+      input.kind = sourceMetadata.kind || input.kind;
       input.assignmentItems = sourceAssignment.items.map((item) => ({
         questionNo: item.orderIndex,
         prompt: item.prompt,
@@ -4516,9 +4546,26 @@ app.post(
       return res.status(400).json({ ok: false, error: "GENERATED_ASSIGNMENT_REQUIRED", message: "系统生成材料必须关联对应的生成作业。" });
     }
 
-    const submission = await createQueuedPhotoSubmission(input);
-    queueSubmissionRecognition(submission.id);
-    const result = queuedSubmissionResult(input, submission);
+    let replayed = false;
+    let submission;
+    if (input.collectionBatchId) {
+      input.collectionTeacherId = req.session.teacherId;
+      input.collectionSubmissionId = collectionSubmissionId(input.collectionBatchId, input.studentId, req.session.teacherId);
+      const imageHashes = await Promise.all(input.uploadedFiles.map(async file =>
+        createHash("sha256").update(await fs.promises.readFile(file.path)).digest("hex")));
+      input.collectionContentFingerprint = createHash("sha256").update(JSON.stringify({
+        assignmentId: input.assignmentId, imageHashes, questionRange: input.questionRange || ""
+      })).digest("hex");
+      const persisted = await persistCollectionSubmission(prisma, input, (submissionInput, tx) => createQueuedPhotoSubmission(submissionInput, tx));
+      if (persisted.error) return res.status(409).json({ ok: false, error: persisted.error,
+        message: persisted.error === "COLLECTION_BATCH_SOURCE_CONFLICT"
+          ? "同一批次只能使用一份材料，原记录已保留；请新建批次选择其他材料。"
+          : "该学生在本批次已有不同作答，原记录已保留；请新建批次上传修改稿。" });
+      submission = persisted.submission;
+      replayed = persisted.replayed;
+    } else submission = await createQueuedPhotoSubmission(input);
+    if (!replayed) queueSubmissionRecognition(submission.id);
+    const result = replayed ? collectionSubmissionReplayResult(submission, { imageCount: input.imageNames?.length || 0 }) : queuedSubmissionResult(input, submission);
     await auditEvent(req, {
       studentId: input.studentId || null,
       feature: "submission",
@@ -4526,18 +4573,21 @@ app.post(
       metadata: {
         assignmentId: input.assignmentId || null,
         batchId: input.batchId || null,
+        collectionBatchId: input.collectionBatchId || null,
+        replayed,
         uploadedBy: input.uploadedBy || null,
         imageCount: input.imageNames?.length || 0,
-        ocrStatus: "RUNNING",
+        ocrStatus: replayed ? (result.structured?.evidence?.ocrStatus || submission.status || "SAVED") : "RUNNING",
         ocrEngine: null,
-        ocrReason: "queued-background-processing",
+        ocrReason: replayed ? "existing-submission" : "queued-background-processing",
         pageNumber: optionalNumber(input.pageNumber),
         questionRange: optionalText(input.questionRange),
         submissionId: submission.id,
         gradingResultId: submission.grading?.id || null
       }
     });
-    res.status(202).json({ ok: true, persistence: { active: true, reason: "queued-background-processing" }, uploadedFiles: input.uploadedFiles, result });
+    res.status(replayed ? 200 : 202).json({ ok: true, replayed, collectionBatchId: input.collectionBatchId,
+      persistence: { active: true, reason: replayed ? "existing-submission" : "queued-background-processing" }, uploadedFiles: input.uploadedFiles, result });
   })
 );
 
@@ -4949,9 +4999,18 @@ app.post("/api/grading/source-packages/dialogue", requireDatabase, requireSessio
     return res.status(422).json({ ok: false, error: "ANSWER_PACKAGE_INVALID", message: normalized.issues.join("；"), issues: normalized.issues });
   }
   const studentId = optionalText(body.studentId);
+  const targetGrade = optionalText(body.targetGrade || body.grade || normalized.package.grade);
+  const gradeLevel = normalizeGradeLevel(targetGrade)?.level;
+  if (!gradeLevel || (normalized.package.grade && normalizeGradeLevel(normalized.package.grade)?.level !== gradeLevel)) {
+    return res.status(422).json({ ok: false, error: "DIALOGUE_GRADE_INVALID", message: "请提供有效且与答案包一致的适用年级。" });
+  }
   if (studentId) {
     if (!(await assertTeacherStudentScope(req, res, studentId))) return;
     if (!(await assertTeacherActiveStudentTarget(req, res, studentId))) return;
+    const student = await prisma.student.findUnique({ where: { id: studentId }, select: { grade: true } });
+    if (normalizeGradeLevel(student?.grade)?.level !== gradeLevel) {
+      return res.status(422).json({ ok: false, error: "ASSIGNMENT_GRADE_MISMATCH", message: "指定学生与材料年级不一致。" });
+    }
   }
   if (body.assignmentId) {
     const existing = await prisma.assignment.findUnique({ where: { id: assignmentId },
@@ -4962,7 +5021,7 @@ app.post("/api/grading/source-packages/dialogue", requireDatabase, requireSessio
       // Older drafts may have received unordered INSERT results. Compare by
       // explicit question number, but return the original immutable package.
       if (!canReplayDialogueSource({ metadata, stored, requested: normalized.package,
-        teacherId: req.session.teacherId, studentId })) {
+        teacherId: req.session.teacherId, studentId, targetGrade })) {
         return res.status(409).json({ ok: false, error: "GRADING_SOURCE_ALREADY_EXISTS", message: "来源标识已存在且内容或所属对象不一致，请使用新的材料标识。" });
       }
       return res.status(200).json({ ok: true, replayed: true,
@@ -4970,13 +5029,14 @@ app.post("/api/grading/source-packages/dialogue", requireDatabase, requireSessio
         gradingSource: gradingSourceReference(stored), gradingSourcePackage: stored });
     }
   }
-  const targetGrade = optionalText(body.targetGrade || body.grade || normalized.package.grade);
   const sourceMetadata = {
     source: "dialogue-import",
     teacherId: req.session.teacherId,
     targetStudentId: studentId || null,
     targetGrade: targetGrade || null,
     targetScope: studentId ? "student" : targetGrade ? "grade" : "teacher",
+    draftReviewStatus: "pending_teacher_review",
+    dialogueContentReview: { status: "pending_teacher_review" },
     subject: optionalText(body.subject || normalized.package.subject) || null,
     kind: optionalText(body.kind || normalized.package.kind) || "练习",
     dialogueAnswerPackageOrigin: {
@@ -5024,6 +5084,9 @@ app.post("/api/grading/source-packages/dialogue", requireDatabase, requireSessio
     }
   });
 }));
+
+registerGradingCollectionRoutes(app, { prisma, middleware: [requireDatabase, requireSession(config, ["teacher"])],
+  asyncRoute, mapAssignment, auditEvent, teacherCanAccessStudent });
 
 app.patch("/api/grading/workbench/:submissionId/dialogue-answer-package", requireDatabase, requireSession(config, ["teacher"]), asyncRoute(async (req, res) => {
   const submission = await prisma.submission.findUnique({

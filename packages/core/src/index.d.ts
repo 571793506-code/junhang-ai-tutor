@@ -164,6 +164,7 @@ export interface AssignmentCard {
   } | null;
   gradingSource?: { sourceId: string; version: number; fingerprint: string; questionCount?: number } | null;
   gradingSourceQuestionCount?: number;
+  gradingEligible?: boolean;
   generationContextSummary?: {
     basis: string;
     target: { scope: string | null; studentId: string | null; grade: string | null; subject: SubjectLabel };

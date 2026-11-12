@@ -45,7 +45,7 @@ test("generated upload rejects missing assignment source and validates its scope
   const route = multilineRouteSource("/api/submissions/grade");
   assert.match(route, /GENERATED_ASSIGNMENT_REQUIRED/);
   assert.match(route, /ASSIGNMENT_NOT_FOUND/);
-  assert.match(route, /assertAssignmentStudentScope/);
+  assert.match(route, /canUseGradingAssignment/);
   assert.match(source, /ASSIGNMENT_STUDENT_MISMATCH/);
   assert.match(source, /ASSIGNMENT_GRADE_MISMATCH/);
   assert.match(route, /ASSIGNMENT_TEACHER_SCOPE_MISMATCH/);

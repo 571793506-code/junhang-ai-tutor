@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { prepareDialogueMaterial, registerDialogueMaterial, resolveDialogueStudent } from "./dialogue-material-source.mjs";
+import { prepareDialogueMaterial, registerDialogueMaterial, resolveDialogueStudent, reviewDialogueMaterial } from "./dialogue-material-source.mjs";
 import { buildGradingSourcePackage, gradingSourcePackageToAssignmentItems, normalizeImportedGradingSourcePackage, validateGradingSourcePackage } from "../packages/core/src/grading-source-package.js";
 
 const fixture = () => ({ schemaVersion: "local-exam-source-v1", version: 1, title: "合成试卷", subject: "数学", grade: "三年级上册",
@@ -68,4 +68,38 @@ test("authenticated registration replays unchanged material and creates a new id
   assert.notEqual(revision.assignment.id, first.assignment.id); assert.equal(writes, 2);
   assignments[1].gradingSource.fingerprint = "changed";
   await assert.rejects(registerDialogueMaterial(options), /REGISTERED_SOURCE_MISMATCH/);
+});
+
+test("grade-scope dialogue registration never assigns a student and remains pending review", async () => {
+  let registration;
+  const fetchImpl = async (url, init) => {
+    if (url.pathname.endsWith("bootstrap")) return Response.json({ ok: true, teachers: [{ id: "t1" }],
+      students: [{ id: "s1", displayName: "学生", grade: "三年级", canReceiveNewWork: true }] });
+    registration = JSON.parse(init.body);
+    return Response.json({ ok: true, assignment: { id: registration.assignmentId, studentId: null, targetScope: "grade",
+      targetGrade: "三年级", draftReviewStatus: "pending_teacher_review", gradingEligible: false,
+      gradingSource: { fingerprint: registration.answerPackage.fingerprint }, gradingSourceQuestionCount: registration.answerPackage.questions.length },
+      gradingSourcePackage: registration.answerPackage });
+  };
+  const result = await registerDialogueMaterial({ baseUrl: "http://127.0.0.1:8787", sessionToken: "token",
+    source: fixture(), scope: "grade", fetchImpl });
+  assert.equal(registration.studentId, undefined);
+  assert.equal(registration.targetGrade, "三年级上册");
+  assert.equal(result.assignment.gradingEligible, false);
+  assert.equal(result.scope, "grade");
+});
+
+test("conversation review client records only a fingerprint-bound explicit teacher decision", async () => {
+  const receipt = { syncStatus: "registered", assignmentId: "paper", gradingSource: { fingerprint: "fingerprint-1" } };
+  let request;
+  const result = await reviewDialogueMaterial({ baseUrl: "http://127.0.0.1:8787", sessionToken: "token", receipt,
+    decision: "accept", note: "教师已审查，内容可用于批改。", fetchImpl: async (url, init) => {
+      request = { url, body: JSON.parse(init.body) };
+      return Response.json({ ok: true, replayed: false, assignment: { id: "paper", draftReviewStatus: "accepted",
+        gradingEligible: true, gradingSource: { fingerprint: "fingerprint-1" } } });
+    } });
+  assert.equal(request.url.pathname, "/api/grading/source-packages/dialogue/paper/review");
+  assert.deepEqual(request.body, { decision: "accept", fingerprint: "fingerprint-1", note: "教师已审查，内容可用于批改。" });
+  assert.equal(result.gradingEligible, true);
+  assert.equal(result.replayed, false);
 });

@@ -6,8 +6,8 @@ import { contentHash, prepareDialogueMaterial, registerDialogueMaterial } from "
 const readJson = async file => JSON.parse((await readFile(file, "utf8")).replace(/^\uFEFF/, ""));
 async function main() {
   const { values } = parseArgs({ options: { input: { type: "string" }, output: { type: "string" },
-    student: { type: "string" }, "deliver-to": { type: "string" }, sync: { type: "boolean" }, help: { type: "boolean" } } });
-  if (values.help) return console.log("node scripts/dialogue-material.mjs --input <source.json> [--output <canonical.json>] [--deliver-to <folder>] [--sync] [--student <id-or-name>]\nSync uses TEACHING_API_BASE_URL, TEACHING_SESSION_FILE and optional TEACHING_WEB_BASE_URL. Session file is private and contains sessionToken. No teacher confirmation or grading is performed.");
+    student: { type: "string" }, scope: { type: "string" }, "deliver-to": { type: "string" }, sync: { type: "boolean" }, help: { type: "boolean" } } });
+  if (values.help) return console.log("node scripts/dialogue-material.mjs --input <source.json> [--output <canonical.json>] [--deliver-to <folder>] [--sync] --scope <student|grade> [--student <id-or-name>]\n--scope student requires one unique --student; --scope grade registers the material for the recognized grade and does not invent a student. Registration is pending teacher review until dialogue-material-review.mjs records an explicit accept/reject decision. Sync uses TEACHING_API_BASE_URL, TEACHING_SESSION_FILE and optional TEACHING_WEB_BASE_URL. Session file is private and contains sessionToken. No scoring or archive is performed.");
   if (!values.input) throw new Error("DIALOGUE_INPUT_REQUIRED");
   const input = path.resolve(values.input);
   const source = await readJson(input);
@@ -29,14 +29,15 @@ async function main() {
   try {
     if (values.sync) {
       const session = await readJson(process.env.TEACHING_SESSION_FILE);
-      const identity = values.student || (source.targetStudents?.length === 1 ? source.targetStudents[0] : "");
+      const identity = values.student || (values.scope !== "grade" && source.targetStudents?.length === 1 ? source.targetStudents[0] : "");
       const result = await registerDialogueMaterial({ baseUrl: process.env.TEACHING_API_BASE_URL,
-        sessionToken: session.sessionToken, source, studentIdentity: identity });
+        sessionToken: session.sessionToken, source, studentIdentity: identity, scope: values.scope || "student" });
       answerPackage = result.answerPackage;
       const web = new URL(process.env.TEACHING_WEB_BASE_URL || "http://127.0.0.1:5173/");
       web.searchParams.set("gradingAssignment", result.assignment.id);
       receipt = { ...receipt, syncStatus: "registered", assignmentId: result.assignment.id,
-        gradingSource: result.assignment.gradingSource, replayed: result.replayed, student: result.student, webUrl: web.href };
+        gradingSource: result.assignment.gradingSource, replayed: result.replayed, student: result.student, scope: result.scope, grade: result.grade,
+        gradingEligible: result.assignment.gradingEligible === true, reviewStatus: result.assignment.draftReviewStatus, webUrl: web.href };
     }
   } catch (error) {
     receipt = { ...receipt, ok: false, error: /^DIALOGUE_|^SESSION_/.test(error.code || error.message) ? (error.code || error.message) : "DIALOGUE_SYNC_FAILED" };

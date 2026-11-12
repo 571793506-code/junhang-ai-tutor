@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { normalizeImportedGradingSourcePackage, validateGradingSourcePackage } from "../packages/core/src/grading-source-package.js";
+import { normalizeGradeLevel } from "../packages/core/src/index.js";
 
 const fail = (code) => { throw Object.assign(new Error(code), { code }); };
 export const contentHash = (value) => createHash("sha256").update(value).digest("hex");
@@ -47,7 +48,7 @@ export function resolveDialogueStudent(students, identity) {
   return matches[0];
 }
 
-export async function registerDialogueMaterial({ baseUrl, sessionToken, source, studentIdentity, fetchImpl = fetch }) {
+export async function registerDialogueMaterial({ baseUrl, sessionToken, source, studentIdentity, scope = "student", fetchImpl = fetch }) {
   const base = new URL(baseUrl);
   if (!["http:", "https:"].includes(base.protocol) || base.username || base.password || base.pathname !== "/" || base.search || base.hash) fail("DIALOGUE_API_URL_INVALID");
   if (!sessionToken) fail("SESSION_REQUIRED");
@@ -61,20 +62,24 @@ export async function registerDialogueMaterial({ baseUrl, sessionToken, source, 
   };
   const bootstrap = await request("/api/bootstrap");
   if (bootstrap.teachers?.length !== 1) fail("DIALOGUE_TEACHER_SESSION_REQUIRED");
-  const student = resolveDialogueStudent(bootstrap.students || [], studentIdentity);
-  const prepared = prepareDialogueMaterial(source, { sourceId: "dialogue-preview", grade: student.grade });
+  if (!["student", "grade"].includes(scope)) fail("DIALOGUE_SCOPE_INVALID");
+  if (scope === "grade" && studentIdentity) fail("DIALOGUE_SCOPE_CONFLICT");
+  const student = scope === "student" ? resolveDialogueStudent(bootstrap.students || [], studentIdentity) : null;
+  const grade = student?.grade || source.grade;
+  if (!normalizeGradeLevel(grade)?.level || (source.grade && normalizeGradeLevel(source.grade)?.level !== normalizeGradeLevel(grade)?.level)) fail("DIALOGUE_GRADE_INVALID");
+  const prepared = prepareDialogueMaterial(source, { sourceId: "dialogue-preview", grade });
   // Database relation order is not part of material identity; explicit question numbers are.
   const preview = normalizeImportedGradingSourcePackage({ ...prepared,
     questions: [...prepared.questions].sort((a, b) => a.questionNo.localeCompare(b.questionNo, "en", { numeric: true })) },
     { sourceId: "dialogue-preview" }).package;
-  const assignmentId = `dialogue-${contentHash(JSON.stringify([bootstrap.teachers[0].id, student.id, preview.fingerprint])).slice(0, 40)}`;
-  let answerPackage = prepareDialogueMaterial(source, { sourceId: assignmentId, grade: student.grade });
+  const assignmentId = `dialogue-${contentHash(JSON.stringify([bootstrap.teachers[0].id, student?.id || `grade:${normalizeGradeLevel(grade).level}`, preview.fingerprint])).slice(0, 40)}`;
+  let answerPackage = prepareDialogueMaterial(source, { sourceId: assignmentId, grade });
   const verify = (assignment) => {
-    if (!assignment || assignment.studentId !== student.id || assignment.gradingSource?.fingerprint !== answerPackage.fingerprint ||
+    if (!assignment || (assignment.studentId || null) !== (student?.id || null) || assignment.gradingSource?.fingerprint !== answerPackage.fingerprint ||
         assignment.gradingSourceQuestionCount !== answerPackage.questions.length) fail("DIALOGUE_REGISTERED_SOURCE_MISMATCH");
     return assignment;
   };
-  const registered = await request("/api/grading/source-packages/dialogue", { assignmentId, studentId: student.id, answerPackage });
+  const registered = await request("/api/grading/source-packages/dialogue", { assignmentId, studentId: student?.id, targetGrade: grade, answerPackage });
   const stored = registered.gradingSourcePackage;
   if (!stored || !validateGradingSourcePackage(stored).ok || stored.sourceId !== assignmentId || stored.questions.length !== answerPackage.questions.length) fail("DIALOGUE_REGISTERED_SOURCE_MISMATCH");
   const byNo = new Map(stored.questions.map(q => [q.questionNo, q]));
@@ -85,5 +90,23 @@ export async function registerDialogueMaterial({ baseUrl, sessionToken, source, 
   const assignment = registered.assignment;
   const replayed = registered.replayed === true;
   verify(assignment);
-  return { assignment, answerPackage, replayed, student: { id: student.id, displayName: student.displayName, grade: student.grade } };
+  return { assignment, answerPackage, replayed, student: student ? { id: student.id, displayName: student.displayName, grade: student.grade } : null, scope, grade };
+}
+
+export async function reviewDialogueMaterial({ baseUrl, sessionToken, receipt, decision, note, fetchImpl = fetch }) {
+  const base = new URL(baseUrl);
+  if (!["http:", "https:"].includes(base.protocol) || base.username || base.password || base.pathname !== "/" || base.search || base.hash) fail("DIALOGUE_API_URL_INVALID");
+  if (!sessionToken) fail("SESSION_REQUIRED");
+  if (receipt?.syncStatus !== "registered" || !receipt.assignmentId || !receipt.gradingSource?.fingerprint) fail("DIALOGUE_RECEIPT_REQUIRED");
+  if (!["accept", "reject"].includes(decision) || !note?.trim()) fail("DIALOGUE_TEACHER_DECISION_REQUIRED");
+  const response = await fetchImpl(new URL(`/api/grading/source-packages/dialogue/${encodeURIComponent(receipt.assignmentId)}/review`, base), {
+    method: "POST", redirect: "error", headers: { Authorization: `Bearer ${sessionToken}`, "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(30000), body: JSON.stringify({ decision, fingerprint: receipt.gradingSource.fingerprint, note }) });
+  const result = await response.json();
+  if (!response.ok || result.ok !== true) fail(`DIALOGUE_REVIEW_${result.error || response.status}`);
+  if (result.assignment?.id !== receipt.assignmentId || result.assignment?.gradingSource?.fingerprint !== receipt.gradingSource.fingerprint ||
+      result.assignment?.draftReviewStatus !== (decision === "accept" ? "accepted" : "rejected") ||
+      result.assignment?.gradingEligible !== (decision === "accept")) fail("DIALOGUE_REVIEW_RESPONSE_MISMATCH");
+  return { ok: true, assignmentId: receipt.assignmentId, gradingSource: receipt.gradingSource, decision,
+    gradingEligible: result.assignment.gradingEligible, replayed: result.replayed === true, checkedAt: new Date().toISOString() };
 }
