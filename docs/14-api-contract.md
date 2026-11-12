@@ -348,10 +348,17 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 - `POST /api/grading/source-packages/dialogue`
   - 教师端将对话生成的结构化答案包登记为数据库中的统一 `Assignment` 来源；服务端按 `junhang-grading-source-v1` 规范化并重新生成仓库指纹。
   - 新建返回 HTTP 201、`assignment.id`、`gradingSource`（来源 ID、版本、指纹）、实际存储的 `gradingSourcePackage` 和导入摘要。后续 Web、小程序和课堂平板批改只提交该 `assignmentId`，统一从 `Assignment.metadata.gradingSourcePackage` 读取题干、答案、分值和解析。
-  - 显式 `assignmentId` 已存在时，仅同教师、同目标学生、来源完整且按题号对齐的全部内容一致可 HTTP 200 重放，返回 `replayed:true` 及原来源包/指纹，不新增或重写记录；其他冲突返回 409 `GRADING_SOURCE_ALREADY_EXISTS`。导入数据不能授予教师确认。
-  - 对话交付 CLI：`node scripts/dialogue-material.mjs --input <source.json> --deliver-to <folder> --sync --student <studentId>`，使用 `TEACHING_API_BASE_URL` 与 `TEACHING_SESSION_FILE`，可配置 `TEACHING_WEB_BASE_URL`。输出双 PDF、标准 JSON 及登记回执；只有回执 `ok=true`、`syncStatus=registered` 表示同步成功。Web `?gradingAssignment=<id>` 登录后带入对应来源，不自动上传、评分或归档。接口和标准答案包供其他端复用，URL 仅是 Web 导航。
+  - 可提供 `studentId` 作为学生专用材料；省略则按 `targetGrade`/`grade` 登记同年级通用材料。有效年级必须与答案包和指定学生一致。显式 `assignmentId` 已存在时，仅同教师、同目标学生与年级、来源完整且按题号对齐的全部内容一致可 HTTP 200 重放；其他冲突返回 409 `GRADING_SOURCE_ALREADY_EXISTS`。
+  - 新登记保持 `draftReviewStatus=pending_teacher_review`、`gradingEligible=false`。对话交付 CLI：`node scripts/dialogue-material.mjs --input <source.json> --deliver-to <folder> --sync --scope grade`；学生专用材料使用 `--scope student --student <studentId>`。使用 `TEACHING_API_BASE_URL` 与私有 `TEACHING_SESSION_FILE`，可配置 `TEACHING_WEB_BASE_URL`。输出双 PDF、标准 JSON 及登记回执；`syncStatus=registered` 只代表已同步，不能代表可批改。Web `?gradingAssignment=<id>` 仅对已认可来源带入材料，学生须明确点选。
   - 对话原始 `sourceId`、指纹和 payload 仅保存在来源审计元数据中；该接口不会创建学生提交，也不会绕过教师逐题复核和归档门禁。
   - 对话登记来源仅供登记教师查看、关联上传及评审/导出；指定学生时仍须匹配该学生。登记不向学生或课堂端发布材料；上传 JSON 中的复核字段不能授予教师确认。
+
+- `POST /api/grading/source-packages/dialogue/:assignmentId/review`
+  - 教师鉴权，提交 `{ decision: "accept" | "reject", fingerprint, note }`；`note` 记录教师对本份材料的明确回复。权限、来源指纹、有效答案包与年级均由服务端校验，采用比较更新防止并发覆盖。
+  - `accept` 才开放 `gradingEligible=true`；`reject` 保持不可选。相同决定可重放，已定稿版本不能反向改变决定；修改内容须登记新来源。CLI：`node scripts/dialogue-material-review.mjs --receipt <材料登记回执.json> --decision accept --note <教师回复>`。此操作不确认得分、不发布给学生、不归档。
+
+- `GET /api/grading/collections?batchId=<id>`
+  - 教师鉴权，按当前教师及可访问学生返回已提交采集记录；可按批次精确筛选。返回 `submissions[]` 的 batchId/title/assignmentId/studentId/submissionId/imageCount/status/submittedAt 和 `capped`。最多200条，页面对当前批次另行读取；不返回模型配置或原始输出。
 
 - `PATCH /api/grading/workbench/:submissionId/questions/:questionId`
   - 教师端逐题修正批改结果，小程序和 Web 共用。
@@ -452,6 +459,9 @@ Web 端只用于联调、原型验证和自动化测试。微信小程序、课�
 - `POST /api/submissions/grade`
   - 如果没有传 `assignmentId`，API 会自动创建一个用于图片提交和批改的 `Assignment`，并写入 `Submission` 与 `GradingResult`。
   - 教师端和学生端都可以走图片上传批改；选择关联生成记录时优先复用该记录的答案键。
+  - 同卷多人采集提交 `assignmentId`、`studentId`、`collectionBatchId`、`collectionTitle` 与有序图片；仅教师可用。服务端验证材料已认可且年级/指定学生一致；一个批次只使用一份材料，每个学生独立提交。
+  - PostgreSQL 事务按教师/批次加锁；相同学生、来源和有序图片的重试返回 HTTP 200、`replayed=true` 与原提交当前状态，不重复排队。新提交 HTTP 202；变更照片或批次来源返回 HTTP 409，保留原记录，修改稿须新建批次。文件名不参与图片内容指纹。
+  - Web/iPad 切换学生保留当前页面待传照片，可调整页序；刷新只恢复服务端已提交批次，不保存未上传照片。列表和本地批次 ID 都不能代替服务端权限或评分确认。
   - 图片批改结果必须进入教师复核队列，复核完成前不能写入 `MistakeRecord` 或学生档案最终分析。
 
 ## 2026-05-26 权限码迁移策略

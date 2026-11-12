@@ -18,11 +18,13 @@
 
 对话生成且后续需要批改的小测、练习或试卷，交付同一目录中的 `*_学生卷.pdf`、`*_答案解析.pdf` 与 `批改答案包.json`。讲解、教学计划等非测评资料不强行转成答案包。答案包使用 `junhang-grading-source-v1`：稳定且不重复的题号、完整题干、选项/材料/图形上下文、答案、逐题分值、解析、考点与评分依据；基础/附加题保留分区，不自行更改教师评分口径。
 
-使用 `node scripts/dialogue-material.mjs --input <source.json> --deliver-to <交付目录> --sync --student <学生ID>` 完成交付与登记。`TEACHING_API_BASE_URL` 指向当前 API；`TEACHING_SESSION_FILE` 指向现有教师私有会话文件；跨设备入口可显式设置 `TEACHING_WEB_BASE_URL` 为已验证可访问的 Web 地址。不得把会话文件复制到交付目录、日志或 Git。学生身份必须唯一且仍可接收任务；本入口当前用于单个学生，不为班级材料猜一个学生。
+使用 `node scripts/dialogue-material.mjs --input <source.json> --deliver-to <交付目录> --sync --scope grade` 登记同年级通用材料，不为它猜一个学生。仅为指定学生生成时使用 `--scope student --student <学生ID>`，身份必须唯一且仍可接收任务。两种范围都必须有有效且一致的年级。`TEACHING_API_BASE_URL` 指向当前 API；`TEACHING_SESSION_FILE` 指向现有教师私有会话文件；跨设备入口可显式设置 `TEACHING_WEB_BASE_URL` 为已验证可访问的 Web 地址。不得把会话文件复制到交付目录、日志或 Git。
 
-脚本接受标准答案包及明确支持的历史 `local-exam-source-v1`，不覆盖输入原件；旧格式按原题号、题型、选项、解析和评分转换，未知格式或缺项失败关闭。双 PDF 使用原字节复制并校验哈希。`材料登记回执.json` 的 `ok=true` 且 `syncStatus=registered` 才表示已登记；失败时保留本地包并说明原因，不宣称 Web 已可选。返回实际 `assignmentId`、来源版本/指纹及 `?gradingAssignment=...` 入口；同教师、同学生、相同内容重复登记复用来源，内容变化建立新来源。已存历史包只按题号比对，保留其原指纹。
+脚本接受标准答案包及明确支持的历史 `local-exam-source-v1`，不覆盖输入原件；旧格式按原题号、题型、选项、解析和评分转换，未知格式或缺项失败关闭。双 PDF 使用原字节复制并校验哈希。`材料登记回执.json` 的 `ok=true` 且 `syncStatus=registered` 只表示登记成功，新材料保持待教师审查，尚不可选作批改来源。返回实际 `assignmentId`、来源版本/指纹及 `?gradingAssignment=...` 入口；同教师、同范围、相同内容重复登记复用来源，内容变化建立新来源。已存历史包只按题号比对，保留其原指纹。
 
-完成时核对交付文件、题数/分值与服务端来源，并在 Web 登录后检查学生、学科、类型和来源已带入。这一步是生成结束后的显式登记，不是自动扫描所有历史对话。登记不等于教师内容确认、发布、批改或归档；没有学生原卷时停在待上传，不合成学生作答。
+先展示可打开的学生卷、答案解析和题数/分值，等待教师对本份材料审查后在对话明确回复。只有收到该回复，才执行 `node scripts/dialogue-material-review.mjs --receipt <材料登记回执.json> --decision accept --note <教师明确回复原文>`；不认可时记录 `reject`，修改后登记新版本。不得把“生成完成”、旧材料确认或 JSON 自带复核字段当成本份材料的认可。核对审查回执和服务端 `gradingEligible=true` 后，Web 刷新材料即可按年级选择；指定学生材料仍只适用该学生。
+
+这一步是生成结束后的显式登记与审查，不是自动扫描所有历史对话。确认只开放材料用于批改，不确认学生得分、不发布给学生、不归档。没有学生原卷时停在待上传，不合成学生作答。同年级材料可在多个批次及多名学生间复用同一 `assignmentId` 和答案包。
 
 ## 前置依赖（服务端）
 
@@ -30,7 +32,7 @@
 
 ## 输入契约
 
-持续工作流入口见 `docs/14-api-contract.md` 的 Shared workflow API and CLI。薄 CLI 为 `node scripts/teaching-workflow.mjs`，只使用指定的教师本地会话调用同一 API。当前本机部署已于2026-09-29完成业务迁移、Prisma Client更新及持久化启用；两个Web工作台已接入共享契约，教师确认的测评于2026-09-30完成真实Web发布、预览及正式双卷导出。实际验收范围见 `docs/teaching-workflow-acceptance.md`，其他环境须核查当前服务状态，resume仍不可用。503 不能视为生成成功，needs_input 代表条件或内容未齐，也不能绕过接口直接写库。根据已确认对话填入结构化学科、年级或学生、用途、kind 和 requirement；专项与每日题量使用 requestedItemCount。自然语言局部修订提交 targetQuestionIds 与 instruction，手工修改使用显式 patch；两者均保留 expectedRevision 和 operationKey。Web 仅缓存按教师隔离的最后任务 ID，内容以服务端版本为准；冲突保留本地未保存编辑，不能自动换成最新 revision 覆盖。取消后的任务只读，继续须明确新建；未启用时保留“原有生成与打印”入口。
+持续工作流入口见 `docs/14-api-contract.md` 的 Shared workflow API and CLI。薄 CLI 为 `node scripts/teaching-workflow.mjs`，只使用指定的教师本地会话调用同一 API。当前本机部署已于2026-09-29完成业务迁移、Prisma Client更新及持久化启用；两个Web工作台已接入共享契约，教师确认的测评于2026-09-30完成真实Web发布、预览及正式双卷导出。实际验收范围见 `docs/teaching-workflow-acceptance.md`，其他环境须核查当前服务状态，resume仍不可用。503 不能视为生成成功，needs_input 代表条件或内容未齐，也不能绕过接口直接写库。根据已确认对话填入结构化学科、年级或学生、用途、kind 和 requirement；专项与每日题量使用 requestedItemCount。Web 的教学用途决定组织方式，内容类型决定练习/小测/试卷形态；仅“综合测评”可选“试卷”，“概念讲解”不显示测评类型，具体题量、题型、年级知识点仍服从教师要求。自然语言局部修订提交 targetQuestionIds 与 instruction，手工修改使用显式 patch；两者均保留 expectedRevision 和 operationKey。Web 仅缓存按教师隔离的最后任务 ID，内容以服务端版本为准；冲突保留本地未保存编辑，不能自动换成最新 revision 覆盖。取消后的任务只读，继续须明确新建。Web“生成与继续修改”负责新建、修改和教师确认；“已有材料与打印记录”只读查看历史材料、题目及文件。服务暂不可用时仍可查看历史，不回退到重复生成工作台。
 
 Web 只提交学科、年级、`kind`、`purpose`、`requestedItemTypes`、`dayPlan`、目标范围、难度、题量、教师要求、知识点和教材标识。服务端组装 `generationContext`、`studentSignals`、`contentContext` 和生成预算；客户端不得提交 prompt、provider、model、raw 或内部预算。
 
